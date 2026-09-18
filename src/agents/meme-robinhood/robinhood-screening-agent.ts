@@ -9,7 +9,7 @@ import { SentimentVoter } from '../shared/sentiment-voter.js';
 import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
-  type VoterOpinion, type VoterScores, scoresFromOpinions,
+  type VoterOpinion, type VoterScores, type VoterContext, scoresFromOpinions,
   whaleVote, regimeVote, securityVote,
 } from '../../orchestrator/voters.js';
 
@@ -435,14 +435,28 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // payload — the consensus gate in index.ts re-derives confidence from the weighted
           // average, so the swarm (not the agent) has the final word.
           if (this.voterSwarm) {
+            // Security vote: carry elevated-but-passing indicators so the 0.25-weight
+            // security voter isn't a constant 100 for finalists (still fail-closed 0 on
+            // audit failure — that's rejected before we get here).
+            const securityPenalties: string[] = [];
+            if (t.rugRatio !== null && t.rugRatio > 0.15) securityPenalties.push('elevated rug risk');
+            if (t.top10HolderRate !== null && t.top10HolderRate > 0.3) securityPenalties.push('holder concentration');
+            if (t.creatorClose) securityPenalties.push('dev closed');
             const opinions: VoterOpinion[] = [
-              securityVote(true),
+              securityVote(true, securityPenalties),
               { voter: 'quant', score: confidence, reasons: [`detected ${det.type} (post-strategy ${confidence}%)`] },
             ];
             const sent = sentimentMap.get(t.address.toLowerCase());
             if (sent) opinions.push(sent);
             const trk = trackAcc.get(t.address.toLowerCase());
-            opinions.push(whaleVote(trk ? [{ side: 'buy' as const, amountUsd: trk.totalBuyUsd, isFullClose: false }] : []));
+            const trackTrades: VoterContext['trackTrades'] = [];
+            if (trk) {
+              if (trk.totalBuyUsd > 0) trackTrades.push({ side: 'buy', amountUsd: trk.totalBuyUsd, isFullClose: false });
+              const partialSell = trk.totalSellUsd - trk.fullCloseTotalUsd;
+              if (partialSell > 0) trackTrades.push({ side: 'sell', amountUsd: partialSell, isFullClose: false });
+              if (trk.fullCloseTotalUsd > 0) trackTrades.push({ side: 'sell', amountUsd: trk.fullCloseTotalUsd, isFullClose: true });
+            }
+            opinions.push(whaleVote(trackTrades));
             const regime = globalMarketRegimeFilter.getRegime();
             opinions.push(regimeVote({
               volatilityIndex: regime.volatilityIndex,

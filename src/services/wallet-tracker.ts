@@ -19,6 +19,8 @@ export interface WalletTrackerDeps {
   exitMinUsd?: number;
   exitWindowMs?: number;
   exitAlertsEnabled?: boolean;
+  /** SL magnitude to tighten to (0.2 = -20%) on a smart-money full-close exit of a held token. */
+  exitSLTightenPct?: number;
 }
 
 export interface WalletHolding {
@@ -54,6 +56,7 @@ export class WalletTracker {
   private exitMinUsd: number;
   private exitWindowMs: number;
   private exitAlertsEnabled: boolean;
+  private exitSLTightenPct: number;
 
   constructor(deps: WalletTrackerDeps) {
     this.positionManager = deps.positionManager;
@@ -66,6 +69,7 @@ export class WalletTracker {
     this.exitMinUsd = deps.exitMinUsd ?? 20_000;
     this.exitWindowMs = deps.exitWindowMs ?? 2 * 60 * 60 * 1000;
     this.exitAlertsEnabled = deps.exitAlertsEnabled ?? true;
+    this.exitSLTightenPct = deps.exitSLTightenPct ?? 0.2;
   }
 
   private defaultEvmBalanceReader: EvmBalanceReader = async (_chain, token, owner) => {
@@ -255,6 +259,10 @@ export class WalletTracker {
         reason: `⚠️ **Smart Money Exit:** $${a.symbol || heldAddr.slice(0, 8)} — ${a.fullCloseWallets.size} smart wallets full-closed $${(a.fullCloseTotalUsd / 1000).toFixed(1)}k in the last ${mins}m. You still hold this position — consider exiting.`,
         address: heldAddr,
       });
+      // Smart-money exit on a HELD token ⇒ tighten the SL in the position manager.
+      // Never widens; only narrows (Math.min in position-manager); fail-closed no-op if not held.
+      const tightened = this.positionManager.tightenStopLoss(heldAddr, this.exitSLTightenPct);
+      if (tightened) console.log(`[WALLET TRACKER] 🔒 Tightened SL on ${a.symbol || heldAddr} to -${Math.round(this.exitSLTightenPct * 100)}% (smart-money exit)`);
       console.log(`[WALLET TRACKER] 🚨 SM Exit: ${a.symbol || heldAddr} — ${a.fullCloseWallets.size} wallet full-close $${(a.fullCloseTotalUsd / 1000).toFixed(1)}k`);
     }
     return alerts;

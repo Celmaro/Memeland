@@ -121,4 +121,46 @@ describe('StateStore trackedTokens persistence', () => {
     const store = storeOn(p);
     expect(store.getApprovalOrders()).toEqual([]);
   });
+
+  it('scorecard flips TP at +100% and SL at -50% (mirrors position-manager), not +50/-20', () => {
+    const store = newStore();
+    store.appendScorecardEntry({
+      id: 'SC_1',
+      symbol: 'X',
+      chain: 'robinhood',
+      contractAddress: '0x1',
+      confidence: 90,
+      entryPriceUsd: 1,
+      currentPriceUsd: 1,
+      entryTimestampIso: '2026-09-19T00:00:00.000Z',
+      updatedAtIso: '2026-09-19T00:00:00.000Z',
+      status: 'OPEN',
+    });
+    store.appendScorecardEntry({
+      id: 'SC_2',
+      symbol: 'Y',
+      chain: 'robinhood',
+      contractAddress: '0x2',
+      confidence: 90,
+      entryPriceUsd: 1,
+      currentPriceUsd: 1,
+      entryTimestampIso: '2026-09-19T00:00:00.000Z',
+      updatedAtIso: '2026-09-19T00:00:00.000Z',
+      status: 'OPEN',
+    });
+
+    // Neither +50% nor -20% should flip — thresholds are now +100%/-50%.
+    store.updateScorecardPrice('SC_1', 1.5, '2026-09-19T00:01:00.000Z');
+    store.updateScorecardPrice('SC_2', 0.8, '2026-09-19T00:01:00.000Z');
+    const mid = store.getScorecard();
+    expect(mid.find((e) => e.id === 'SC_1')?.status).toBe('OPEN');
+    expect(mid.find((e) => e.id === 'SC_2')?.status).toBe('OPEN');
+
+    // +100% -> TP, -50% -> SL.
+    store.updateScorecardPrice('SC_1', 2.0, '2026-09-19T00:02:00.000Z');
+    store.updateScorecardPrice('SC_2', 0.5, '2026-09-19T00:02:00.000Z');
+    const flipped = store.getScorecard();
+    expect(flipped.find((e) => e.id === 'SC_1')?.status).toBe('TP');
+    expect(flipped.find((e) => e.id === 'SC_2')?.status).toBe('SL');
+  });
 });

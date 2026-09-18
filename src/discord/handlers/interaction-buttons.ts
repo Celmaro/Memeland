@@ -159,6 +159,7 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         wallet: walletService,
         journal: tradeJournalService,
         onExecuted: () => approvalQueueService.recordExecuted(approved.id),
+        chain: approved.chain,
         symbol: approved.symbol,
         contractAddress: approved.contractAddress,
         entryPriceUsd: approved.entryPriceUsd,

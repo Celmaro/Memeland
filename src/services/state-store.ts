@@ -26,7 +26,8 @@ export interface SignalLedgerEntry {
 /**
  * Phase-1 scorecard entry (Arch 5 ladder) — predicted-vs-actual for every fired
  * signal. Fired signals get an OPEN entry at their quoted entry price; the
- * screening cycle updates prices each pass and flips status on TP(+50%)/SL(-20%).
+ * screening cycle updates prices each pass and flips status on TP(+100%)/SL(-50%)
+ * to mirror real position-manager closes.
  */
 export interface ScorecardEntry {
   id: string;
@@ -523,15 +524,16 @@ export class StateStore {
     this.scheduleSave();
   }
 
-  /** Update an OPEN scorecard entry's price; flips to TP (+50%) or SL (-20%) deterministically. */
+  /** Update an OPEN scorecard entry's price; flips to TP (+100%) or SL (-50%) to mirror
+   *  how real positions are closed (position-manager TP1 +100% / SL -50%). */
   public updateScorecardPrice(id: string, priceUsd: number, nowIso: string): void {
     const entry = this.state.scorecard.find((e) => e.id === id && e.status === 'OPEN');
     if (!entry || !(priceUsd > 0)) return;
     entry.currentPriceUsd = priceUsd;
     entry.updatedAtIso = nowIso;
     const change = entry.entryPriceUsd > 0 ? priceUsd / entry.entryPriceUsd - 1 : 0;
-    if (change >= 0.5) entry.status = 'TP';
-    else if (change <= -0.2) entry.status = 'SL';
+    if (change >= 1.0) entry.status = 'TP';
+    else if (change <= -0.5) entry.status = 'SL';
     this.scheduleSave();
   }
 

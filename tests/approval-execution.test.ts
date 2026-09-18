@@ -101,4 +101,57 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     expect(onExecuted).toHaveBeenCalledTimes(1);
     expect(journal.listTrades()).toHaveLength(1);
   });
+
+  it.each([
+    'sol', 'Solana', 'bsc', 'BNB Chain', 'base', 'eth', 'Ethereum',
+  ])('fail-closed: %s never reaches the EVM adapter, journal, or funnel', async (chain) => {
+    const { journal, evm, wallet } = makeDeps();
+    const onExecuted = vi.fn();
+    const res = await executeMemeBuy({
+      evm,
+      wallet,
+      journal,
+      onExecuted,
+      chain,
+      symbol: 'TOKEN',
+      contractAddress: '0x/abc-not-an-evm-address',
+      entryPriceUsd: 1,
+      amountEth: 0.1,
+      confidence: 80,
+      thesis: 'cross-chain signal',
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.simulated).toBe(false);
+    expect(res.error).toMatch(/fail-closed/);
+    expect(res.error).toMatch(/no execution adapter/);
+    expect(evm.executeBuyToken).not.toHaveBeenCalled();
+    expect(onExecuted).not.toHaveBeenCalled();
+    expect(journal.listTrades()).toHaveLength(0);
+  });
+
+  it('executes on the canonical robinhood chain when a label is passed (Robinhood)', async () => {
+    const { journal, evm, wallet } = makeDeps();
+    const onExecuted = vi.fn();
+    const res = await executeMemeBuy({
+      evm,
+      wallet,
+      journal,
+      onExecuted,
+      chain: 'Robinhood',
+      symbol: 'TEST',
+      contractAddress: '0xabc',
+      entryPriceUsd: 0.5,
+      amountEth: 0.1,
+      confidence: 85,
+      thesis: 'robinhood label',
+    });
+    expect(res.success).toBe(true);
+    expect(evm.executeBuyToken).toHaveBeenCalledTimes(1);
+    expect(evm.executeBuyToken).toHaveBeenCalledWith(
+      expect.objectContaining({ chain: 'robinhood' }),
+      wallet
+    );
+    expect(onExecuted).toHaveBeenCalledTimes(1);
+  });
 });

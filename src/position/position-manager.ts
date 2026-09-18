@@ -12,6 +12,8 @@ export interface OpenPosition {
   initialSmartMoneyCount?: number;
   tp100Triggered?: boolean;
   tp200Triggered?: boolean;
+  /** Current stop-loss magnitude (0.5 = -50%). Tightened on smart-money exit. */
+  stopLossPct?: number;
 }
 
 export interface ActiveLPPosition {
@@ -89,6 +91,22 @@ export class PositionManager {
     this.stateStore?.removePosition(id);
   }
 
+  /**
+   * Tighten the stop-loss on a HELD meme position (smaller value = tighter SL).
+   * Only ever moves the SL narrower — never widens it. Returns false if the
+   * position isn't held so callers can degrade gracefully.
+   */
+  public tightenStopLoss(contractAddress: string, stopPercent: number): boolean {
+    const pos = Array.from(this.activePositions.values()).find(
+      (p) => p.contractAddress.toLowerCase() === String(contractAddress || '').toLowerCase()
+    );
+    if (!pos) return false;
+    const current = pos.stopLossPct ?? 0.5;
+    pos.stopLossPct = Math.min(current, stopPercent);
+    this.stateStore?.setPosition(pos);
+    return true;
+  }
+
   public updateMemePosition(
     positionId: string,
     currentPriceUsd: number,
@@ -126,13 +144,14 @@ export class PositionManager {
       };
     }
 
-    // 2. Critical Drop (-50%)
-    if (priceChangePercent <= -50) {
+    // 2. Critical Drop (default -50%; tightened by a smart-money exit, e.g. -20%)
+    const stopLossPct = pos.stopLossPct ?? 0.5;
+    if (priceChangePercent <= -stopLossPct * 100) {
       this.stateStore?.setPosition(pos);
       return {
         triggerAlert: true,
         type: 'CRITICAL',
-        reason: `🚨 **Critical Drop:** $${pos.symbol} has dropped **-50%** below your entry price! Current Price: $${currentPriceUsd.toFixed(6)}. Immediate exit recommended!`,
+        reason: `🚨 **Critical Drop:** $${pos.symbol} has dropped **-${Math.round(stopLossPct * 100)}%** below your entry price! Current Price: $${currentPriceUsd.toFixed(6)}. Immediate exit recommended!`,
       };
     }
 

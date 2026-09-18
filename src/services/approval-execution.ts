@@ -14,6 +14,8 @@ export interface ExecuteMemeBuyOptions {
   journal: TradeJournalService;
   /** Called after the fill is recorded — bumps the `executed` funnel stage. */
   onExecuted: () => void;
+  /** Signal chain (payload.network / approval order chain). Defaults to robinhood. */
+  chain?: string;
   symbol: string;
   contractAddress: string;
   entryPriceUsd: number;
@@ -31,10 +33,40 @@ export interface ExecuteMemeBuyResult {
   error?: string;
 }
 
+/** Chains with a live execution adapter today. All others fail closed. */
+const EXECUTABLE_CHAINS = new Set<string>(['robinhood']);
+
+/** Normalize payload/approval chain labels to the canonical chain key. */
+export function normalizeChain(v: string): string {
+  const k = String(v || '').trim().toLowerCase();
+  const alias: Record<string, string> = {
+    robinhood: 'robinhood',
+    solana: 'sol',
+    sol: 'sol',
+    'bnb chain': 'bsc',
+    bsc: 'bsc',
+    binance: 'bsc',
+    base: 'base',
+    ethereum: 'eth',
+    eth: 'eth',
+  };
+  return alias[k] ?? k;
+}
+
 export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<ExecuteMemeBuyResult> {
+  const chain = normalizeChain(opts.chain || 'robinhood');
+  if (!EXECUTABLE_CHAINS.has(chain)) {
+    return {
+      success: false,
+      simulated: false,
+      outputTokens: 0,
+      error: `no execution adapter for chain '${chain}' — fail-closed (robinhood only)`,
+    };
+  }
+
   const execRes = await opts.evm.executeBuyToken(
     {
-      chain: 'robinhood',
+      chain,
       tokenAddress: opts.contractAddress,
       amountEth: opts.amountEth,
       slippagePercentage: 1.5,
@@ -47,7 +79,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     domain: 'MEME_ROBINHOOD',
     symbol: opts.symbol || 'TOKEN',
     contractAddressOrId: opts.contractAddress || opts.symbol || 'N/A',
-    chain: 'robinhood',
+    chain,
     entryTimestamp: new Date().toISOString(),
     entryPriceUsdOrEth: opts.entryPriceUsd,
     positionSizeUsd: opts.amountEth * (opts.entryPriceUsd || 1),

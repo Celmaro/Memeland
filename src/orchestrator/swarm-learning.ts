@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import type { VoterId } from './voters.js';
 
 export interface SignalOutcome {
   id: string;
@@ -20,6 +21,24 @@ export interface SwarmWeights {
   devHoldingWeight: number; // default 0.20
   twitterWeight: number;    // default 0.20
 }
+
+/** Baseline 7-voter weights — mirror of DEFAULT_VOTER_WEIGHTS in voters.ts. */
+const BASE_VOTER_WEIGHTS: Record<VoterId, number> = {
+  quant: 0.2,
+  ml: 0.15,
+  security: 0.25,
+  sentiment: 0.15,
+  whale: 0.1,
+  regime: 0.05,
+  critic: 0.1,
+};
+
+const LEARNING_DEFAULTS = {
+  smartMoney: 0.35,
+  liquidity: 0.25,
+  devHolding: 0.20,
+  twitter: 0.20,
+};
 
 export class SwarmLearningEngine {
   private dbPath: string;
@@ -133,6 +152,36 @@ export class SwarmLearningEngine {
 
   public getWeights(): SwarmWeights {
     return { ...this.weights };
+  }
+
+  /**
+   * Bridge recalibrated learning weights into the 7-voter aggregation. Maps the
+   * learning emphasis back onto its corresponding voter (smartMoney→whale,
+   * liquidity→quant, devHolding→security, twitter→sentiment), bounded to a
+   * ±30% swing around baseline and renormalized to sum ~1.0 so it can never
+   * destabilize the >=80 gate.
+   */
+  public getVoterWeights(): Record<VoterId, number> {
+    const w = this.weights;
+    const swing = (val: number, base: number): number =>
+      Math.max(0.7, Math.min(1.3, base > 0 ? val / base : 1));
+    const adj: Partial<Record<VoterId, number>> = {
+      quant: BASE_VOTER_WEIGHTS.quant * swing(w.liquidityWeight, LEARNING_DEFAULTS.liquidity),
+      ml: BASE_VOTER_WEIGHTS.ml,
+      security: BASE_VOTER_WEIGHTS.security * swing(w.devHoldingWeight, LEARNING_DEFAULTS.devHolding),
+      sentiment: BASE_VOTER_WEIGHTS.sentiment * swing(w.twitterWeight, LEARNING_DEFAULTS.twitter),
+      whale: BASE_VOTER_WEIGHTS.whale * swing(w.smartMoneyWeight, LEARNING_DEFAULTS.smartMoney),
+      regime: BASE_VOTER_WEIGHTS.regime,
+      critic: BASE_VOTER_WEIGHTS.critic,
+    };
+    const out = {} as Record<VoterId, number>;
+    let sum = 0;
+    for (const id of Object.keys(BASE_VOTER_WEIGHTS) as VoterId[]) {
+      out[id] = adj[id] ?? BASE_VOTER_WEIGHTS[id];
+      sum += out[id];
+    }
+    for (const id of Object.keys(out) as VoterId[]) out[id] = out[id] / sum;
+    return out;
   }
 
   public getWinRatePercentage(): number {

@@ -357,6 +357,8 @@ describe('WalletTracker.checkSmartMoneyExit — position alerts', () => {
     expect(alerts[0].address).toBe('mintx'); // lowercase — consistent with alert deduplication
     expect(alerts[0].reason).toContain('2 smart wallets full-close');
     expect(alerts[0].reason).toContain('$23.0k');
+    const held = pm.getActivePositions().find((p) => p.contractAddress.toLowerCase() === 'mintx');
+    expect(held?.stopLossPct).toBe(0.2); // SL tightened on held token (was default 0.5)
   });
 
   it('without position → NO alert (exit signals never become calls)', async () => {

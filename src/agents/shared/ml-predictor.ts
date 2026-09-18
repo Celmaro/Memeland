@@ -97,8 +97,10 @@ export function predictUpMomentum(candles: KlineLike[]): PredictionResult {
 
   const pUp = 1 / (1 + Math.exp(-z));
   const pUpClamped = Math.max(0.001, Math.min(0.999, pUp));
-  // Linear mapping centered at 50: p=0.5 → 50, p=0.75 → 100, p=0.25 → 0.
-  const score = Math.round(50 + (pUpClamped - 0.5) * 200);
+  // Gentler linear mapping centered at 50: p=0.5 → 50, p=0.75 → 75, p=1.0 → 100.
+  // (Prior /+200 slope saturated on modest momentum; halved so the vote only
+  // near-maxes at high conviction.)
+  const score = Math.round(50 + (pUpClamped - 0.5) * 100);
   const clamped = Math.max(0, Math.min(100, score));
 
   const reasons: string[] = [

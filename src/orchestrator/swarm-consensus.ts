@@ -1,5 +1,6 @@
 import { StateStore, SignalLedgerEntry } from '../services/state-store.js';
 import { aggregateVoterScores } from './voters.js';
+import { globalSwarmLearning } from './swarm-learning.js';
 
 export interface SignalCandidate {
   symbol: string;
@@ -87,11 +88,15 @@ export class SwarmConsensusEngine {
         let baseConfidence = 0;
         let isFastLane = false;
         let voterBreakdown: Record<string, number> | null = null;
+        // Learning-bridged weights: the swarm-learning engine's recalibrated
+        // emphasis feeds the voter aggregate (bounded ±30%, renormalized). Default
+        // weights are used whenever learning has not diverged from baseline.
+        const voterWeights = globalSwarmLearning.getVoterWeights();
         // Arch-3 7-voter swarm path: weighted average across the voters that rendered
         // a score (quant/ml/security/sentiment/whale/regime/critic). The meme agent's
         // own confidence rides in as the 'quant' vote, so nothing is lost.
         if (candidate.voterScores && Object.keys(candidate.voterScores).length > 0) {
-          const agg = aggregateVoterScores(candidate.voterScores);
+          const agg = aggregateVoterScores(candidate.voterScores, voterWeights);
           baseConfidence = agg.score;
           voterBreakdown = agg.breakdown;
           quantScore = agg.breakdown['quant'] ?? 0;

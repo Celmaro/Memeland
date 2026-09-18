@@ -477,6 +477,7 @@ if (discordToken && clientId) {
                       wallet: walletService,
                       journal: tradeJournalService,
                       onExecuted: () => stateStore.incrementFunnel('meme-robinhood', 'executed'),
+                      chain: String(item.payload.network || 'robinhood'),
                       symbol: item.payload.symbol || 'TOKEN',
                       contractAddress: item.payload.contractAddress,
                       entryPriceUsd: parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0,
