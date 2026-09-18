@@ -1,196 +1,68 @@
-# AGENTS.md - Opencatz AI (Robinhood Chain Edition) Guidelines & Agent Instructions
+# AGENTS.md — Opencatz AI (Multi-Chain Autonomous Memecoin Trading Bot)
 
-Welcome to **Opencatz AI (Robinhood Chain Edition)**! This document outlines project conventions, tech stack, directory layout, and architectural rules for AI agents and developers working on this repository.
+## The one rule
+Screening is math, not vibes: no trade reaches execution until the 7-voter swarm passes the
+≥ 80% weighted consensus gate, the risk veto, and every fired signal ships a scorecard with
+reasons. LLMs draft thesis cards and critiques — never the verdict itself.
 
----
+## Current context (verified 2026-09-18)
+- Multi-agent autonomous memecoin trading bot. TypeScript, Node ≥ 20, viem, discord.js.
+  Entry: src/index.ts. Chain scope: sol / bsc / base / eth via ONE multi-chain meme agent
+  (chain = runtime parameter in collectCandidates, not a per-chain agent class). Robinhood #4663
+  retained as the existing EVM execution venue, not a screening target.
+- Module changes in flight: lp-robinhood (Krystal) and nft (OpenSea) domains REMOVED;
+  alpha-robinhood redesigned as the Sentiment voter; whale-eth demoted to the Whale/Smart-Money
+  exit monitor + macro risk-off feed (no standalone domain).
 
-## 1. Project Overview
+## Architecture: 7-voter swarm (Arch 3)
+  1. Quant/Momentum   algo  — GMGN rank/trenches/hot + technical indicators
+  2. ML Predictor     ML    — LSTM/GBM on GeckoTerminal/GMGN klines → P(up, 15m/1h) as 0–100 vote
+  3. Security+Holder  algo  — GoPlus + GMGN audit + Blockscout top-10/dev concentration
+  4. Alpha/Sentiment  LLM   — X/Reddit/on-chain social score (redesigned alpha; X optional, degrade)
+  5. Whale/Smart-Money algo — GMGN smartmoney/kol accumulation + Hyperliquid risk-off;
+                             smart-money exit on a HELD token ⇒ tighten SL in position manager
+  6. Regime           algo  — market-regime + DeFiLlama chain TVL/DEX-volume context
+  7. Critic           LLM   — adversarial pass: "what is wrong with this trade?"
+- Gate: swarm-consensus ≥ 80% (weighted, never lowered) → risk-engine-v2 veto → position
+  manager (TP/SL/trailing). swarm-learning recalibrates voter weights by realized outcome.
 
-**Opencatz AI (Robinhood Chain Edition)** is an autonomous, multi-agent crypto intelligence and trading ecosystem specialized for **Robinhood Chain (EVM)** and operated through a **Discord Command Center**, **Terminal TUI**, and **Telegram Notification Bridge**.
+## Autonomy ladder (Arch 5) — never skip a phase
+  Phase 1 SIGNAL_ONLY: score live, journal predicted-vs-actual for every fired signal.
+  Phase 2 APPROVAL: orders queue to Discord/TG one-click approve; N > 50 approved fills.
+  Phase 3 AUTO: only after positive expectancy in Phase 2; daily loss cap + kill-switch.
 
-- **Core Hub Agent (`#opencatz-control-room`):** Handles user chat, configuration, portfolio tracking, global risk management, custom price alerts (`/alert`), trade execution, and natural language trade audits.
-- **Multi-Agent Consensus Engine:** Evaluates candidate signals through a 3-Layer Filter (Quant & Liquidity, Catalyst & Sentiment, Security Audit) requiring a **>= 80% Confidence Score** before posting to Discord.
-- **Specialist Screening Sub-Agents:** Run 24/7 background screening (on-demand) and post call signals to dedicated Discord channels (exactly 5 domains):
-  - `#call-meme-robinhood` (Robinhood Chain EVM DEX tokens / GMGN OpenAPI + GoPlus security)
-  - `#call-lp-robinhood` (Robinhood Chain Concentrated Liquidity Velocity Signals / Krystal Cloud)
-  - `#call-nft-robinhood` (EVM NFT floor & rarity alerts / OpenSea REST v2)
-  - `#call-alpha-robinhood` (1-hour Robinhood Chain Alpha Scraper / optional official X API v2)
-  - `#call-whale-eth` (Hyperliquid ETH whale positioning & spot flow tracking)
-- **Position Manager:** Handles post-execution auto-sell targets (Take Profit, Stop Loss, Trailing Stops, and Out-of-Range LP Warnings).
+## Data stack (free tiers, raw fetch, zero new SDKs)
+- GMGN OpenAPI — primary screen + wallet tags (smart money/KOL/rat/bundler: no free substitute).
+- GeckoTerminal — independent discovery (new_pools/trending), OHLCV, quote fallback; 30/min budget.
+- GoPlus — contract security; chain IDs mapped for base/eth/bsc/robinhood, add Solana.
+- Blockscout — EVM holders (scale raw units by decimals), wallet activity, ABI, eth_call. Enrichment
+  only: no meme-token quotes/OHLCV/honeypot. Use PRO API with free key; per-instance APIs deprecated.
+- DeFiLlama — chain TVL, DEX-volume ranking, regime context. Cache 30–60 min; never per-token data.
 
----
+## Non-negotiables
+1. Fail-closed: unknown volume/liquidity/mcap/security ⇒ reject, never pass.
+2. Execution modes DRY_RUN / SIGNAL_ONLY / APPROVAL / AUTO_EXECUTE; live trades only in
+   AUTO_EXECUTE behind Phase-3 gates with verified keys.
+3. Pacing + backup-key rotation on every provider: GMGN (429 ban extends +5s per retry — no
+   retry spam; per-chain key pools GMGN_API_KEY_SOL...), GeckoTerminal 30/min, GoPlus batch,
+   Blockscout credit budget, DeFiLlama ~300rpm fair use.
+4. Chain-aware gates: renounced = Solana-only; honeypot = EVM-only; token_signal booster absent
+   on base/eth — degrade silently, never fabricate.
+5. Dedupe per chain by lowercase contract address, 60s cooldown.
+6. Never commit .env; backups as *_BACKUP_KEYS; GMGN keys IPv4-only; Ed25519 only for trade routes.
+7. Consensus floor ≥ 80% never lowers.
 
-## 2. Technology Stack & Environment
+## Behavior norms
+- Scan on 5–10 min cycles; enrich only post-prefilter candidates via batch endpoints.
+- Proof over claims: every report names the live log signature it enabled and shows the funnel
+  counter moved. fired=0 across deploys ⇒ diagnostic report, not another patch.
+- Cheap deterministic math first; LLM calls reserved for sentiment, critic, thesis, post-mortem.
+- TDD: every change keeps the regression floor green before commit.
 
-- **Runtime:** Node.js (>=22.12) / TypeScript
-- **Config:** `dotenv` (.env files, never committed)
-- **Discord Bot SDK:** `discord.js` (v14+)
-- **Target Chain:** Robinhood Chain (EVM L2) — chain ID **4663**, native token **ETH**, canonical RPC `https://rpc.mainnet.chain.robinhood.com`, explorer `https://robinhoodchain.blockscout.com`
-- **Primary DEX Venue:** Uniswap V3 Router (Robinhood Chain EVM L2 #4663) — primary venue for meme tokens, swaps, and LP positions. Single-chain focus (cross-chain bridge removed).
-- **Execution Modes (`EXECUTION_MODE`):**
-  - `AUTO_EXECUTE`: Real on-chain trading via Uniswap V3 / Viem client when Multi-Agent Consensus $\ge 80\%$ and Risk Manager checks pass. Requires `EVM_PRIVATE_KEY`.
-  - `DRY_RUN`: Realistic market simulation using real-time quotes, fees, and price data from Uniswap V3 API / DexScreener. Requires public `EVM_WALLET_ADDRESS` (Private Key optional). Fills logged to `database/opencatz_state.json`.
-  - `SIGNAL_ONLY`: Intelligence Hub mode posting screening call cards to Discord and auto-tracking wallet position holdings via `EVM_WALLET_ADDRESS`.
-- **Blockchain & Crypto Web3 SDKs:**
-  - `viem` (EVM reads/signs)
-  - Uniswap V3 Gateway API (`https://trade-api.gateway.uniswap.org/v1`)
-  - GMGN OpenAPI (smart-money / rank / trenches / token security audit)
-  - Krystal Cloud DeFi Data API (Robinhood LP pools, `ethereum@4663`)
-  - OpenSea REST API v2 (EVM NFTs + swap aggregator)
-  - Relay.link (token send & secondary swap fallback)
-- **Security Audit APIs:** GoPlus Security API (EVM) + GMGN `/v1/token/security`
-- **AI Engine:** OpenRouter / OpenAI / Anthropic Node SDK
-- **Database & State:** Local JSON file persistence (`database/opencatz_state.json`)
-- **Protocol:** Model Context Protocol (MCP)
-
----
-
-## 3. Directory Layout (verified against `git ls-files` — real paths only)
-
-```
-Opencatz AI (Robinhood Chain)/
-├── .agents/
-│   ├── AGENTS.md                  # Project rules & coding guidelines
-│   └── skills/                    # Opencatz-specific skills (swarm trading, gmgn)
-├── src/
-│   ├── index.ts                   # Bot initialization & client launcher
-│   ├── config/config.ts           # Env/config validation & execution mode helpers
-│   ├── orchestrator/              # OpenCatz Core Hub & Global Risk Engine
-│   │   ├── hub.ts                 # OpenCatzHub: agent states, risk gate, on-demand passes
-│   │   ├── risk-manager.ts        # Drawdown / position-size / correlation guards
-│   │   ├── risk-engine-v2.ts      # Kill-switch circuit breaker (singleton)
-│   │   ├── swarm-consensus.ts     # 3-Layer Signal Quality Filter Engine
-│   │   ├── swarm-learning.ts      # Outcome-driven agent weight recalibration
-│   │   ├── strategy-engine.ts     # Sandboxed .mjs strategy loader (sanitized env)
-│   │   ├── strategy-types.ts      # Strategy context types (snake_case GMGN contract)
-│   │   ├── strategy-bootstrap.ts  # Preset/custom strategy selection + first-boot compile
-│   │   ├── agent-registry.ts      # Single source of truth for all 5 agent domains
-│   │   ├── agent-runner.ts        # LLM tool-call loop for chat/TUI/Telegram
-│   │   ├── dispatch.ts            # Per-domain dispatch + LP payload builder
-│   │   └── tool-registry.ts       # LLM function-calling tools (chat commands)
-│   ├── agents/                    # Specialized screening agents (shared contract)
-│   │   ├── shared/
-│   │   │   ├── agent-contract.ts  # ScreeningAgent contract + CallCardPayload
-│   │   │   └── gmgn-meme-helpers.ts # Shared GMGN prefilter/dedupe/signal helpers
-│   │   ├── alpha-robinhood/       # 1-Hour Robinhood Alpha Scraper (X API v2)
-│   │   ├── meme-robinhood/        # Robinhood Chain EVM DEX screening (GMGN + GoPlus)
-│   │   ├── nft/                   # EVM NFT floor & rarity screening (OpenSea)
-│   │   └── whale-eth/             # Hyperliquid ETH whale tracking
-│   ├── adapters/                  # Web3 & Exchange execution adapters
-│   │   ├── evm-adapter.ts         # EVM Uniswap V3 swaps & sends
-│   │   ├── relay-adapter.ts       # Relay.link token send & swap fallback
-│   │   ├── gmgn-adapter.ts        # GMGN OpenAPI (rank/trenches/signals/audit)
-│   │   ├── krystal-cloud-adapter.ts # Krystal Cloud DeFi data (Robinhood LP pools)
-│   │   └── opensea-adapter.ts     # NFT floor signals + swap aggregator
-│   ├── position/                  # Auto TP/SL & Trailing Stop Position Manager
-│   │   └── position-manager.ts
-│   ├── discord/                   # Discord handlers, slash commands & embed views
-│   │   ├── commands/index.ts      # Slash command definitions
-│   │   ├── handlers/
-│   │   │   ├── interaction-handler.ts # Thin dispatcher (entry)
-│   │   │   ├── command-handlers.ts    # Slash-command logic + service singletons
-│   │   │   ├── interaction-buttons.ts # Buttons/modals/select menus
-│   │   │   └── message-handler.ts     # Control-room NLU chat
-│   │   ├── embeds/                # Call cards, dashboard, audit embeds
-│   │   └── setup/                 # Channel bootstrap
-│   ├── services/                  # Shared security, price feeds, alerts & LLM
-│   │   ├── state-store.ts         # Persistent JSON state (database/)
-│   │   ├── price-feed-service.ts  # CoinGecko singleton
-│   │   ├── price-alert-service.ts # Custom price alerts (/alert)
-│   │   ├── wallet-service.ts      # Wallet keys + balances (singleton)
-│   │   ├── wallet-tracker.ts      # Holdings lifecycle -> PositionManager
-│   │   ├── position-scanner.ts    # Open-position monitoring
-│   │   ├── trade-journal-service.ts # Open/close audit trail
-│   │   ├── goplus-security-service.ts # GoPlus (EVM)
-│   │   ├── token-audit-service.ts # On-demand audit pipeline
-│   │   ├── ai-service.ts          # Multi-provider LLM failover
-│   │   ├── opencatz-system-prompt.ts # Master OpenCatz AI persona prompt
-│   │   ├── api-key-pool.ts        # Stackable API keys + backup rotation
-│   │   ├── api-key-guard.ts       # Key leak prevention guard
-│   │   ├── session-memory.ts      # Audit memory for chat context
-│   │   ├── cron-scheduler.ts      # Process-wide cron singleton
-│   │   ├── market-regime.ts       # Market regime classifier
-│   │   ├── health-watcher.ts      # Process health + restart watcher
-│   │   ├── skill-loader.ts        # .agents/skills loader
-│   │   ├── rpc-failover.ts        # RPC failover pool
-│   │   └── technical-indicators.ts # Custom indicator library
-│   ├── cli/                       # Terminal TUI + diagnostic doctor
-│   ├── telegram/                  # Telegram notification bridge + bot polling
-│   └── api/                       # Native Web Dashboard REST server (status, calls, positions, executions, alerts, toggle, command)
-├── strategies/                    # User/LLM-authored strategy .mjs modules
-├── indicators/                    # Custom technical indicator .mjs modules
-├── bin/opencatz.js                # `opencatz` CLI (run/onboard/terminal/deploy/test/build/update/uninstall/doctor)
-├── bin/opencat.js                 # Backward-compatible CLI wrapper
-├── scripts/                       # wizard.js (env setup), update-core.mjs, uninstall.mjs, notify-update.mjs
-├── tests/                         # Full Vitest suite
-├── deploy.sh / setup.sh / setup.bat # PM2 deploy + platform bootstrap
-├── .env.example                   # Environment variable template
-├── package.json
-└── tsconfig.json
-```
-
----
-
-## 4. Coding Conventions & Best Practices
-
-1. **Modular Multi-Agent Isolation:**
-   - Keep screening logic decoupled from execution logic. Screening agents MUST pass candidate signals to the `Multi-Agent Consensus Engine` before emitting to Multi-Platform dispatch channels (Discord, Terminal TUI, Telegram) or `OpenCatz Core Hub`.
-2. **Safety & Execution Modes First:**
-   - Every trading adapter MUST check `getExecutionMode()`. Live trades occur only in `AUTO_EXECUTE` mode with verified private keys. `DRY_RUN` uses real Uniswap API market pricing without broadcasting. `SIGNAL_ONLY` tracks holdings without executing.
-3. **Multi-Agent Consensus Validation:**
-   - Require >= 80% confidence score across Quant, Catalyst, and Security audits before delivering signal cards.
-4. **Strict TypeScript Typing:**
-   - Avoid using `any`. Define clear interfaces for Token Signals, Audit Results, Consensus Scores, Discord Command Contexts, and Position States.
-5. **Multi-Platform UX Standards (Discord, Terminal TUI, Telegram):**
-   - Discord: Rich Embeds with 8-bit OpenCats color coding (🟢 `#CCFF00` Hero Green, 🌸 `#FFB7B2` Meme, 🔮 `#D6C7FF` NFT, 🌊 `#80DEEA` LP, ☀️ `#FFF59D` Alpha, 🔴 `#E53935` Risk/Warning).
-   - Terminal TUI: Interactive 24-bit TrueColor ANSI interface with on-demand screening passes, live CA token audits, strategy tuner, and treasury manager (`opencatz terminal`).
-   - Telegram: Markdown broadcast cards with quick inline callback buttons.
-6. **Customizable Screening Strategies:**
-   - Screening strategies are fully customizable (wizard STEP 5.5: loosened default / standard / custom prompt / numeric editor); custom prompts compile to validated strategy `.mjs` at first boot with default fallback; consensus >= 80% floor never lowered.
-
----
-
-## 5. Development & Testing Commands (Cross-Platform)
-
-Opencatz AI supports **Windows (PowerShell / CMD / Windows Terminal)**, **Linux**, and **macOS** natively:
-
-```bash
-# Install dependencies & build
-npm install
-npm run build              # or: setup.bat (Windows) / bash setup.sh (Linux/macOS)
-
-# Run in development mode (with hot reload)
-npm run dev                # or: opencatz run
-
-# Run interactive Terminal TUI Command Center
-npm run terminal           # or: opencatz terminal
-
-# Run unit tests
-npm test                   # or: opencatz test
-
-# Health check & diagnostics
-node bin/opencatz.js doctor # or: opencatz doctor
-
-# Clean uninstall
-npm run uninstall          # or: opencatz uninstall
-```
-
----
-
-## 6. Onboarding & Update Flow
-
-- **Onboarding (`opencatz onboard` / `npm run wizard`):** `scripts/wizard.js` walks through `.env` creation, AI provider selection, Execution Mode selection (`DRY_RUN`, `SIGNAL_ONLY`, `AUTO_EXECUTE`), Auto TP/SL targets, Discord/Telegram credentials, and API keys (`UNISWAP_API_KEY`, etc.) — never skip it on a fresh clone.
-- **Update (`opencatz update` / `npm run update`):** `scripts/update-core.mjs` performs git pull + install + rebuild + service restart, and notifies via Telegram/Discord webhook (`DISCORD_DEPLOY_WEBHOOK_URL`).
-- **Deploy (`opencatz deploy`):** PM2 daemon via `deploy.sh` / `npm run deploy` (Cat Den — 24/7 background process).
-- **Uninstall (`opencatz uninstall` / `npm run uninstall`):** `scripts/uninstall.mjs` safely stops PM2 background processes, resets state, and purges `.env` credentials & build artifacts.
-
----
-
-## 7. Safety & Security Rules
-
-- **NEVER** commit private keys, mnemonic phrases, API keys, or Discord bot tokens into Git.
-- Use `.env` files and keep `.env.example` updated with mock placeholders.
-- **Backup-key convention:** every paid API key supports a comma-separated `*_BACKUP_KEYS` variable (e.g. `GMGN_BACKUP_KEYS`, `KRYSTAL_CLOUD_BACKUP_KEYS`, `OPENSEA_BACKUP_KEYS`, `GOPLUS_BACKUP_KEYS`, `UNISWAP_BACKUP_KEYS`) — sub-agents auto-rotate to backups on 401/403/429 and mark failed keys.
-- Operating live trading agents should always use dedicated burner wallets with capped funds.
-- **Token & API Cost Optimization**: Reserve LLM API calls strictly for high-value reasoning tasks (e.g. interpreting social sentiment in tweets, drafting final AI Thesis summaries, and handling user chat queries in the command room). Use local deterministic code and mathematical rules for filtering, security checks, and screening to minimize token consumption and keep running costs near zero.
-
+## Key paths (6)
+- src/adapters/gmgn-adapter.ts — widen Chain union (line 4); per-chain key pools
+- src/agents/meme-robinhood/robinhood-screening-agent.ts — the single multi-chain meme agent (chain loop)
+- src/agents/shared/gmgn-meme-helpers.ts — chain-agnostic prefilter/dedupe/signal logic
+- src/orchestrator/swarm-consensus.ts (+ swarm-learning.ts) — the voter gate, never the floor
+- src/orchestrator/risk-engine-v2.ts — kill-switch veto in the execution path
+- src/services/goplus-security-service.ts + api-key-pool.ts — security layer + rotation pattern

@@ -1,4 +1,5 @@
 import { StateStore, SignalLedgerEntry } from '../services/state-store.js';
+import { aggregateVoterScores } from './voters.js';
 
 export interface SignalCandidate {
   symbol: string;
@@ -9,6 +10,8 @@ export interface SignalCandidate {
   securityAuditPassed: boolean;
   socialHypeScore: number; // 0 - 100
   confidence?: number; // agent-computed confidence (0-100); when present, swarm acts as pure gate
+  /** Arch-3 7-voter swarm scores. When present, the weighted voter average becomes the confidence. */
+  voterScores?: Partial<Record<string, number>>;
 }
 
 export interface ConsensusResult {
@@ -19,6 +22,8 @@ export interface ConsensusResult {
     catalystScore: number;
     securityScore: number;
     reputationMultiplier: number;
+    /** Per-voter swarm scores (voter path only; absent on the legacy path). */
+    voters?: Record<string, number>;
   };
   reason: string;
 }
@@ -76,14 +81,25 @@ export class SwarmConsensusEngine {
     const reputationMultiplier = 1.0;
 
     // Agent-computed confidence path (new): swarm acts as pure gate
-    let quantScore = 0;
-    let catalystScore = 0;
-    let securityScore = 0;
-    let baseConfidence = 0;
-    let isFastLane = false;
-    if (typeof candidate.confidence === 'number' && candidate.confidence > 0) {
-      baseConfidence = candidate.confidence;
-    } else {
+        let quantScore = 0;
+        let catalystScore = 0;
+        let securityScore = 0;
+        let baseConfidence = 0;
+        let isFastLane = false;
+        let voterBreakdown: Record<string, number> | null = null;
+        // Arch-3 7-voter swarm path: weighted average across the voters that rendered
+        // a score (quant/ml/security/sentiment/whale/regime/critic). The meme agent's
+        // own confidence rides in as the 'quant' vote, so nothing is lost.
+        if (candidate.voterScores && Object.keys(candidate.voterScores).length > 0) {
+          const agg = aggregateVoterScores(candidate.voterScores);
+          baseConfidence = agg.score;
+          voterBreakdown = agg.breakdown;
+          quantScore = agg.breakdown['quant'] ?? 0;
+          catalystScore = agg.breakdown['sentiment'] ?? 0;
+          securityScore = agg.breakdown['security'] ?? 0;
+        } else if (typeof candidate.confidence === 'number' && candidate.confidence > 0) {
+          baseConfidence = candidate.confidence;
+        } else {
       // Legacy path: recompute from quant/catalyst/security
       if (candidate.liquidityUsd >= 25000) quantScore += 50;
       if (candidate.volume1hUsd >= 10000) quantScore += 50;
@@ -151,13 +167,16 @@ export class SwarmConsensusEngine {
         catalystScore,
         securityScore,
         reputationMultiplier,
+        ...(voterBreakdown ? { voters: voterBreakdown } : {}),
       },
       reason: passed
         ? strategyReason
           ? `Signal passed Multi-Agent Consensus (${confidenceScore}% confidence) + Strategy: ${strategyReason}`
           : isFastLane 
             ? `⚡ **FAST-LANE AGENT CONSENSUS PASSED** (${confidenceScore}% confidence, Sub-second High Conviction, Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
-            : `Signal passed Multi-Agent Consensus with ${confidenceScore}% confidence (Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
+            : voterBreakdown
+              ? `Signal passed 7-voter Swarm Consensus (${confidenceScore}% confidence; voters: ${JSON.stringify(voterBreakdown)}).`
+              : `Signal passed Multi-Agent Consensus with ${confidenceScore}% confidence (Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
         : `Signal rejected (${confidenceScore}% confidence below 80% threshold or security failed).`,
     };
 

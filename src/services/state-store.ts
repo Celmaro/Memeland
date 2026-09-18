@@ -24,10 +24,28 @@ export interface SignalLedgerEntry {
 }
 
 /**
+ * Phase-1 scorecard entry (Arch 5 ladder) — predicted-vs-actual for every fired
+ * signal. Fired signals get an OPEN entry at their quoted entry price; the
+ * screening cycle updates prices each pass and flips status on TP(+50%)/SL(-20%).
+ */
+export interface ScorecardEntry {
+  id: string;
+  symbol: string;
+  chain: string;
+  contractAddress: string;
+  confidence: number;
+  entryPriceUsd: number;
+  currentPriceUsd: number;
+  entryTimestampIso: string;
+  updatedAtIso: string;
+  status: 'OPEN' | 'TP' | 'SL' | 'CLOSED';
+}
+
+/**
  * Token tracked by the wallet auto-tracker — resolved on startup via GMGN token info.
  */
 export interface TrackedToken {
-  chain: 'robinhood';
+  chain: string;
   address: string;
   symbol: string;
   addedAt: number;
@@ -71,6 +89,12 @@ export interface OpenCatzPersistedState {
   // happens in the agents (whitelist + clamps) before persisting.
   screeningConfigs: Record<string, Record<string, unknown>>;
 
+  // Phase-1 funnel counters per domain+stage (scanned/prefiltered/consensus/fired/executed)
+  funnels: Record<string, Record<string, number>>;
+
+  // Phase-1 predicted-vs-actual scorecard (Arch 5 ladder)
+  scorecard: ScorecardEntry[];
+
   // Metadata
   lastUpdated: string;
   version: number;
@@ -108,6 +132,7 @@ export class StateStore {
     }
 
     this.state = this.loadFromDisk();
+    this.ensureLatestFields();
     console.log(`[STATE STORE] Loaded persistent state from ${this.dbFilePath} (${this.state.signalLedger.length} ledger entries, ${Object.keys(this.state.priceAlerts).length} alerts, ${Object.keys(this.state.tradeJournalEntries).length} journal entries)`);
   }
 
@@ -129,9 +154,17 @@ export class StateStore {
       trackedTokens: [],
       trackedNftCollections: [],
       screeningConfigs: {},
+      funnels: {},
+      scorecard: [],
       lastUpdated: new Date().toISOString(),
       version: CURRENT_VERSION,
     };
+  }
+
+  /** Backfill fields added after the on-disk version — existing state files must never lose data. */
+  private ensureLatestFields(): void {
+    if (!this.state.funnels) this.state.funnels = {};
+    if (!Array.isArray(this.state.scorecard)) this.state.scorecard = [];
   }
 
   private loadFromDisk(): OpenCatPersistedState {
@@ -179,6 +212,8 @@ export class StateStore {
         trackedTokens: Array.isArray(data.trackedTokens) ? data.trackedTokens : [],
         trackedNftCollections: Array.isArray(data.trackedNftCollections) ? data.trackedNftCollections : [],
         screeningConfigs: data.screeningConfigs || {},
+        funnels: data.funnels || {},
+        scorecard: Array.isArray(data.scorecard) ? data.scorecard : [],
         lastUpdated: data.lastUpdated || new Date().toISOString(),
         version: CURRENT_VERSION,
       };
@@ -437,6 +472,43 @@ export class StateStore {
   public setScreeningConfig(domain: string, partial: Record<string, unknown>): void {
     this.state.screeningConfigs[domain] = { ...(this.state.screeningConfigs[domain] || {}), ...partial };
     this.scheduleSave();
+  }
+
+  // ==========================================
+  // PHASE-1 FUNNEL COUNTERS + SCORECARD (Arch 5 ladder)
+  // ==========================================
+
+  /** Increment a funnel stage counter for a domain. Stages: scanned/prefiltered/consensus/fired/executed/approved. */
+  public incrementFunnel(domain: string, stage: string, by = 1): void {
+    if (!this.state.funnels[domain]) this.state.funnels[domain] = {};
+    this.state.funnels[domain][stage] = (this.state.funnels[domain][stage] || 0) + by;
+    this.scheduleSave();
+  }
+
+  public getFunnelStats(): Record<string, Record<string, number>> {
+    return this.state.funnels;
+  }
+
+  /** Open a scorecard entry for a fired signal (predicted-vs-actual tracking). */
+  public appendScorecardEntry(entry: ScorecardEntry): void {
+    this.state.scorecard.push(entry);
+    this.scheduleSave();
+  }
+
+  /** Update an OPEN scorecard entry's price; flips to TP (+50%) or SL (-20%) deterministically. */
+  public updateScorecardPrice(id: string, priceUsd: number, nowIso: string): void {
+    const entry = this.state.scorecard.find((e) => e.id === id && e.status === 'OPEN');
+    if (!entry || !(priceUsd > 0)) return;
+    entry.currentPriceUsd = priceUsd;
+    entry.updatedAtIso = nowIso;
+    const change = entry.entryPriceUsd > 0 ? priceUsd / entry.entryPriceUsd - 1 : 0;
+    if (change >= 0.5) entry.status = 'TP';
+    else if (change <= -0.2) entry.status = 'SL';
+    this.scheduleSave();
+  }
+
+  public getScorecard(): ScorecardEntry[] {
+    return this.state.scorecard;
   }
 }
 

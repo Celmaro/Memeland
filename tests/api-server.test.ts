@@ -22,18 +22,19 @@ describe('OpenCatzRESTServer Test Suite', () => {
     await server.stop();
   });
 
-  it('GET /api/status returns 200 with full system status and 5 sub-agent details', async () => {
-    const res = await fetch(`http://localhost:${testPort}/api/status`);
-    expect(res.status).toBe(200);
-    const data = await res.json();
+  it('GET /api/status returns 200 with full system status and active sub-agent details', async () => {
+      const res = await fetch(`http://localhost:${testPort}/api/status`);
+      expect(res.status).toBe(200);
+      const data = await res.json();
 
-    expect(data.success).toBe(true);
-    expect(data.executionMode).toBeDefined();
-    expect(data.primaryVenue).toContain('Robinhood Chain L2');
-    expect(Array.isArray(data.subAgents)).toBe(true);
-    expect(data.subAgents.length).toBe(5);
-    expect(data.connectedApiKeys).toBeDefined();
-  });
+      expect(data.success).toBe(true);
+      expect(data.executionMode).toBeDefined();
+      expect(data.primaryVenue).toContain('Robinhood Chain L2');
+      expect(Array.isArray(data.subAgents)).toBe(true);
+      // Arch-3 strip: lp-robinhood + nft + alpha removed; meme (multi-chain) + whale remain.
+      expect(data.subAgents.length).toBe(2);
+      expect(data.connectedApiKeys).toBeDefined();
+    });
 
   it('GET /api/calls returns signal call ledger items', async () => {
     const res = await fetch(`http://localhost:${testPort}/api/calls`);

@@ -119,7 +119,7 @@ export class WalletTracker {
   }
 
   /** Persist a token as an auto-tracking target (deduped by chain + address in StateStore). */
-  public registerTrackedToken(chain: 'robinhood', address: string, symbol: string): void {
+  public registerTrackedToken(chain: 'robinhood' | 'sol' | 'bsc' | 'base' | 'eth', address: string, symbol: string): void {
     this.stateStore?.setTrackedToken({ chain, address, symbol, addedAt: Date.now() });
   }
 

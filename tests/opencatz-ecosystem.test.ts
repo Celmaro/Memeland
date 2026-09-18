@@ -223,15 +223,20 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
   });
 
   it('25. ApiKeyGuard: Should halt sub-agents with missing required API keys', async () => {
-    const { ApiKeyGuardService } = await import('../src/services/api-key-guard.js');
-    const guard = new ApiKeyGuardService();
+      const { ApiKeyGuardService } = await import('../src/services/api-key-guard.js');
+      const guard = new ApiKeyGuardService();
 
-    delete process.env.OPENSEA_API_KEY;
-    const res = guard.checkDomainKeys('nft');
-    expect(res.ready).toBe(false);
-    expect(res.missingKeys).toContain('OPENSEA_API_KEY');
-    expect(res.statusMessage).toContain('HALTED');
-  });
+      const original = process.env.AI_API_KEY;
+      delete process.env.AI_API_KEY;
+      try {
+        const res = guard.checkDomainKeys('meme-robinhood');
+        expect(res.ready).toBe(false);
+        expect(res.missingKeys).toContain('AI_API_KEY');
+        expect(res.statusMessage).toContain('HALTED');
+      } finally {
+        if (original !== undefined) process.env.AI_API_KEY = original;
+      }
+    });
 
   it('26. ApiKeyGuard & ToolRegistry: Should set API key at runtime and unblock sub-agent', async () => {
     const { ApiKeyGuardService } = await import('../src/services/api-key-guard.js');

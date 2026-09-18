@@ -1,8 +1,21 @@
 import crypto from 'node:crypto';
 import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 
-export type Chain = 'robinhood';
+/** All chains GMGN OpenAPI serves for market/token/track routes (multi-chain expansion, 2026-09-18). */
+export type Chain = 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood';
 export type RankInterval = '1m' | '5m' | '1h' | '6h' | '24h';
+export type KlineResolution = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '12h' | '1d';
+
+export interface KlineCandle {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export const GMGN_CHAINS: Chain[] = ['sol', 'bsc', 'base', 'eth', 'robinhood'];
 
 export interface GMGNRawToken {
   chain: Chain;
@@ -166,7 +179,11 @@ export class GMGNAdapter {
   }
 
   constructor(apiKey?: string) {
-    const envPool = loadApiKeyPool('GMGN_API_KEY', ['GMGN_API_KEY_ROBINHOOD']);
+    // Per-chain key pools: GMGN_API_KEY_SOL / GMGN_API_KEY_BSC / GMGN_API_KEY_BASE /
+    // GMGN_API_KEY_ETH / GMGN_API_KEY_ROBINHOOD each contribute to ONE rotation pool
+    // (plus legacy GMGN_API_KEY + *_BACKUP_KEYS + indexed slots via loadApiKeyPool).
+    const perChainAliases = GMGN_CHAINS.map((c) => `GMGN_API_KEY_${c.toUpperCase()}`);
+    const envPool = loadApiKeyPool('GMGN_API_KEY', ['GMGN_API_KEY_ROBINHOOD', ...perChainAliases]);
     this.keyPool = apiKey
       ? createApiKeyPool('GMGN_API_KEY', [apiKey, ...envPool.keys])
       : envPool;
@@ -406,6 +423,51 @@ export class GMGNAdapter {
     const data = res?.data;
     if (!data || typeof data !== 'object') return null;
     return this.normalizeToken(this.flattenTokenInfo(data), chain);
+  }
+
+  /**
+   * /v1/market/token_kline — OHLCV candles per token (weight 2; 1s resolution is
+   * Pro-only). Parsed tolerantly across known response shapes; null on any failure
+   * (fail-closed: the ML predictor treats null as "no data → neutral vote").
+   */
+  public async fetchTokenKlines(
+    chain: Chain,
+    address: string,
+    resolution: KlineResolution = '15m',
+    limit = 50
+  ): Promise<KlineCandle[] | null> {
+    const res = await this.gmgnRequest<any>('GET', '/v1/market/token_kline', {
+      chain,
+      address,
+      resolution,
+      limit,
+    });
+    if (!res) return null;
+    const data = res?.data;
+    const rawKlines: unknown =
+      data?.data?.klines ??
+      data?.klines ??
+      data?.list ??
+      res?.data?.list ??
+      (Array.isArray(data) ? data : null);
+    if (!Array.isArray(rawKlines)) return null;
+    const candles: KlineCandle[] = [];
+    for (const row of rawKlines) {
+      if (!Array.isArray(row)) continue;
+      const [ts, open, high, low, close, volume] = row as [number, number, number, number, number, number];
+      const n = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
+      const c: KlineCandle = {
+        timestamp: n(ts),
+        open: n(open),
+        high: n(high),
+        low: n(low),
+        close: n(close),
+        volume: n(volume),
+      };
+      if (c.timestamp > 0 && c.close > 0) candles.push(c);
+    }
+    if (candles.length === 0) return null;
+    return candles.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   /**

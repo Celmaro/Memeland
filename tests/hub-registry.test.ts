@@ -144,8 +144,8 @@ describe('OpenCatzHub registry-driven triggerAgentPass', () => {
     expect(stub.runScreeningPass).toHaveBeenCalledTimes(1);
   });
 
-  it('all 3 registered domain ids are triggerable via factories', async () => {
-    const ids = ['meme-robinhood', 'nft', 'lp-robinhood'] as const;
+  it('all active registered domains are triggerable via factories (meme-robinhood + whale-eth)', async () => {
+    const ids = ['meme-robinhood', 'whale-eth'] as const;
     for (const id of ids) {
       const stub = mkStubAgent(id, [mkReport(id.toUpperCase())]);
       const hub = new OpenCatzHub({ agentFactories: { [id]: () => stub } });
@@ -154,186 +154,14 @@ describe('OpenCatzHub registry-driven triggerAgentPass', () => {
     }
   });
 
-  it('lp-robinhood wraps Krystal pool data into LP_ROBINHOOD payload', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool()]),
-      gmgnAdapter: mkGmgnStub({ '0xweth': mkGmgnToken() }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(1);
-    const r = results[0];
-    expect(r.passed).toBe(true);
-    expect(r.confidence).toBe(80);
-    expect(r.payload?.domain).toBe('LP_ROBINHOOD');
-    expect(r.payload?.contractAddress).toBe('0xpool1');
-    expect(r.payload?.network).toBe('Robinhood Chain (Uniswap v3)');
-    expect(r.payload?.poolUrl).toBe('https://app.uniswap.org/explore/pools/robinhood/0xpool1');
-    expect(r.payload?.krystalUrl).toContain('defi.krystal.app');
-    expect(r.payload?.feeApr).toContain('%');
-  });
-
-  it('lp-robinhood orders meme token first (WETH-PEPE pool -> token0=PEPE, title PEPE-WETH)', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken() }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(1);
-    const p = results[0].payload!;
-    expect(p.title).toBe('PEPE-WETH');
-    expect(p.symbol).toBe('PEPE');
-    expect(p.token0Symbol).toBe('PEPE');
-    expect(p.token1Symbol).toBe('WETH');
-    expect(p.token0Address).toBe('0xpepe');
-    expect(p.token1Address).toBe('0xweth');
-    expect(p.token0ChartUrl).toContain('0xpepe');
-    expect(p.gmgnUrl).toContain('0xpepe');
-  });
-
-  // ── LP security gate (GMGN) ─────────────────────────────────────────────
-
-  it('lp-robinhood: audit unavailable (null) → pool REJECTED (fail-closed)', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool()]),
-      gmgnAdapter: mkGmgnStub({ '0xweth': mkGmgnToken() }, { '0xweth': null }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(0);
-  });
-
-  it('lp-robinhood: honeypot meme token rejects pool', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken({ isHoneypot: true }) }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(0);
-  });
-
-  it('lp-robinhood: honeypot security audit (GMGN /token/security) rejects pool', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken({ marketCapUsd: 500000 }) }, { '0xpepe': mkSafeAudit({ isHoneypot: true }) }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(0);
-  });
-
-  it('lp-robinhood: unsellable token (canNotSell) → pool REJECTED', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken({ marketCapUsd: 500000 }) }, { '0xpepe': mkSafeAudit({ canNotSell: true }) }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(0);
-  });
-
-  it('lp-robinhood: null token on GMGN → pool REJECTED (MC cannot be verified)', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({}),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(0);
-  });
-
-  it('lp-robinhood: meme token market cap < $200k → pool REJECTED', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken({ marketCapUsd: 150000 }) }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(0);
-  });
-
-  it('lp-robinhood: safe token with large MC → post + security label populated', async () => {
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken({ marketCapUsd: 500000 }) }),
-    });
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(1);
-    expect(results[0].payload?.securityScore).toContain('GMGN audit');
-  });
-
   it('factory exception is caught and returns [] (fail-closed)', async () => {
     const hub = new OpenCatzHub({
       agentFactories: {
-        nft: () => {
+        'whale-eth': () => {
           throw new Error('boom');
         },
       },
     });
-    expect(await hub.triggerAgentPass('nft')).toEqual([]);
-  });
-
-  it('lp-robinhood uses active strategy params (loosened default passes $15k TVL / 3% fee pool)', async () => {
-    const { StrategyEngine } = await import('../src/orchestrator/strategy-engine.js');
-    // Loosened default (lp-robinhood-default): TVL >= $10k, vol >= $100k,
-    // Fee/TVL >= 2%, MC >= $100k — this pool would fail the strict fallback
-    // (MC $150k < $200k) but passes once the strategy provider is wired.
-    const hub = new OpenCatzHub({
-      krystalAdapter: mkKrystalStub([mkKrystalPool({
-        pairName: 'WETH-PEPE',
-        token0Symbol: 'WETH',
-        token1Symbol: 'PEPE',
-        token0Address: '0xweth',
-        token1Address: '0xpepe',
-        tvlUsd: 15000,
-        volume24hUsd: 150000,
-        feesToTvlRatio24h: 0.03,
-      })]),
-      gmgnAdapter: mkGmgnStub({ '0xpepe': mkGmgnToken({ marketCapUsd: 150000 }) }),
-    });
-    hub.setStrategyProvider((domain: string) => new StrategyEngine().getActiveStrategy(domain));
-    const results = await hub.triggerAgentPass('lp-robinhood');
-    expect(results).toHaveLength(1);
-    const r = results[0];
-    expect(r.passed).toBe(true);
-    expect(r.confidence).toBe(80);
-    expect(r.payload?.symbol).toBe('PEPE');
-    expect(r.payload?.title).toBe('PEPE-WETH');
+    expect(await hub.triggerAgentPass('whale-eth')).toEqual([]);
   });
 });

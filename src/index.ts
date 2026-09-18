@@ -16,14 +16,12 @@ import { globalHealthWatcher } from './services/health-watcher.js';
 import { globalMarketRegimeFilter } from './services/market-regime.js';
 import { bootstrapDiscordChannels } from './discord/setup/channel-bootstrap.js';
 import { SkillLoader } from './services/skill-loader.js';
-import { OpenSeaAdapter } from './adapters/opensea-adapter.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
 import { GMGNAdapter } from './adapters/gmgn-adapter.js';
 import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
-import { NFTScreeningAgent } from './agents/nft/nft-screening-agent.js';
-import { AlphaRobinhoodScreeningAgent } from './agents/alpha-robinhood/alpha-screening-agent.js';
 import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
+import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
 import { StateStore } from './services/state-store.js';
@@ -65,6 +63,9 @@ function gateSignal(payload: any): boolean {
     securityAuditPassed: Boolean(payload.securityAuditPassed),
     socialHypeScore: Number(payload.socialHypeScore) || 0,
     confidence: Number(payload.confidenceScore) || undefined,
+    // Arch-3 7-voter swarm: when the agent attached per-voter scores, the gate
+    // re-derives confidence from the weighted average (voters.ts).
+    voterScores: payload.voterScores || undefined,
   });
   if (!res.passed) {
     console.warn(`[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected (confidence ${res.confidenceScore}%) — not posting.`);
@@ -128,31 +129,28 @@ try {
 }
 
 const skillLoader = new SkillLoader();
-const openseaAdapter = new OpenSeaAdapter();
 const evmTradeAdapter = new EVMTradeAdapter();
 
 // Apply persisted per-domain screening overrides (set via chat `set_screening_config`).
 // Agent-level prefilter/hard-gate thresholds are seeded from the ACTIVE strategy's
 // prefilter* params (loosened presets take effect at runtime); fallback = config.
+// Arch-3 voter swarm: enabled unless VOTER_SWARM_ENABLED=false; the Critic voter gets
+// the AIService (fail-open neutral when LLM is unavailable).
 const savedScreeningConfigs = stateStore.getScreeningConfigs();
 const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
   savedScreeningConfigs['meme-robinhood'] as any,
   () => strategyEngine.getActiveStrategy('meme-robinhood')?.params ?? {},
+  {
+    voterSwarm: process.env.VOTER_SWARM_ENABLED !== 'false',
+    critic: new CriticVoter(aiService),
+  },
 );
-const nftScreeningAgent = new NFTScreeningAgent(
-  openseaAdapter,
-  undefined,
-  () => strategyEngine.getActiveStrategy('nft')?.params ?? {},
-);
-const alphaRobinhoodScreeningAgent = new AlphaRobinhoodScreeningAgent();
 const hyperliquidAdapter = new HyperliquidAdapter();
 const whaleScreeningAgent = new WhaleScreeningAgent(hyperliquidAdapter);
 
 // Wire shared adapters + singleton agent instances into the Hub
 hub.attachAgentFactories({
   'meme-robinhood': () => robinhoodScreeningAgent,
-  nft: () => nftScreeningAgent,
-  'alpha-robinhood': () => alphaRobinhoodScreeningAgent,
   'whale-eth': () => whaleScreeningAgent,
 });
 
@@ -165,9 +163,9 @@ walletService.attachStateStore(stateStore);
 const loadedSkills = skillLoader.loadAllSkills();
 
 console.log(`[SKILL SYSTEM] Active skills loaded: ${loadedSkills.length} (${loadedSkills.map(s => s.name).join(', ')})`);
-console.log(`[SECURITY SERVICES] GMGN + GoPlus Security (Robinhood Chain) Initialized.`);
-console.log(`[SCREENING AGENTS] Robinhood Meme + LP Robinhood + NFT Sniping + Alpha + ETH Whale Tracking Agents Initialized.`);
-console.log(`[SCREENING ADAPTERS] GMGN AI + Krystal + OpenSea + Relay + Hyperliquid + EVM Adapters Initialized.`);
+console.log(`[SECURITY SERVICES] GMGN + GoPlus Security Initialized (sol/bsc/base/eth/robinhood).`);
+console.log(`[SCREENING AGENTS] Multi-Chain Meme (7-voter swarm) + ETH Whale Tracking Agents Initialized.`);
+console.log(`[SCREENING ADAPTERS] GMGN AI + GoPlus + Relay + Hyperliquid + EVM Adapters Initialized.`);
 console.log(`[AI SERVICE] Configured with provider: ${aiService.getConfig().provider}, model: ${aiService.getConfig().modelName}`);
 
 const discordToken = process.env.DISCORD_BOT_TOKEN;
@@ -330,53 +328,31 @@ if (discordToken && clientId) {
 
         let dispatchedPayloads: Array<{ payload: import('./agents/shared/agent-contract.js').CallCardPayload; channelName: string; rawReason: string }> = [];
 
-        const robinhoodDispatched = await dispatchDomain({
-          domain: 'meme-robinhood',
-          channelName: 'call-meme-robinhood',
-          isActive: () => hub.isAgentActive('meme-robinhood'),
-          runPass: () => withScreeningTimeout(robinhoodScreeningAgent.runScreeningPass(), 'meme-robinhood'),
-          keyReady: () => apiKeyGuard.checkDomainKeys('meme-robinhood'),
-        });
-        dispatchedPayloads.push(...robinhoodDispatched);
+                const robinhoodDispatched = await dispatchDomain({
+                  domain: 'meme-robinhood',
+                  channelName: 'call-meme-robinhood',
+                  isActive: () => hub.isAgentActive('meme-robinhood'),
+                  runPass: () => withScreeningTimeout(robinhoodScreeningAgent.runScreeningPass(), 'meme-robinhood'),
+                  keyReady: () => apiKeyGuard.checkDomainKeys('meme-robinhood'),
+                });
+                dispatchedPayloads.push(...robinhoodDispatched);
 
-        const nftDispatched = await dispatchDomain({
-          domain: 'nft',
-          channelName: 'call-nft-robinhood',
-          isActive: () => hub.isAgentActive('nft'),
-          runPass: () => withScreeningTimeout(nftScreeningAgent.runScreeningPass(), 'nft'),
-          keyReady: () => apiKeyGuard.checkDomainKeys('nft'),
-        });
-        dispatchedPayloads.push(...nftDispatched);
-
-        const lpEvmDispatched = await dispatchDomain({
-          domain: 'lp-robinhood',
-          channelName: 'call-lp-robinhood',
-          isActive: () => hub.isAgentActive('lp-robinhood'),
-          runPass: () => withScreeningTimeout(hub.runLPPass('lp-robinhood'), 'lp-robinhood'),
-          keyReady: () => apiKeyGuard.checkDomainKeys('lp-robinhood'),
-        });
-        dispatchedPayloads.push(...lpEvmDispatched);
-
-        const alphaDispatched = await dispatchDomain({
-          domain: 'alpha-robinhood',
-          channelName: 'call-alpha-robinhood',
-          isActive: () => hub.isAgentActive('alpha-robinhood'),
-          runPass: () => withScreeningTimeout(alphaRobinhoodScreeningAgent.runScreeningPass(), 'alpha-robinhood'),
-          keyReady: () => apiKeyGuard.checkDomainKeys('alpha-robinhood'),
-        });
-        dispatchedPayloads.push(...alphaDispatched);
-
-        const whaleDispatched = await dispatchDomain({
-          domain: 'whale-eth',
-          channelName: 'call-whale-eth',
-          isActive: () => hub.isAgentActive('whale-eth'),
-          runPass: () => withScreeningTimeout(whaleScreeningAgent.runScreeningPass(), 'whale-eth'),
-          keyReady: () => apiKeyGuard.checkDomainKeys('whale-eth'),
-        });
-        dispatchedPayloads.push(...whaleDispatched);
+                const whaleDispatched = await dispatchDomain({
+                  domain: 'whale-eth',
+                  channelName: 'call-whale-eth',
+                  isActive: () => hub.isAgentActive('whale-eth'),
+                  runPass: () => withScreeningTimeout(whaleScreeningAgent.runScreeningPass(), 'whale-eth'),
+                  keyReady: () => apiKeyGuard.checkDomainKeys('whale-eth'),
+                });
+                dispatchedPayloads.push(...whaleDispatched);
 
         // Real Swarm Consensus gate (>= 80%): every signal must pass with real data
+        const preGateCount = dispatchedPayloads.length;
         dispatchedPayloads = dispatchedPayloads.filter((item) => gateSignal(item.payload));
+        const postGateCount = dispatchedPayloads.length;
+        stateStore.incrementFunnel('meme-robinhood', 'scanned', robinhoodScreeningAgent.getLastFunnelStats().scanned);
+        stateStore.incrementFunnel('meme-robinhood', 'consensus', postGateCount);
+        console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
 
         // Register real heartbeats for every active agent that ran this pass
         for (const domain of hub.getActiveDomains()) {
@@ -399,12 +375,30 @@ if (discordToken && clientId) {
           recentSignals.set(dedupKey, now);
           stateStore.setDedupEntry(dedupKey, now);
 
+          // Phase-1 scorecard + funnel: this signal FIRED — open a predicted-vs-actual entry
+          stateStore.incrementFunnel('meme-robinhood', 'fired');
+          {
+            const firedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
+            if (firedPrice > 0) {
+              stateStore.appendScorecardEntry({
+                id: `SC_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                symbol: item.payload.symbol || 'TOKEN',
+                chain: String(item.payload.network || 'robinhood').toLowerCase(),
+                contractAddress: item.payload.contractAddress || '',
+                confidence: Number(item.payload.confidenceScore) || 0,
+                entryPriceUsd: firedPrice,
+                currentPriceUsd: firedPrice,
+                entryTimestampIso: new Date().toISOString(),
+                updatedAtIso: new Date().toISOString(),
+                status: 'OPEN',
+              });
+            }
+          }
+
           // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates with real market quotes, SIGNAL_ONLY skips trade execution.
           const AUTO_EXECUTE_ENABLED = isAutoExecute() || process.env.AUTO_EXECUTE_ENABLED === 'true';
-          const autoExecDomain: string | undefined =
-            item.channelName === 'call-meme-robinhood' ? 'meme-robinhood' :
-            item.channelName === 'call-nft-robinhood' ? 'nft' :
-            undefined;
+                    const autoExecDomain: string | undefined =
+                      item.channelName === 'call-meme-robinhood' ? 'meme-robinhood' : undefined;
           if (autoExecDomain && AUTO_EXECUTE_ENABLED && !isSignalOnly()) {
             const autoExec = hub.isAutoExecuteEnabled(autoExecDomain);
             if (autoExec.enabled) {
@@ -481,13 +475,10 @@ if (discordToken && clientId) {
           }
 
           // 3. Register called tokens for wallet auto-tracking (own-position detection + exit alerts)
-          if ((item.channelName === 'call-meme-robinhood' || item.channelName === 'call-lp-robinhood') && item.payload.contractAddress) {
-            walletTracker.registerTrackedToken('robinhood', item.payload.contractAddress, item.payload.symbol);
-          } else if (item.channelName === 'call-nft-robinhood' && item.payload.symbol) {
-            // NFT: register collection slug for user position monitoring (floor drop -20%, TP, etc.)
-            stateStore.setTrackedNftCollection(item.payload.symbol.toLowerCase());
-            console.log(`[POSITION MONITOR] NFT collection di-track: ${item.payload.symbol}`);
-          }
+                    if (item.channelName === 'call-meme-robinhood' && item.payload.contractAddress) {
+                      const chainForTracking = item.payload.network?.toLowerCase() === 'solana' ? 'sol' : 'robinhood';
+                      walletTracker.registerTrackedToken(chainForTracking, item.payload.contractAddress, item.payload.symbol);
+                    }
 
           // 4. Feed the Swarm Learning Engine — every posted call is recorded at its
           //    entry price so outcome tracking (TP/SL via wallet-tracker) can
@@ -521,6 +512,33 @@ if (discordToken && clientId) {
           console.log(`[POSITION MONITOR] ${positionManager.getActivePositions().length} spot + ${positionManager.getActiveLpPositions().length} LP + ${positionManager.getActiveNftPositions().length} NFT positions tracked, ${allAlerts.length} alert(s) fired this cycle.`);
         } catch (wtErr: any) {
           console.warn(`[POSITION MONITOR] sync failed this cycle: ${wtErr.message}`);
+        }
+
+        // Phase-1 scorecard mark-to-market: refresh OPEN entries each cycle and flip TP/SL.
+        try {
+          const scorecardAdapter = new GMGNAdapter();
+          const nowIso = new Date().toISOString();
+          const chainMap: Record<string, 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood'> = {
+            solana: 'sol', sol: 'sol', bsc: 'bsc', 'bnb chain': 'bsc', base: 'base',
+            ethereum: 'eth', robinhood: 'robinhood',
+          };
+          let openCount = 0;
+          for (const entry of stateStore.getScorecard()) {
+            if (entry.status !== 'OPEN' || !entry.contractAddress) continue;
+            openCount += 1;
+            const chain = chainMap[entry.chain] || 'robinhood';
+            const info = await scorecardAdapter.fetchTokenInfo(chain, entry.contractAddress);
+            if (info && info.priceUsd > 0) {
+              stateStore.updateScorecardPrice(entry.id, info.priceUsd, nowIso);
+            }
+          }
+          const scorecard = stateStore.getScorecard();
+          const closed = scorecard.filter((e) => e.status !== 'OPEN');
+          const wins = closed.filter((e) => e.status === 'TP').length;
+          const winRate = closed.length > 0 ? Math.round((wins / closed.length) * 100) : 0;
+          console.log(`[SCORECARD] open=${openCount} closed=${closed.length} tp=${wins} sl=${closed.length - wins} winRate=${winRate}%`);
+        } catch (scErr: any) {
+          console.warn(`[SCORECARD] mark-to-market failed this cycle: ${scErr.message}`);
         }
       } catch (err: any) {
         console.error('[SUB-AGENTS LOOP ERROR]', err.message);

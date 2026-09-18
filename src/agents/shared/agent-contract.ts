@@ -77,6 +77,8 @@ export interface CallCardPayload {
   socialHypeScore: number;
   liquidityUsd: number;
   volume1hUsd: number;
+  /** Arch-3 7-voter swarm scores (quant/ml/security/sentiment/whale/regime/critic), when collected. */
+  voterScores?: Partial<Record<string, number>>;
   whaleReport?: WhaleReport;
   cexRadar?: any[];
 }
