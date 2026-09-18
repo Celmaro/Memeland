@@ -12,10 +12,14 @@ import { ToolRegistry } from '../orchestrator/tool-registry.js';
 export class OpenCatzRESTServer {
   private server: http.Server | null = null;
   private port: number;
+  private host: string;
   private toolRegistry = new ToolRegistry();
 
   constructor(port = 3000) {
     this.port = Number(process.env.API_PORT) || port;
+    // Bind to loopback by default; the REST surface can mutate state / execute
+    // command tools, so it must not be exposed on all interfaces unintentionally.
+    this.host = process.env.API_BIND_HOST || '127.0.0.1';
   }
 
   public stop(): Promise<void> {
@@ -189,6 +193,16 @@ export class OpenCatzRESTServer {
 
         // 7. POST /api/command (Execute ToolRegistry command via REST)
         if (req.method === 'POST' && pathname === '/api/command') {
+          // Mutating/control endpoint — always require a valid API key (fail-closed).
+          // Without a configured key, /api/command is refused rather than silently
+          // exposing command execution (write_strategy_file, read_file, set_api_key...).
+          const authKey = process.env.OPENCATZ_API_KEY || process.env.OPENCAT_API_KEY;
+          const clientKey = req.headers['x-opencatz-api-key'] || req.headers['x-opencat-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+          if (!authKey || authKey.trim() === '' || clientKey !== authKey) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ success: false, error: 'Unauthorized: /api/command requires a valid API key (set OPENCATZ_API_KEY or OPENCAT_API_KEY).' }));
+            return;
+          }
           const body = await parseJsonBody(req);
           const toolName = String(body.command || body.toolName || '').trim();
           const args = body.args || {};
@@ -216,8 +230,8 @@ export class OpenCatzRESTServer {
       }
     });
 
-    this.server.listen(this.port, () => {
-      console.log(`📡 🐾 OPENCATZ AI REST API Server listening on port ${this.port}`);
+    this.server.listen(this.port, this.host, () => {
+      console.log(`📡 🐾 OPENCATZ AI REST API Server listening on ${this.host}:${this.port}`);
     });
   }
 }

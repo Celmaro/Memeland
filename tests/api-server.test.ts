@@ -95,4 +95,23 @@ describe('OpenCatzRESTServer Test Suite', () => {
     });
     expect(authRes.status).toBe(200);
   });
+
+  it('POST /api/command is fail-closed: requires a valid API key', async () => {
+    // No key configured -> 401 (command must never run unauthenticated)
+    const noKey = await fetch(`http://localhost:${testPort}/api/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'read_file', args: { path: 'package.json' } }),
+    });
+    expect(noKey.status).toBe(401);
+
+    // Key configured but request missing the header -> 401
+    process.env.OPENCATZ_API_KEY = 'secret_key_123';
+    const missingHeader = await fetch(`http://localhost:${testPort}/api/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'read_file', args: { path: 'package.json' } }),
+    });
+    expect(missingHeader.status).toBe(401);
+  });
 });
