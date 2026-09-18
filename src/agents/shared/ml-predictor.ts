@@ -139,3 +139,86 @@ export async function fetchGeckoKlines(
   }
   return out.length > 0 ? out : null;
 }
+
+/**
+ * Map a GMGN chain id to the GeckoTerminal network id. GMGN uses 'sol' while
+ * GeckoTerminal uses 'solana'; the other chains share the same id.
+ */
+export function geckoNetworkIdFor(chain: string): string | null {
+  switch (chain) {
+    case 'sol': return 'solana';
+    case 'bsc': return 'bsc';
+    case 'base': return 'base';
+    case 'eth': return 'eth';
+    case 'robinhood': return 'robinhood';
+    default: return null;
+  }
+}
+
+/**
+ * Resolve the primary DEX pool for a token on GeckoTerminal. GMGN does not
+ * expose a pool address in its normalized token (its `exchange` field is the
+ * venue label, e.g. 'raydium'/'pump_amm'), so we ask GeckoTerminal to map the
+ * token address to its pools and pick the most liquid one. Returns null when
+ * unresolved (fail-closed → ML stays neutral).
+ */
+export async function resolveGeckoPool(
+  networkId: string,
+  tokenAddress: string
+): Promise<string | null> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/${encodeURIComponent(networkId)}/tokens/${encodeURIComponent(tokenAddress)}/pools?page=1`;
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json;version=20230203' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) return null;
+  const json: any = await res.json();
+  const pools: unknown = json?.data;
+  if (!Array.isArray(pools) || pools.length === 0) return null;
+  let best: string | null = null;
+  let bestReserveUsd = -1;
+  for (const p of pools) {
+    const addr = (p as any)?.attributes?.address;
+    const reserve = Number((p as any)?.attributes?.reserve_in_usd ?? 0) || 0;
+    if (typeof addr === 'string' && addr && reserve > bestReserveUsd) {
+      best = addr;
+      bestReserveUsd = reserve;
+    }
+  }
+  return best;
+}
+
+export interface GeckoKlineDeps {
+  resolvePool: (networkId: string, tokenAddress: string) => Promise<string | null>;
+  fetchKlines: (
+    networkId: string,
+    poolAddress: string,
+    timeframe?: 'minute' | 'hour' | 'day',
+    aggregate?: number,
+    limit?: number
+  ) => Promise<KlineLike[] | null>;
+}
+
+/**
+ * Kline source with GMGN-primary → GeckoTerminal-fallback. Tries `primary`
+ * first; if it returns empty or throws, resolves a Gecko pool for the token
+ * and fetches OHLCV there. Never lets an outage throw — null is fail-closed
+ * and the ML voter reads null as a neutral 50.
+ */
+export async function fetchKlinesWithGeckoFallback(
+  primary: () => Promise<KlineLike[] | null>,
+  networkId: string | null,
+  tokenAddress: string,
+  deps: GeckoKlineDeps = { resolvePool: resolveGeckoPool, fetchKlines: fetchGeckoKlines }
+): Promise<KlineLike[] | null> {
+  try {
+    const gmgn = await primary();
+    if (gmgn && gmgn.length > 0) return gmgn;
+  } catch { /* fall through to Gecko on failure */ }
+  if (!networkId || !tokenAddress) return null;
+  try {
+    const pool = await deps.resolvePool(networkId, tokenAddress);
+    if (!pool) return null;
+    return await deps.fetchKlines(networkId, pool, 'minute', 15, 50);
+  } catch { return null; }
+}

@@ -13,7 +13,7 @@ import { slashCommands } from './discord/commands/index.js';
 import { handleInteraction } from './discord/handlers/interaction-handler.js';
 import { handleControlRoomMessage } from './discord/handlers/message-handler.js';
 import { globalHealthWatcher } from './services/health-watcher.js';
-import { globalMarketRegimeFilter } from './services/market-regime.js';
+import { globalMarketRegimeFilter, computeWhaleRiskOff } from './services/market-regime.js';
 import { bootstrapDiscordChannels } from './discord/setup/channel-bootstrap.js';
 import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
@@ -345,6 +345,17 @@ if (discordToken && clientId) {
                   keyReady: () => apiKeyGuard.checkDomainKeys('whale-eth'),
                 });
                 dispatchedPayloads.push(...whaleDispatched);
+
+                // Feed Hyperliquid ETH whale net positioning into the regime filter as a
+                // risk-off overlay (takes effect from the next cycle — a slow-moving signal).
+                const whaleSignal = whaleScreeningAgent.getLastSignal();
+                if (whaleSignal) {
+                  const whaleRegime = computeWhaleRiskOff(whaleSignal.totalLongUsd, whaleSignal.totalShortUsd);
+                  globalMarketRegimeFilter.setWhaleRiskOff(
+                    whaleRegime.riskOff,
+                    `Hyperliquid ETH whales net $${(whaleSignal.netUsd / 1e6).toFixed(1)}M (short share ${whaleRegime.shortSharePct}%)`
+                  );
+                }
 
         // Real Swarm Consensus gate (>= 80%): every signal must pass with real data
         const preGateCount = dispatchedPayloads.length;

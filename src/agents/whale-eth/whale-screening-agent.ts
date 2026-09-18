@@ -76,6 +76,7 @@ export class WhaleScreeningAgent implements ScreeningAgent<WhalePositionSignal> 
   private adapter: HyperliquidAdapter;
   private config: WhaleTrackConfig;
   private snapshots = new Map<string, AssetSnapshot>();
+  private lastSignal: WhalePositionSignal | null = null;
 
   constructor(adapter?: HyperliquidAdapter, config?: Partial<WhaleTrackConfig>) {
     this.adapter = adapter || new HyperliquidAdapter();
@@ -121,6 +122,9 @@ export class WhaleScreeningAgent implements ScreeningAgent<WhalePositionSignal> 
       }
 
       const signal = this.buildSignal(coin, positions, returnByAddress, spotFlowByMarket);
+      // Expose the latest computed whale book to the regime voter each pass,
+      // regardless of whether it's a material enough change to post.
+      this.lastSignal = signal;
       if (!this.isMaterialChange(coin, signal)) {
         console.log(`[WHALE AGENT] ⚪ ${coin}: no material change, skipping post.`);
         continue;
@@ -140,6 +144,11 @@ export class WhaleScreeningAgent implements ScreeningAgent<WhalePositionSignal> 
 
     console.log(`[WHALE AGENT] Pass complete. ${reports.length} signals generated.`);
     return reports;
+  }
+
+  /** The most recent ETH whale positioning snapshot (long/short USD), or null before the first pass. */
+  public getLastSignal(): WhalePositionSignal | null {
+    return this.lastSignal;
   }
 
   private buildSignal(

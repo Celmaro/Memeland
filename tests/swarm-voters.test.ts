@@ -7,7 +7,7 @@ import {
   regimeVote,
   scoresFromOpinions,
 } from '../src/orchestrator/voters.js';
-import { predictUpMomentum, rsi, type KlineLike } from '../src/agents/shared/ml-predictor.js';
+import { predictUpMomentum, rsi, fetchKlinesWithGeckoFallback, geckoNetworkIdFor, type KlineLike } from '../src/agents/shared/ml-predictor.js';
 import { CriticVoter } from '../src/agents/shared/critic-voter.js';
 import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
 
@@ -114,6 +114,57 @@ describe('ML momentum predictor', () => {
     expect(rsi(up, 14)).toBe(100);
     const down = Array.from({ length: 15 }, (_, i) => 100 - i);
     expect(rsi(down, 14)).toBe(0);
+  });
+});
+
+// ── GeckoTerminal kline failover (ml-predictor.ts) ─────────────────────────
+
+describe('Gecko kline failover', () => {
+  const k = (close: number): KlineLike => ({ timestamp: 1, open: close, high: close, low: close, close, volume: 1 });
+
+  it('geckoNetworkIdFor maps GMGN chains to GeckoTerminal network ids', () => {
+    expect(geckoNetworkIdFor('sol')).toBe('solana');
+    expect(geckoNetworkIdFor('bsc')).toBe('bsc');
+    expect(geckoNetworkIdFor('base')).toBe('base');
+    expect(geckoNetworkIdFor('eth')).toBe('eth');
+    expect(geckoNetworkIdFor('robinhood')).toBe('robinhood');
+    expect(geckoNetworkIdFor('unknown')).toBeNull();
+  });
+
+  it('returns the primary (GMGN) klines when present — Gecko never called', async () => {
+    const primary = vi.fn(async () => [k(1), k(2)]);
+    const deps = { resolvePool: vi.fn(), fetchKlines: vi.fn() };
+    const out = await fetchKlinesWithGeckoFallback(primary, 'bsc', '0xaddr', deps as any);
+    expect(out).toHaveLength(2);
+    expect(deps.resolvePool).not.toHaveBeenCalled();
+    expect(deps.fetchKlines).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Gecko when the primary throws (429/failure)', async () => {
+    const primary = vi.fn(async () => { throw new Error('gmgn 429'); });
+    const deps = {
+      resolvePool: vi.fn(async () => '0xpool'),
+      fetchKlines: vi.fn(async () => [k(3), k(4)]),
+    };
+    const out = await fetchKlinesWithGeckoFallback(primary, 'eth', '0xaddr', deps as any);
+    expect(out).toHaveLength(2);
+    expect(deps.resolvePool).toHaveBeenCalledWith('eth', '0xaddr');
+  });
+
+  it('returns null when primary is empty and no Gecko network id resolves', async () => {
+    const primary = vi.fn(async () => null);
+    const deps = { resolvePool: vi.fn(), fetchKlines: vi.fn() };
+    const out = await fetchKlinesWithGeckoFallback(primary, null, '0xaddr', deps as any);
+    expect(out).toBeNull();
+    expect(deps.resolvePool).not.toHaveBeenCalled();
+  });
+
+  it('returns null when no Gecko pool resolves (fail-closed, ML stays neutral)', async () => {
+    const primary = vi.fn(async () => null);
+    const deps = { resolvePool: vi.fn(async () => null), fetchKlines: vi.fn() };
+    const out = await fetchKlinesWithGeckoFallback(primary, 'base', '0xaddr', deps as any);
+    expect(out).toBeNull();
+    expect(deps.fetchKlines).not.toHaveBeenCalled();
   });
 });
 

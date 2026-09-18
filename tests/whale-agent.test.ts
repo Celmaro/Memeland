@@ -86,6 +86,26 @@ describe('HyperliquidAdapter & WhaleScreeningAgent Test Suite', () => {
     expect(report.payload?.whaleReport?.spotFlow.length).toBe(1);
   });
 
+  it('WhaleScreeningAgent exposes the last computed signal for the regime voter', async () => {
+    vi.spyOn(mockAdapter, 'fetchLeaderboardTraders').mockResolvedValue([
+      { address: '0xWhale1', returnPct: 10, pnlUsd: 1_000 },
+    ]);
+    vi.spyOn(mockAdapter, 'fetchClearinghouseState').mockResolvedValue([
+      { coin: 'ETH', side: 'SHORT', sizeUsd: 9_000_000, entryPx: 2800, leverage: 5, funding: 0 },
+    ]);
+    vi.spyOn(mockAdapter, 'fetchUserFills').mockResolvedValue([]);
+
+    const agent = new WhaleScreeningAgent(mockAdapter);
+    expect(agent.getLastSignal()).toBeNull();
+    await agent.runScreeningPass();
+
+    const last = agent.getLastSignal();
+    expect(last).not.toBeNull();
+    expect(last?.coin).toBe('ETH');
+    expect(last?.totalShortUsd).toBe(9_000_000);
+    expect(last?.netUsd).toBe(-9_000_000);
+  });
+
   it('Default and Standard strategies evaluate whale context accurately', () => {
     const bullishCtx = {
       whale: {

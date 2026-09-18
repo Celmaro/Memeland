@@ -7,7 +7,7 @@ import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSigna
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { SentimentVoter } from '../shared/sentiment-voter.js';
 import { CriticVoter } from '../shared/critic-voter.js';
-import { predictUpMomentum } from '../shared/ml-predictor.js';
+import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
   type VoterOpinion, type VoterScores, scoresFromOpinions,
   whaleVote, regimeVote, securityVote,
@@ -389,9 +389,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // ML predictor input: 15m klines (only when the candidate is close to conviction — saves GMGN budget)
           let klines: KlineCandle[] | null = null;
           if (this.voterSwarm && det.confidence >= 60) {
-            try {
-              klines = await this.gmgn.fetchTokenKlines(chain, t.address, '15m', 50);
-            } catch { /* no klines → ML votes neutral */ }
+            // GMGN-primary → GeckoTerminal fallback (pool resolved via token address).
+            klines = await fetchKlinesWithGeckoFallback(
+              () => this.gmgn.fetchTokenKlines(chain, t.address, '15m', 50),
+              geckoNetworkIdFor(chain),
+              t.address
+            ) as KlineCandle[] | null;
           }
 
           // Strategy extension layer (optional): adjust confidence
@@ -443,7 +446,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             const regime = globalMarketRegimeFilter.getRegime();
             opinions.push(regimeVote({
               volatilityIndex: regime.volatilityIndex,
-              riskOff: regime.regime === 'TRENDING_BEAR' || regime.regime === 'EXTREME_VOLATILITY',
+              riskOff: regime.regime === 'TRENDING_BEAR' || regime.regime === 'EXTREME_VOLATILITY' || regime.whaleRiskOff === true,
             }));
             if (klines) {
               const pred = predictUpMomentum(klines);
