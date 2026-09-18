@@ -25,6 +25,9 @@ import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
 import { StateStore } from './services/state-store.js';
+import { OpportunityLedger } from './services/opportunity-ledger.js';
+import { OpportunityStrategist } from './services/opportunity-strategist.js';
+import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
@@ -49,6 +52,19 @@ const hub = new OpenCatzHub();
 const swarmEngine = new SwarmConsensusEngine();
 swarmEngine.attachStateStore(stateStore);
 
+// Opportunity lifecycle ledger + Strategist (build step 1-2). Pure additions —
+// the ledger records every fired signal and the Strategist decides which
+// opportunities to re-score and when (throttled by nextReviewAt). The live loop
+// ingests fired signals and records the real approval outcome; nothing here
+// gates execution, so it can never block the existing pipeline.
+const opportunityLedger = new OpportunityLedger();
+const opportunityStrategist = new OpportunityStrategist(opportunityLedger);
+const opportunityPostMortem = new OpportunityPostMortem(opportunityLedger, (success: boolean) => {
+  import('./orchestrator/swarm-learning.js')
+    .then((m) => m.globalSwarmLearning.recordAttributedOutcome(success))
+    .catch((learnErr: any) => console.warn(`[SWARM LEARNING] post-mortem feed failed: ${learnErr.message}`));
+});
+
 // Wire sandboxed StrategyEngine into Swarm Consensus (active strategy can adjust confidence)
 const strategyEngine = new StrategyEngine();
 SwarmConsensusEngine.setStrategyProvider((domain: string) => strategyEngine.getActiveStrategy(domain));
@@ -72,6 +88,21 @@ function gateSignal(payload: any): boolean {
     console.warn(`[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected (confidence ${res.confidenceScore}%) — not posting.`);
   }
   return res.passed;
+}
+
+/** Build an opportunity sighting from a gate-passed call payload (ledger identity). */
+function strategistSightingFrom(item: { payload: import('./agents/shared/agent-contract.js').CallCardPayload; channelName: string }): import('./services/opportunity-ledger.js').OpportunitySighting | null {
+  const payload = item.payload;
+  if (!payload?.contractAddress) return null;
+  const price = parseFloat(String(payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
+  return {
+    chain: String(payload.network || 'robinhood').toLowerCase(),
+    contractAddress: payload.contractAddress,
+    symbol: payload.symbol,
+    source: item.channelName === 'call-meme-robinhood' ? 'swarm:gate' : 'whale:gate',
+    priceUsd: price > 0 ? price : undefined,
+    liquidityUsd: payload.liquidityUsd > 0 ? payload.liquidityUsd : undefined,
+  };
 }
 
 // Rate-limited Discord notification to #opencatz-control-room (never spam)
@@ -111,6 +142,7 @@ async function notifyControlRoom(client: any, key: string, content: string): Pro
 
 const positionManager = new PositionManager();
 positionManager.attachStateStore(stateStore);
+positionManager.attachOpportunityLedger(opportunityLedger);
 const { PositionScanner } = await import('./services/position-scanner.js');
 const positionScanner = new PositionScanner({ positionManager, walletService, stateStore });
 
@@ -388,6 +420,7 @@ if (discordToken && clientId) {
         };
 
         // Dispatch all passed signals to Discord channels & Telegram topics (with dedup)
+        const firedOpportunities: Array<{ id: string; confidence: number }> = [];
         for (const item of dispatchedPayloads) {
           const dedupKey = `${item.channelName}:${item.payload.symbol}:${item.payload.contractAddress || 'N/A'}`;
           if (recentSignals.has(dedupKey)) {
@@ -396,6 +429,20 @@ if (discordToken && clientId) {
           }
           recentSignals.set(dedupKey, now);
           stateStore.setDedupEntry(dedupKey, now);
+
+          // Opportunity ledger: ingest every fired signal so the Strategist can
+          // re-score/re-admit it over time. Never gates anything (fail-soft).
+          try {
+            const sighting = strategistSightingFrom(item);
+            if (sighting) {
+              firedOpportunities.push({
+                id: opportunityStrategist.ingest(sighting).opportunityId,
+                confidence: Number(item.payload.confidenceScore) || 0,
+              });
+            }
+          } catch (ledgerErr: any) {
+            console.warn(`[OPPORTUNITY LEDGER] ingest failed (${item.payload.symbol}): ${ledgerErr.message}`);
+          }
 
           // Phase-1 scorecard + funnel: this signal FIRED — open a predicted-vs-actual entry
           stateStore.incrementFunnel('meme-robinhood', 'fired');
@@ -539,6 +586,43 @@ if (discordToken && clientId) {
           } catch (learnErr: any) {
             console.warn(`[SWARM LEARNING] record failed: ${learnErr.message}`);
           }
+        }
+
+        // Opportunity Strategist: record the real approval outcome for every fired
+        // signal, then decide which opportunities need a re-score and why now.
+        // Fail-soft — never breaks the live loop.
+        try {
+          for (const { id, confidence } of firedOpportunities) {
+            opportunityStrategist.recordDispatch(id, confidence);
+          }
+          const strategyCycle = opportunityStrategist.decide();
+          const tally = new Map<string, number>();
+          for (const d of strategyCycle.decisions) tally.set(d.action, (tally.get(d.action) || 0) + 1);
+          if (tally.size > 0) {
+            console.log(
+              `[STRATEGIST] decisions=${JSON.stringify(Object.fromEntries(tally))} ` +
+              `candidatesToScore=${strategyCycle.nextCandidates.length} readyToEnqueue=${strategyCycle.enqueueCandidates.length}`
+            );
+          }
+          opportunityLedger.flushToDisk();
+        } catch (strategistErr: any) {
+          console.warn(`[STRATEGIST] cycle failed: ${strategistErr.message}`);
+        }
+
+        // Opportunity Post-mortem (build step 4): attribute terminal (closed)
+        // opportunities that never got a finalOutcome and feed the outcome into
+        // swarm-learning weight recalibration. Fail-soft — never breaks the loop.
+        try {
+          const pmResult = opportunityPostMortem.run();
+          if (pmResult.attributedCount > 0) {
+            console.log(
+              `[POST-MORTEM] attributed=${pmResult.attributedCount} fedSuccess=${pmResult.fedSuccessCount} ` +
+              `fedLoss=${pmResult.fedLossCount} neutral=${pmResult.skippedNeutralCount}`
+            );
+          }
+          opportunityLedger.flushToDisk();
+        } catch (pmErr: any) {
+          console.warn(`[POST-MORTEM] cycle failed: ${pmErr.message}`);
         }
 
         // Wallet Auto-Tracking: detect user's own positions + exit alerts

@@ -1,4 +1,5 @@
 import { StateStore } from '../services/state-store.js';
+import { OpportunityLedger } from '../services/opportunity-ledger.js';
 
 export interface OpenPosition {
   id: string;
@@ -43,6 +44,7 @@ export interface ActiveNFTPosition {
 
 export class PositionManager {
   private stateStore: StateStore | null = null;
+  private opportunityLedger: OpportunityLedger | null = null;
 
   // In-memory mirrors for fast access (loaded from StateStore on init)
   private activePositions: Map<string, OpenPosition> = new Map();
@@ -73,6 +75,14 @@ export class PositionManager {
     }
   }
 
+  /**
+   * Attach the OpportunityLedger so position open/exit lifecycle events can be
+   * recorded (MOVED_TO_OPEN / POSITION_EXITED). Optional — no-op without it.
+   */
+  public attachOpportunityLedger(ledger: OpportunityLedger): void {
+    this.opportunityLedger = ledger;
+  }
+
   // ==========================================
   // MEME & SPOT POSITION TRACKING
   // ==========================================
@@ -80,6 +90,7 @@ export class PositionManager {
   public addPosition(position: OpenPosition) {
     this.activePositions.set(position.id, position);
     this.stateStore?.setPosition(position);
+    this.emitPositionEvent(position, 'MOVED_TO_OPEN');
   }
 
   public getActivePositions(): OpenPosition[] {
@@ -87,8 +98,23 @@ export class PositionManager {
   }
 
   public removePosition(id: string): void {
+    const position = this.activePositions.get(id);
     this.activePositions.delete(id);
     this.stateStore?.removePosition(id);
+    if (position) this.emitPositionEvent(position, 'POSITION_EXITED');
+  }
+
+  /** Record a lifecycle event for every ledger identity matching this contract. */
+  private emitPositionEvent(position: OpenPosition, type: 'MOVED_TO_OPEN' | 'POSITION_EXITED'): void {
+    if (!this.opportunityLedger) return;
+    const label = type === 'MOVED_TO_OPEN' ? 'opened' : 'exited';
+    for (const identity of this.opportunityLedger.findByContractAddress(position.contractAddress)) {
+      this.opportunityLedger.recordPositionEvent(
+        identity.opportunityId,
+        type,
+        `position ${position.id} ${label} (${position.symbol})`
+      );
+    }
   }
 
   /**

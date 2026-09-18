@@ -139,6 +139,17 @@ export class SwarmLearningEngine {
     this.saveState();
   }
 
+  /**
+   * Feed a terminal outcome directly from the OpportunityLedger post-mortem
+   * (not tied to a specific tracked signal price). Rewards/penalizes the same
+   * weight set that price-driven TP/SL outcomes do. Fail-soft: no-op on a
+   * non-boolean input.
+   */
+  public recordAttributedOutcome(success: boolean): void {
+    this.recalibrateWeights(Boolean(success));
+    this.saveState();
+  }
+
   private recalibrateWeights(isSuccess: boolean): void {
     if (isSuccess) {
       // Reward smart money and liquidity weights
