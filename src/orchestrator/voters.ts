@@ -91,19 +91,39 @@ export function quantVote(signalConfidence: number, reasons: string[] = []): Vot
   return { voter: 'quant', score: Math.max(0, Math.min(100, signalConfidence)), reasons };
 }
 
-/** Helper: security vote is fail-closed — 0 on audit failure, 100 on pass (plus holder notes subtract below 100). */
-export function securityVote(auditPassed: boolean, penalties: string[] = []): VoterOpinion {
+/**
+ * Helper: security vote is fail-closed — 0 on audit failure, 100 on pass.
+ * `penalties` (rug features, holder concentration) subtract 10 each; `botRisk`
+ * (0-100, from BotDetectionService) applies a scaled safety demerit on top.
+ */
+export function securityVote(auditPassed: boolean, penalties: string[] = [], botRisk = 0): VoterOpinion {
   if (!auditPassed) {
     return { voter: 'security', score: 0, reasons: ['security audit failed — fail-closed'] };
   }
-  const score = Math.max(0, 100 - penalties.length * 10);
-  return { voter: 'security', score, reasons: penalties.length > 0 ? penalties : ['audit passed'] };
+  let score = 100 - penalties.length * 10;
+  const reasons = penalties.length > 0 ? [...penalties] : ['audit passed'];
+  if (botRisk > 0) {
+    const demerit = botRisk >= 80 ? 30 : botRisk >= 60 ? 20 : botRisk >= 40 ? 10 : 5;
+    score -= demerit;
+    reasons.push(`bot-risk ${Math.round(botRisk)}`);
+  }
+  return { voter: 'security', score: Math.max(0, score), reasons };
 }
 
-/** Helper: whale vote from GMGN smart-money/KOL flow — accumulation lifts, heavy sells/full-closes cap it. */
-export function whaleVote(trades: VoterContext['trackTrades'] = []): VoterOpinion {
+/**
+ * Helper: whale vote from GMGN smart-money/KOL flow — accumulation lifts,
+ * heavy sells/full-closes cap it. `botRisk` (0-100) CAPS accumulation evidence:
+ * bot-driven flow is untrustworthy, so a high bot risk floors the whale score
+ * even if the trade feed shows heavy buying.
+ */
+export function whaleVote(trades: VoterContext['trackTrades'] = [], botRisk = 0): VoterOpinion {
   if (!trades || trades.length === 0) {
-    return { voter: 'whale', score: 50, reasons: ['no smart-money flow data — neutral'] };
+    const reasons = botRisk >= 60 ? [`bot risk ${Math.round(botRisk)} — flow not trusted`] : ['no smart-money flow data — neutral'];
+    return {
+      voter: 'whale',
+      score: botRisk >= 60 ? 40 : 50,
+      reasons,
+    };
   }
   let buys = 0;
   let sells = 0;
@@ -121,7 +141,15 @@ export function whaleVote(trades: VoterContext['trackTrades'] = []): VoterOpinio
     `smart-money buys $${(buys / 1000).toFixed(1)}k / sells $${(sells / 1000).toFixed(1)}k`,
     exitFlags > 0 ? `${exitFlags} full close(s) detected` : 'no full closes',
   ];
-  return { voter: 'whale', score: finalScore, reasons };
+  let capped = finalScore;
+  if (botRisk >= 60) {
+    capped = Math.min(capped, 40);
+    reasons.push(`bot risk ${Math.round(botRisk)} caps accumulation read`);
+  } else if (botRisk >= 40) {
+    capped = Math.min(capped, 55);
+    reasons.push(`bot risk ${Math.round(botRisk)} limits accumulation read`);
+  }
+  return { voter: 'whale', score: capped, reasons };
 }
 
 /** Helper: regime vote — risk-off caps the score at 45, high volatility adds small caution. */

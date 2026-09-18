@@ -39,6 +39,14 @@ describe('7-voter swarm aggregation', () => {
     expect(securityVote(true, ['concentration penalty']).score).toBe(90);
   });
 
+  it('security vote folds bot-risk demerits (scaled) on top of penalties', () => {
+    expect(securityVote(true, [], 90).score).toBe(70);
+    expect(securityVote(true, [], 65).score).toBe(80);
+    expect(securityVote(true, [], 45).score).toBe(90);
+    expect(securityVote(true, ['rug flag'], 85).score).toBe(60);
+    expect(securityVote(true, [], 90).reasons).toContain('bot-risk 90');
+  });
+
   it('whale vote: accumulation lifts, full closes cap; no data → neutral 50', () => {
     const empty = whaleVote([]);
     expect(empty.score).toBe(50);
@@ -55,6 +63,18 @@ describe('7-voter swarm aggregation', () => {
     ]);
     // netRatio = -0.2 → 42 − 10 (full close) = 32
     expect(exited.score).toBe(32);
+  });
+
+  it('whale vote caps trust when bot risk is high (flow not trusted)', () => {
+    const buyHeavy = [
+      { side: 'buy', amountUsd: 50000, isFullClose: false },
+      { side: 'buy', amountUsd: 30000, isFullClose: false },
+    ];
+    // Without bot risk this would be ~85; with bot risk 70 it must cap at 40.
+    const capped = whaleVote(buyHeavy as any, 70);
+    expect(capped.score).toBeLessThanOrEqual(40);
+    expect(capped.reasons.some((r) => r.includes('caps'))).toBe(true);
+    expect(whaleVote([], 70).score).toBe(40);
   });
 
   it('regime vote: risk-off caps at 45', () => {

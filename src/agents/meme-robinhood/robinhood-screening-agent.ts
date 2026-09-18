@@ -1,6 +1,8 @@
 import { GMGNAdapter, GMGNRawToken, type Chain, type KlineCandle } from '../../adapters/gmgn-adapter.js';
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { globalMarketRegimeFilter } from '../../services/market-regime.js';
+import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
+import { globalRugScoring } from '../../services/rug-scoring.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
@@ -442,8 +444,19 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             if (t.rugRatio !== null && t.rugRatio > 0.15) securityPenalties.push('elevated rug risk');
             if (t.top10HolderRate !== null && t.top10HolderRate > 0.3) securityPenalties.push('holder concentration');
             if (t.creatorClose) securityPenalties.push('dev closed');
+            // Bot-detection (WWW'26) + rug-feature (early-window) materialized
+            // into the safety voters. Fail-open: no fields → neutral 0 risk.
+            const botReport = globalBotDetection.analyze(t);
+            recordBotRiskSample(botReport.botRisk);
+            if (botReport.needsBotKillSwitch) {
+              securityPenalties.push(`CRITICAL bot risk ${botReport.botRisk} — ${botReport.reasons[botReport.reasons.length - 1]}`);
+            } else if (botReport.botRisk >= 40) {
+              securityPenalties.push(`bot risk ${botReport.botRisk} (${botReport.signals.bundle ? 'bundle' : ''}${botReport.signals.sniper ? '+sniper' : ''}${botReport.signals.gradualBundle ? '+gradual' : ''})`);
+            }
+            const rugFeature = globalRugScoring.assess(t);
+            securityPenalties.push(...rugFeature.penalties);
             const opinions: VoterOpinion[] = [
-              securityVote(true, securityPenalties),
+              securityVote(true, securityPenalties, botReport.botRisk),
               { voter: 'quant', score: confidence, reasons: [`detected ${det.type} (post-strategy ${confidence}%)`] },
             ];
             const sent = sentimentMap.get(t.address.toLowerCase());
@@ -456,7 +469,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               if (partialSell > 0) trackTrades.push({ side: 'sell', amountUsd: partialSell, isFullClose: false });
               if (trk.fullCloseTotalUsd > 0) trackTrades.push({ side: 'sell', amountUsd: trk.fullCloseTotalUsd, isFullClose: true });
             }
-            opinions.push(whaleVote(trackTrades));
+            opinions.push(whaleVote(trackTrades, botReport.botRisk));
             const regime = globalMarketRegimeFilter.getRegime();
             opinions.push(regimeVote({
               volatilityIndex: regime.volatilityIndex,

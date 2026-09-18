@@ -14,6 +14,8 @@ import { handleInteraction } from './discord/handlers/interaction-handler.js';
 import { handleControlRoomMessage } from './discord/handlers/message-handler.js';
 import { globalHealthWatcher } from './services/health-watcher.js';
 import { globalMarketRegimeFilter, computeWhaleRiskOff } from './services/market-regime.js';
+import { MarketSentinel, marketSentinelProbe } from './services/market-sentinel.js';
+import { globalBotRiskWindow } from './services/bot-detection.js';
 import { bootstrapDiscordChannels } from './discord/setup/channel-bootstrap.js';
 import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
@@ -676,6 +678,21 @@ if (discordToken && clientId) {
     // Run first screening cycle immediately on startup, then every 5 minutes
     runScreeningCycle().catch((err: any) => console.error('[SCREENING CYCLE BOOT ERROR]', err.message));
     setInterval(runScreeningCycle, 5 * 60 * 1000);
+
+    // MarketSentinel — decoupled risk monitor (arXiv 2601.04687). Runs on its
+    // OWN 60s schedule, completely outside the screening/trading loop. It only
+    // flips the RiskEngineV2 kill-switch on persistent market-wide bot/regime
+    // risk; it never gates or rejects an individual signal.
+    const marketSentinel = new MarketSentinel(
+      marketSentinelProbe(globalBotRiskWindow, globalMarketRegimeFilter)
+    );
+    setInterval(() => {
+      try {
+        marketSentinel.checkAndReact();
+      } catch (err: any) {
+        console.warn(`[MARKET SENTINEL] pass error (${err.message}) — ignored.`);
+      }
+    }, 60 * 1000);
   });
 
   client.on('interactionCreate', (interaction) => {

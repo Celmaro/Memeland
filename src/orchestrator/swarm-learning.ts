@@ -43,6 +43,7 @@ const LEARNING_DEFAULTS = {
 export class SwarmLearningEngine {
   private dbPath: string;
   private outcomes: SignalOutcome[] = [];
+  private verbalReflector = false;
   private weights: SwarmWeights = {
     smartMoneyWeight: 0.35,
     liquidityWeight: 0.25,
@@ -143,11 +144,49 @@ export class SwarmLearningEngine {
    * Feed a terminal outcome directly from the OpportunityLedger post-mortem
    * (not tied to a specific tracked signal price). Rewards/penalizes the same
    * weight set that price-driven TP/SL outcomes do. Fail-soft: no-op on a
-   * non-boolean input.
+   * non-boolean input. When the verbal reflector is ON this observes the
+   * outcome WITHOUT touching the live weights (no-update mode).
    */
   public recordAttributedOutcome(success: boolean): void {
+    if (this.verbalReflector) {
+      this.reflectOnOutcome(Boolean(success));
+      return;
+    }
     this.recalibrateWeights(Boolean(success));
     this.saveState();
+  }
+
+  /**
+   * Toggle the no-update "verbal reflector" mode (arXiv 2510.08068). When ON,
+   * every outcome observation is folded into the win-rate trail and a narrative
+   * reflection is emitted, but the swarm weights are never mutated. This lets a
+   * dry-run/paper phase learn descriptively without corrupting production
+   * consensus.
+   */
+  public setVerbalReflector(on: boolean, persist = false): void {
+    this.verbalReflector = Boolean(on);
+    console.log(`[SWARM LEARNING] Verbal reflector ${this.verbalReflector ? 'ON' : 'OFF'} (weights ${this.verbalReflector ? 'frozen' : 'live'}).`);
+    if (persist) this.saveState();
+  }
+
+  public isVerbalReflector(): boolean {
+    return this.verbalReflector;
+  }
+
+  /**
+   * Emit a no-update narrative reflection on an outcome. Never mutates weights;
+   * stateless aside from a log line. Used directly in verbal-reflector mode and
+   * available for external callers that want commentary without recalibration.
+   */
+  public reflectOnOutcome(success: boolean, context?: string): string {
+    const winRate = this.getWinRatePercentage();
+    const w = this.weights;
+    const narrative = success
+      ? `TRAIN: win → smartMoney ${w.smartMoneyWeight.toFixed(2)} / liquidity ${w.liquidityWeight.toFixed(2)} (frozen; reflector only)`
+      : `TRAIN: loss → devHolding strictness ${w.devHoldingWeight.toFixed(2)} (frozen; reflector only)`;
+    const line = `[SWARM REFLECTOR] ${context ? context + ': ' : ''}${narrative} — live win-rate ${winRate}%, ${this.outcomes.length} outcomes.`;
+    console.log(line);
+    return line;
   }
 
   private recalibrateWeights(isSuccess: boolean): void {
