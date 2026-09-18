@@ -42,6 +42,28 @@ export interface ScorecardEntry {
 }
 
 /**
+ * Phase-2 approval order (Arch 5 ladder) — a gate-passed signal queued for
+ * one-click operator approve/cancel. Approved fills are what unlock Phase-3 AUTO
+ * (N approved + positive expectancy).
+ */
+export interface ApprovalOrder {
+  id: string;
+  domain: string;
+  symbol: string;
+  contractAddress: string;
+  chain: string;
+  entryPriceUsd: number;
+  suggestedSizeUsd: number;
+  confidence: number;
+  thesis: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  createdAtIso: string;
+  decidedAtIso?: string;
+  decidedBy?: string;
+  scorecardId?: string;
+}
+
+/**
  * Token tracked by the wallet auto-tracker — resolved on startup via GMGN token info.
  */
 export interface TrackedToken {
@@ -94,6 +116,9 @@ export interface OpenCatzPersistedState {
 
   // Phase-1 predicted-vs-actual scorecard (Arch 5 ladder)
   scorecard: ScorecardEntry[];
+
+  // Phase-2 approval queue (Arch 5 ladder) — gate-passed signals awaiting operator decision
+  approvalOrders: ApprovalOrder[];
 
   // Metadata
   lastUpdated: string;
@@ -156,6 +181,7 @@ export class StateStore {
       screeningConfigs: {},
       funnels: {},
       scorecard: [],
+      approvalOrders: [],
       lastUpdated: new Date().toISOString(),
       version: CURRENT_VERSION,
     };
@@ -165,6 +191,7 @@ export class StateStore {
   private ensureLatestFields(): void {
     if (!this.state.funnels) this.state.funnels = {};
     if (!Array.isArray(this.state.scorecard)) this.state.scorecard = [];
+    if (!Array.isArray(this.state.approvalOrders)) this.state.approvalOrders = [];
   }
 
   private loadFromDisk(): OpenCatPersistedState {
@@ -214,6 +241,7 @@ export class StateStore {
         screeningConfigs: data.screeningConfigs || {},
         funnels: data.funnels || {},
         scorecard: Array.isArray(data.scorecard) ? data.scorecard : [],
+        approvalOrders: Array.isArray(data.approvalOrders) ? data.approvalOrders : [],
         lastUpdated: data.lastUpdated || new Date().toISOString(),
         version: CURRENT_VERSION,
       };
@@ -509,6 +537,32 @@ export class StateStore {
 
   public getScorecard(): ScorecardEntry[] {
     return this.state.scorecard;
+  }
+
+  // ==========================================
+  // PHASE-2 APPROVAL QUEUE (Arch 5 ladder)
+  // ==========================================
+
+  public getApprovalOrders(): ApprovalOrder[] {
+    return this.state.approvalOrders;
+  }
+
+  public getApprovalOrder(id: string): ApprovalOrder | undefined {
+    return this.state.approvalOrders.find((o) => o.id === id);
+  }
+
+  /** Insert a new approval order at the front of the queue. */
+  public addApprovalOrder(order: ApprovalOrder): void {
+    this.state.approvalOrders.unshift(order);
+    this.scheduleSave();
+  }
+
+  /** Upsert an existing approval order (status/decision updates). */
+  public updateApprovalOrder(order: ApprovalOrder): void {
+    const idx = this.state.approvalOrders.findIndex((o) => o.id === order.id);
+    if (idx >= 0) this.state.approvalOrders[idx] = order;
+    else this.state.approvalOrders.unshift(order);
+    this.scheduleSave();
   }
 }
 

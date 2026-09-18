@@ -22,12 +22,13 @@ import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
 import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
-import { priceAlertService, tradeJournalService, walletService, priceFeedService } from './discord/handlers/interaction-handler.js';
+import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
 import { StateStore } from './services/state-store.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
+import { executeMemeBuy } from './services/approval-execution.js';
 
 dotenv.config();
 
@@ -159,6 +160,7 @@ hub.attachStateStore(stateStore);
 priceAlertService.attachStateStore(stateStore);
 tradeJournalService.attachStateStore(stateStore);
 walletService.attachStateStore(stateStore);
+approvalQueueService.attachStateStore(stateStore);
 
 const loadedSkills = skillLoader.loadAllSkills();
 
@@ -376,6 +378,15 @@ if (discordToken && clientId) {
           if (now - ts > DEDUP_WINDOW_MS) recentSignals.delete(key);
         }
 
+        // Phase-3 AUTO gate expectancy source: TP/SL counts from the live scorecard.
+        const scorecardExpectancy = () => {
+          const closed = stateStore.getScorecard().filter((e) => e.status !== 'OPEN');
+          return {
+            tp: closed.filter((e) => e.status === 'TP').length,
+            sl: closed.filter((e) => e.status === 'SL').length,
+          };
+        };
+
         // Dispatch all passed signals to Discord channels & Telegram topics (with dedup)
         for (const item of dispatchedPayloads) {
           const dedupKey = `${item.channelName}:${item.payload.symbol}:${item.payload.contractAddress || 'N/A'}`;
@@ -388,11 +399,13 @@ if (discordToken && clientId) {
 
           // Phase-1 scorecard + funnel: this signal FIRED — open a predicted-vs-actual entry
           stateStore.incrementFunnel('meme-robinhood', 'fired');
+          let scorecardId: string | undefined;
           {
             const firedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
             if (firedPrice > 0) {
+              scorecardId = `SC_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
               stateStore.appendScorecardEntry({
-                id: `SC_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                id: scorecardId,
                 symbol: item.payload.symbol || 'TOKEN',
                 chain: String(item.payload.network || 'robinhood').toLowerCase(),
                 contractAddress: item.payload.contractAddress || '',
@@ -406,58 +419,76 @@ if (discordToken && clientId) {
             }
           }
 
+          // Phase-2 APPROVAL ladder: queue this gate-passed meme signal as a
+          // PENDING order for one-click Approve/Cancel on the call card. AUTO
+          // stays locked until the approved-fill + expectancy gate opens.
+          let approvalOrderId: string | undefined;
+          if (item.channelName === 'call-meme-robinhood' && item.payload.contractAddress) {
+            const queuedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
+            const order = approvalQueueService.enqueue(
+              {
+                domain: 'meme-robinhood',
+                symbol: item.payload.symbol || 'TOKEN',
+                contractAddress: item.payload.contractAddress,
+                chain: String(item.payload.network || 'robinhood').toLowerCase(),
+                entryPriceUsd: queuedPrice,
+                suggestedSizeUsd: (hub.isAutoExecuteEnabled('meme-robinhood').maxTradeAmount || 0.1) * (queuedPrice || 1),
+                confidence: Number(item.payload.confidenceScore) || 0,
+                thesis: (item.rawReason || item.payload.aiThesis || '').slice(0, 300),
+              },
+              { scorecardId }
+            );
+            approvalOrderId = order.id;
+            console.log(`[APPROVAL] Queued PENDING order ${order.id} for ${item.payload.symbol} (scorecard ${scorecardId || 'n/a'})`);
+          }
+
           // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates with real market quotes, SIGNAL_ONLY skips trade execution.
           const AUTO_EXECUTE_ENABLED = isAutoExecute() || process.env.AUTO_EXECUTE_ENABLED === 'true';
                     const autoExecDomain: string | undefined =
                       item.channelName === 'call-meme-robinhood' ? 'meme-robinhood' : undefined;
           if (autoExecDomain && AUTO_EXECUTE_ENABLED && !isSignalOnly()) {
-            const autoExec = hub.isAutoExecuteEnabled(autoExecDomain);
-            if (autoExec.enabled) {
-              try {
-                // ── RISK GATE (RiskEngineV2 / RiskManager) ──
-                // Never execute (even simulated) when risk limits are hit: global
-                // drawdown cap, per-trade size cap, or kill-switch active. This wires
-                // the previously-dead risk engine into the actual execution path.
-                const riskCheck = hub.getRiskManager().isTradeAllowed(autoExec.maxTradeAmount || 0.1);
-                if (!riskCheck.allowed) {
-                  console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by risk gate — ${riskCheck.reason}`);
-                  await notifyControlRoom(client, `risk:${autoExecDomain}`, `🚫 **RISK GATE BLOCKED** auto-execute ${autoExecDomain} ${item.payload.symbol}: ${riskCheck.reason}`);
-                  break;
-                }
-                if (globalRiskEngineV2.checkKillSwitchStatus()) {
-                  console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED — emergency kill-switch active.`);
-                  await notifyControlRoom(client, 'risk:killswitch', `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`);
-                  break;
-                }
-                if (autoExecDomain === 'meme-robinhood' && item.payload.contractAddress) {
-                  const execRes = await evmTradeAdapter.executeBuyToken({ chain: 'robinhood', tokenAddress: item.payload.contractAddress, amountEth: autoExec.maxTradeAmount || 0.1, slippagePercentage: 1.5 }, walletService);
-                  console.log(`[AUTO-EXECUTE] meme-robinhood ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
-                }
-
-                // Record every auto-executed signal into the trade journal (real data).
-                // Simulated while DRY_RUN=true — journal keeps an OPEN entry for audit/tracking.
+            // Phase-3 AUTO gate: execution only opens once the approved-fill floor
+            // (N > 50) AND positive expectancy (closed win rate > 50%) are proven.
+            const phaseGate = approvalQueueService.canAutoExecute(scorecardExpectancy());
+            if (!phaseGate.allowed) {
+              console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by Phase-3 AUTO gate — ${phaseGate.reason}`);
+            } else {
+              const autoExec = hub.isAutoExecuteEnabled(autoExecDomain);
+              if (autoExec.enabled) {
                 try {
-                  const entryPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
-                  const journalDomain = (item.payload.domain || 'MEME_ROBINHOOD') as any;
-                  tradeJournalService.recordTradeEntry({
-                    id: `TRADE_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                    domain: journalDomain,
-                    symbol: item.payload.symbol || 'TOKEN',
-                    contractAddressOrId: item.payload.contractAddress || item.payload.symbol || 'N/A',
-                    chain: autoExecDomain === 'meme-robinhood' ? 'robinhood' : 'nft',
-                    entryTimestamp: new Date().toISOString(),
-                    entryPriceUsdOrEth: entryPrice,
-                    positionSizeUsd: (autoExec.maxTradeAmount || 0.1) * (entryPrice || 1),
-                    swarmScore: Number(item.payload.confidenceScore) || 0,
-                    strategyUsed: 'auto-execute',
-                    aiThesisSummary: (item.rawReason || item.payload.aiThesis || '').slice(0, 200),
-                    status: 'OPEN',
-                  });
-                  console.log(`[TRADE JOURNAL] Auto-execute recorded: ${item.payload.symbol} (${autoExecDomain}) OPEN entry.`);
-                } catch (journalErr: any) {
-                  console.warn(`[TRADE JOURNAL] Failed to record ${item.payload.symbol}: ${journalErr.message}`);
-                }
-              } catch (err: any) { console.error(`[AUTO-EXECUTE] ${item.payload.symbol} error: ${err.message}`); }
+                  // ── RISK GATE (RiskEngineV2 / RiskManager) ──
+                  // Never execute (even simulated) when risk limits are hit: global
+                  // drawdown cap, per-trade size cap, or kill-switch active. This wires
+                  // the previously-dead risk engine into the actual execution path.
+                  const riskCheck = hub.getRiskManager().isTradeAllowed(autoExec.maxTradeAmount || 0.1);
+                  if (!riskCheck.allowed) {
+                    console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by risk gate — ${riskCheck.reason}`);
+                    await notifyControlRoom(client, `risk:${autoExecDomain}`, `🚫 **RISK GATE BLOCKED** auto-execute ${autoExecDomain} ${item.payload.symbol}: ${riskCheck.reason}`);
+                    break;
+                  }
+                  if (globalRiskEngineV2.checkKillSwitchStatus()) {
+                    console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED — emergency kill-switch active.`);
+                    await notifyControlRoom(client, 'risk:killswitch', `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`);
+                    break;
+                  }
+                  if (autoExecDomain === 'meme-robinhood' && item.payload.contractAddress) {
+                    const execRes = await executeMemeBuy({
+                      evm: evmTradeAdapter,
+                      wallet: walletService,
+                      journal: tradeJournalService,
+                      onExecuted: () => stateStore.incrementFunnel('meme-robinhood', 'executed'),
+                      symbol: item.payload.symbol || 'TOKEN',
+                      contractAddress: item.payload.contractAddress,
+                      entryPriceUsd: parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0,
+                      amountEth: autoExec.maxTradeAmount || 0.1,
+                      confidence: Number(item.payload.confidenceScore) || 0,
+                      thesis: item.rawReason || item.payload.aiThesis || '',
+                      strategyUsed: 'auto-execute',
+                    });
+                    console.log(`[AUTO-EXECUTE] meme-robinhood ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
+                  }
+                } catch (err: any) { console.error(`[AUTO-EXECUTE] ${item.payload.symbol} error: ${err.message}`); }
+              }
             }
           }
 
@@ -467,7 +498,7 @@ if (discordToken && clientId) {
           ) as any;
 
           if (targetChannel && 'send' in targetChannel) {
-            const embedData = buildCallEmbed(item.payload);
+            const embedData = buildCallEmbed(item.payload, { approvalOrderId });
             await targetChannel.send(embedData);
             console.log(`[DISCORD DISPATCH] Posted signal call card for "${item.payload.symbol}" to #${item.channelName}`);
           }

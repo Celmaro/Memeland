@@ -61,4 +61,64 @@ describe('StateStore trackedTokens persistence', () => {
     const store = storeOn(p);
     expect(store.getTrackedTokens()).toEqual([]);
   });
+
+  it('addApprovalOrder + getApprovalOrder round-trips and persists across reloads', () => {
+    const store = newStore();
+    store.addApprovalOrder({
+      id: 'APR_1',
+      domain: 'meme-robinhood',
+      symbol: 'TEST',
+      contractAddress: '0xabc',
+      chain: 'robinhood',
+      entryPriceUsd: 0.5,
+      suggestedSizeUsd: 100,
+      confidence: 85,
+      thesis: 'swarm',
+      status: 'PENDING',
+      createdAtIso: '2026-09-19T00:00:00.000Z',
+    });
+    store.flushToDisk();
+
+    const reloaded = storeOn(dbPaths[dbPaths.length - 1]);
+    const orders = reloaded.getApprovalOrders();
+    expect(orders).toHaveLength(1);
+    expect(orders[0].id).toBe('APR_1');
+    expect(orders[0].status).toBe('PENDING');
+  });
+
+  it('updateApprovalOrder upserts an existing order (status/decision change)', () => {
+    const store = newStore();
+    store.addApprovalOrder({
+      id: 'APR_1',
+      domain: 'meme-robinhood',
+      symbol: 'TEST',
+      contractAddress: '0xabc',
+      chain: 'robinhood',
+      entryPriceUsd: 0.5,
+      suggestedSizeUsd: 100,
+      confidence: 85,
+      thesis: 'swarm',
+      status: 'PENDING',
+      createdAtIso: '2026-09-19T00:00:00.000Z',
+    });
+    const updated = {
+      ...store.getApprovalOrder('APR_1')!,
+      status: 'APPROVED' as const,
+      decidedBy: 'op',
+      decidedAtIso: '2026-09-19T01:00:00.000Z',
+    };
+    store.updateApprovalOrder(updated);
+    const order = store.getApprovalOrder('APR_1');
+    expect(order?.status).toBe('APPROVED');
+    expect(order?.decidedBy).toBe('op');
+    expect(store.getApprovalOrders()).toHaveLength(1);
+  });
+
+  it('loads an empty approvalOrders list for legacy state files without the field', () => {
+    const p = path.join(process.cwd(), 'database', `test_state_store_noapproval_${Date.now()}.json`);
+    dbPaths.push(p);
+    fs.writeFileSync(p, JSON.stringify({ version: 2, openPositions: {}, scorecard: [] }), 'utf-8');
+    const store = storeOn(p);
+    expect(store.getApprovalOrders()).toEqual([]);
+  });
 });

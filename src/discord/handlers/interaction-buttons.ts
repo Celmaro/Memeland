@@ -14,7 +14,10 @@ import {
 } from 'discord.js';
 import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
 import { createDashboardComponents } from '../embeds/dashboard-embed.js';
-import { priceAlertService, walletService, buildDashboardOptions } from './command-handlers.js';
+import { globalRiskEngineV2 } from '../../orchestrator/risk-engine-v2.js';
+import { EVMTradeAdapter } from '../../adapters/evm-adapter.js';
+import { executeMemeBuy } from '../../services/approval-execution.js';
+import { priceAlertService, walletService, tradeJournalService, approvalQueueService, buildDashboardOptions } from './command-handlers.js';
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (interaction.customId === 'wallet_setup_modal') {
@@ -123,6 +126,66 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
     await interaction.deferReply({ ephemeral: false });
     const results = await hub.triggerAgentPass(domain);
     await interaction.editReply(`🔎 **On-Demand Screening Pass Triggered** for domain \`${domain}\`! Audited ${results.length} candidate signals.`);
+  } else if (customId.startsWith('APPROVE_')) {
+    const orderId = customId.slice('APPROVE_'.length);
+    const order = approvalQueueService.getById(orderId);
+    if (!order) {
+      await interaction.reply({ content: '❌ Approval order not found.', ephemeral: true });
+      return;
+    }
+    const approved = approvalQueueService.approve(orderId, interaction.user.username || interaction.user.id);
+    if (!approved) {
+      await interaction.reply({ content: `ℹ️ Order \`${orderId}\` was already decided (status: ${order.status}).`, ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: false });
+
+    // Fail-closed: even an operator-approved fill stays behind the risk gate
+    // (drawdown cap / kill-switch). Nothing executes if risk says no.
+    const autoExec = hub.isAutoExecuteEnabled('meme-robinhood');
+    const amountEth = autoExec.maxTradeAmount || 0.1;
+    const riskCheck = hub.getRiskManager().isTradeAllowed(amountEth);
+    if (!riskCheck.allowed || globalRiskEngineV2.checkKillSwitchStatus()) {
+      await interaction.editReply(
+        `🚫 **RISK GATE BLOCKED** approval for \`${approved.symbol}\` — ${riskCheck.allowed ? 'emergency kill-switch active' : riskCheck.reason}`
+      );
+      return;
+    }
+
+    try {
+      const res = await executeMemeBuy({
+        evm: new EVMTradeAdapter(),
+        wallet: walletService,
+        journal: tradeJournalService,
+        onExecuted: () => approvalQueueService.recordExecuted(approved.id),
+        symbol: approved.symbol,
+        contractAddress: approved.contractAddress,
+        entryPriceUsd: approved.entryPriceUsd,
+        amountEth,
+        confidence: approved.confidence,
+        thesis: approved.thesis,
+      });
+      await interaction.editReply(
+        `✅ **APPROVED & EXECUTED** \`${approved.symbol}\` (\`${orderId}\`)\n` +
+        `• Result: ${res.success ? (res.simulated ? '🟡 SIMULATED ok' : '🟢 LIVE ok') : '🔴 FAILED'}\n` +
+        `• Output: \`${res.outputTokens}\`${res.error ? `\n• Error: \`${res.error}\`` : ''}`
+      );
+    } catch (err: any) {
+      await interaction.editReply(`❌ **APPROVED FILL ERROR** \`${approved.symbol}\`: ${err.message}`);
+    }
+  } else if (customId.startsWith('CANCEL_')) {
+    const orderId = customId.slice('CANCEL_'.length);
+    const order = approvalQueueService.getById(orderId);
+    const rejected = approvalQueueService.reject(orderId, interaction.user.username || interaction.user.id);
+    if (!rejected) {
+      await interaction.reply({
+        content: `ℹ️ Order \`${orderId}\` was already decided${order ? ` (status: ${order.status})` : ' or does not exist'}.`,
+        ephemeral: true,
+      });
+      return;
+    }
+    await interaction.reply({ content: `🚫 **CANCELLED** approval for \`${rejected.symbol}\` (\`${orderId}\`).`, ephemeral: false });
   }
 
 }

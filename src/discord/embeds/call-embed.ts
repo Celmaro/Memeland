@@ -25,7 +25,7 @@ export function encodeSymbolForUrl(symbol: string | undefined | null): string {
   return encodeURIComponent(clean);
 }
 
-export function buildCallEmbed(payload: CallSignalPayload) {
+export function buildCallEmbed(payload: CallSignalPayload, options: { approvalOrderId?: string } = {}) {
   // OpenCatz Master Color Palette
   const colorMap: Record<CallSignalPayload['domain'], number> = {
     MEME_ROBINHOOD: 0xffb7b2,  // Pastel Pink
@@ -315,6 +315,21 @@ export function buildCallEmbed(payload: CallSignalPayload) {
         .setLabel('📊 Chart on DexScreener')
         .setURL(url)
         .setStyle(ButtonStyle.Link)
+    );
+  }
+
+  // Phase-2 APPROVAL ladder: when the signal was queued, the card carries
+  // one-click Approve/Cancel so the operator can authorize (or kill) the fill.
+  if (options.approvalOrderId) {
+    buttonsRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`APPROVE_${options.approvalOrderId}`)
+        .setLabel('✅ Approve')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`CANCEL_${options.approvalOrderId}`)
+        .setLabel('🚫 Cancel')
+        .setStyle(ButtonStyle.Danger)
     );
   }
 
