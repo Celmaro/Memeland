@@ -1,0 +1,48 @@
+{
+  "total": 260,
+  "github": 202,
+  "external": 58,
+  "priorities": {
+    "P1": 92,
+    "P2": 77,
+    "P0": 91
+  },
+  "categories": [
+    {
+      "category": "agents",
+      "count": 7
+    },
+    {
+      "category": "chain-data-infra",
+      "count": 18
+    },
+    {
+      "category": "chain-execution",
+      "count": 11
+    },
+    {
+      "category": "general",
+      "count": 78
+    },
+    {
+      "category": "market-data",
+      "count": 25
+    },
+    {
+      "category": "mcp-data-tools",
+      "count": 31
+    },
+    {
+      "category": "meme-smart-money",
+      "count": 65
+    },
+    {
+      "category": "robinhood",
+      "count": 4
+    },
+    {
+      "category": "trading-risk-research",
+      "count": 21
+    }
+  ]
+}

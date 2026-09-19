@@ -1,0 +1,2622 @@
+[
+  {
+    "id": "SRC-001",
+    "url": "docs.gmgn.ai/index/gmgn-agent-api",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "GMGN Agent API (official agent skills/API overview) - P1. Verdict: Adopt | flags: Private keys must never enter git, logs, chats, or screenshots and must match the public-key pair uploaded for the API key. Hosted-wallet execution and IP allowlisting reduce local transaction construction but increase vendor/custody dependence. No hardcoded secrets or pricing are shown; numeric rate limits are undocumented. The page does not establish RH 4663 support, despite a later GMGN blog claiming website support."
+  },
+  {
+    "id": "SRC-002",
+    "url": "docs.gmgn.ai/index/gmgn-callout-openapi",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "GMGN Callout OpenAPI (official partner callout API) - P1. Verdict: Adopt | flags: Keep SK server-side; exact serialized bytes must be signed and sent. IP allowlists, invalid timestamps, API permissions, and key validity can produce HTTP 401; over-limit is HTTP 429. Decimal values are strings and omitted fields are genuinely absent. The API requires GMGN-issued AK/SK credentials and partner approval form. No hardcoded live keys were found. Chain names are string-based but RH 4663 support is not documented."
+  },
+  {
+    "id": "SRC-003",
+    "url": "gmgnai.github.io/skillmarket-demos/aitrader",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "AI Trader (GMGN skill-market demo) - P2. Verdict: Adapt | flags: Demo data and sample addresses are not a production API contract. LLM is deliberately last and cannot override deterministic safety. The live page is view-only; local execution requires a user-owned key. No hardcoded secret was found. It shows SOL/BSC/Base/ETH/Robinhood labels but does not prove backend RH 4663 coverage or chain-specific semantics."
+  },
+  {
+    "id": "SRC-004",
+    "url": "gmgnai.github.io/skillmarket-demos/memex",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "MemeX (GMGN skill-market demo) - P2. Verdict: Study | flags: Browser localStorage is weaker than Memeland's server-side secret store and could expose a key to XSS or browser compromise. The page is BSC-oriented and does not document RH 4663. Binance Alpha is an additional vendor/data dependency. No hardcoded key was found and pricing/quotas are undocumented."
+  },
+  {
+    "id": "SRC-005",
+    "url": "http://www.predictions.exchange/dex",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - predictions.exchange DEX (dead site). Verdict: Skip dead page (HTTP 410) with no retrievable content; no data or patterns map to a Memeland edge. | flags: none/verdict-ready."
+  },
+  {
+    "id": "SRC-006",
+    "url": "https://985monitor.xyz",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - 985monitor (opaque client-rendered app)`. "
+  },
+  {
+    "id": "SRC-007",
+    "url": "https://alchemy.com",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Alchemy blockchain infrastructure (RH Arc + 100 chains)`n- **What it is:** Alchemy is a hosted blockchain-infrastructure provider across 100+ chains: RPC/JSON-RPC APIs, data APIs, webhooks, enhanced APIs, devtools (faucets, sandbox), and rollup/validator offerings. Landing page and RPC directory confirm support for Robinhood Chain (Arc) - /rpc/robinhood-testnet lists Chain ID 46630 for testnet while the site banner states \"Arc mainnet is live on Alchemy,\" pairing with the Robinhood-chain branding alongside Solana RPC, gRPC, and streaming lanes.`n- **Key pattern:** Standard multi-chain JSON-RPC + enhanced-API pattern; per-chain RPC resource pages with chain id, token, and endpoints; free-tier get-started flow; the Debug/archive and websocket capabilities familiar from the already-adopted RH fast-submit/Nitro/Quoter/txlock execution stack.`n- **For Memeland:** Useful as a resilient fallback RPC provider for RH-4663 mainnet and testnet if the primary node is degraded, and as a model for portable per-chain RPC resource configuration. No memecoin scoring, no keyless data feed - it re-supplies the same RPC/archive primitives already in use.`n- **Costs:** Paid keyed RPC (free tier exists but limits are low); adds an external key + platform dependency with minor portability gain.`n- **Verdict:** Study <provider option; real RH-4663 RPC/archive coverage worth a fallback, but paid key and redundant with existing execution path>`n- **Security/complexity flags:** keyed auth, third-party API key surface; verdict-ready study-as-provider-option.`n. "
+  },
+  {
+    "id": "SRC-008",
+    "url": "https://anchor-lang.com",
+    "kind": "external-source",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Anchor (Solana program framework) - P3. Verdict: Study | flags: Adding Anchor would introduce Rust/Solana toolchain and program-account/transaction-model complexity to a TypeScript/Node EVM bot. Solana authority/account semantics are not interchangeable with EVM contract calls, and no RH-4663 compatibility is claimed. No secrets or paid service requirements were found on the fetched intro page."
+  },
+  {
+    "id": "SRC-009",
+    "url": "https://api.coinpaprika.com",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - CoinPaprika aggregated market API. Verdict: Study keyless aggregated macro/market-breadth feed that complements GMGN for regime signals but cannot cover RH-4663 or memecoin universe. | flags: none/verdict-ready; no key, simple REST, low penetration into core flow."
+  },
+  {
+    "id": "SRC-010",
+    "url": "https://api.dexpaprika.com",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - DexPaprika keyless multi-chain DEX API. Verdict: Adopt keyless multi-chain feed (incl. RH-4663) plus Adapt drain-detection/SSE reserve-streaming pattern to de-couple from GMGN. | flags: none/verdict-ready; keyless and simple REST, low complexity, covers portability to all target chains."
+  },
+  {
+    "id": "SRC-011",
+    "url": "https://app.santiment.net/assets/list?name=decentralized%20exchanges",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Santiment on-chain/social/development metrics. Verdict: Study portable sentiment/network-growth metric patterns; Skip as a live feed because it is a paid key with no RH coverage. | flags: key/verdict-ready; adds a key dependency and GraphQL client without covering the traded universe."
+  },
+  {
+    "id": "SRC-012",
+    "url": "https://arxiv.org/html/2501.00826v3",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "research - LLM multi-agent system for crypto portfolio mgmt (arXiv 2501.00826v3)`n- **What it is:** A UCL/NTU research paper proposing a multi-agent system for automated crypto portfolio management: three modality-specialised agents (a Crypto Agent processing market/on-chain dynamics, a News Agent encoding weekly news sentiment, a Trading Agent fusing all signals for execution), run over one of three communication architectures (hierarchical, collaborative, debate) and one of four capability configurations (zero-shot, chain-of-thought, RAG, skill-augmented), each with a rolling memory window and a ReAct-style traceable-reasoning prompt.`n- **Key pattern:** In a 52-week 2025 backtest over the top-15 L1 tokens, the best config (Hierarchical + Skill) hit +133.52% cumulative return and 1.502 Sharpe, beating single-agent, passive, and deep-learning baselines; a controlled ablation shows the Crypto (market) Agent is the most critical component (its removal cuts return by 42.57pp); the multi-agent advantage is model-agnostic across GPT-4o, GPT-5, Claude Sonnet 4.5. Regime-conditioned evaluation (bull vs bear) is used throughout.`n- **For Memeland:** Validates and sharpens Memeland's existing voter swarm: the ablation insight (the market-data/Crypto agent dominates) argues for weighting/prioritising the data-grounded voters; the regime-conditioned backtest methodology maps directly onto Memeland's calibration/anti-overfit practice; the skill-augmented capability and ReAct traceable-rationale pattern are foldable into voter prompts to keep decisions auditable; the hierarchical-vs-debate architecture question maps to Memeland's layered risk gates and >=80% consensus gate.`n- **Costs:** Pure methodology, no code/dependency to run; requires porting the evaluation design (regime conditioning, ablation, capability configs) into Memeland's existing test harness.`n- **Verdict:** Adapt <transferable methodology: regime-conditioned backtest, ablation, skill-augmentation and agent-weighting patterns to fold into the voter swarm and risk gates>`n- **Security/complexity flags:** research only, no network/key surface; verdict-ready adapt-as-methodology.`n. "
+  },
+  {
+    "id": "SRC-013",
+    "url": "https://birdeye.so",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Birdeye multi-chain DEX analytics. Verdict: Study complementary keyed feed with RH and Solana coverage that adds security/holder/liquidity signals to the voter stack. | flags: key/verdict-ready; adds a key dependency and CU-metered cost without being fully keyless."
+  },
+  {
+    "id": "SRC-014",
+    "url": "https://chainstack.com",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Chainstack managed nodes (generic chain coverage)`n- **What it is:** Chainstack is a managed blockchain-node infrastructure provider: bare-metal/cloud hosted nodes, RPC endpoints, archive access, and multi-provider failover across many networks. The landing page chain list includes Robinhood (Arc) alongside Arbitrum, BNB, Base, Polygon, TRON, Sui and the new EVM chains (Zora, Monad, MegaETH, etc.) through a create-endpoint flow.`n- **Key pattern:** Standard hosted-node + RPC model with network-chainlist enumeration; DevNet/archive tiers and regions - the same primitives as Alchemy/QuickNode rather than a distinct data or signal surface.`n- **For Memeland:** Another generic RPC-node option; adds RH Arc availability but no differentiated data feed, no memecoin/launchpad analytics, and no keyless multi-chain market data. Redundant with the incumbent RPC/QuickNode/provider stack and adds a paid key.`n- **Costs:** Paid node hosting per endpoint; operational rather than informational value; single purpose (RPC) easily duplicated by competitors.`n- **Verdict:** Skip <generic managed-node provider; RH node is the only marginal point and it is redundant with incumbent RPC infra>`n- **Security/complexity flags:** keyed node access, extra external infra; verdict-ready skip as code-to-copy.`n. "
+  },
+  {
+    "id": "SRC-015",
+    "url": "https://coinmarketcap.com/view/memes",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "CoinMarketCap Meme View (meme-token category index) - P3. Verdict: Skip | flags: Category membership and rankings are centralized, dynamic, and potentially stale relative to on-chain liquidity; symbols can collide. The page has sponsored buy links and market/editorial content, so it is unsuitable as a safety oracle. API credentials/pricing must be obtained elsewhere; no hardcoded secret was found. No RH chain guarantee is documented."
+  },
+  {
+    "id": "SRC-016",
+    "url": "https://debank.com/ranking/dex",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - DeBank Cloud wallet/protocol/token API. Verdict: Skip <wallet/portfolio-centric, redundant with GMGN/DexScreener, paid keyed units, no RH-4663 trade edge> | flags: key-based auth, prepaid metering, region-blocked page; verdict-ready skip unless a holder/whale feed above the existing voter stack is specifically wanted."
+  },
+  {
+    "id": "SRC-017",
+    "url": "https://defined.fi/api",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Defined.fi (formerly DEX Guru) trading/analytics platform. Verdict: Skip <closed institutional terminal, redundant wallet/order-flow data, no keyless RH feed, bot-check protected> | flags: client-only JS behind security checkpoint, institutional paywall, opaque data terms; verdict-ready skip."
+  },
+  {
+    "id": "SRC-018",
+    "url": "https://developers.shrimpy.io",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Shrimpy portfolio/rebalancing API (band-based)`. "
+  },
+  {
+    "id": "SRC-019",
+    "url": "https://dex.watch",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - dex.watch DEX dashboard (unreachable). Verdict: Skip <dead/unreachable site, no documented API, redundant with current DEX screener stack> | flags: connection timeout/HTTP 000, no API surface; verdict-ready skip on dead page."
+  },
+  {
+    "id": "SRC-020",
+    "url": "https://dexindex.io",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - dexindex.io DEX market index (unreachable). Verdict: Skip <dead/unreachable site, no documented API, redundant with existing DEX aggregators> | flags: HTTP 000 / no route, no API surface; verdict-ready skip on dead page."
+  },
+  {
+    "id": "SRC-021",
+    "url": "https://dexrabbit.bitquery.io",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - DEXRabbit DEX screener by Bitquery (network-blocked)`. "
+  },
+  {
+    "id": "SRC-022",
+    "url": "https://docs.birdeye.so",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "api-docs - Birdeye Data API reference. Verdict: Study the documented API contract and batch/CU-cost patterns; supported-network table confirms RH coverage. | flags: key/verdict-ready; replacement docs host and key-based auth noted."
+  },
+  {
+    "id": "SRC-023",
+    "url": "https://docs.codex.io/networks",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Codex unified GraphQL crypto data API (RH-4663 covered). Verdict: Adopt <unified keyless-to-MPP GraphQL feed with explicit RH-4663 + all Memeland chains covered and wallet/launchpad analytics; strongest candidate to reduce GMGN coupling> | flags: paid key dependency (mitigated by MPP), third-party indexing trust, new-chain depth unverified; verdict-ready adopt-as-primary-feed-candidate."
+  },
+  {
+    "id": "SRC-024",
+    "url": "https://docs.coincap.io",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "api-docs - CoinCap v3 API (agent-friendly + x402). Verdict: Study <portable agentFriendly/x402/MCP API design; feed itself irrelevant to memecoin + no RH> | flags: accountless x402 prepaid keys, OpenAPI JSON, MCP exposure; verdict-ready study-as-pattern not live feed."
+  },
+  {
+    "id": "SRC-025",
+    "url": "https://docs.dexscreener.com",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "api-docs - DexScreener (docs + API reference). Verdict: Study <keyless free multi-chain fallback + rate-tier/batch patterns; data overlaps GMGN and lacks RH-4663> | flags: keyless public endpoint, tiered rate limits, GitBook docs; verdict-ready study-as-secondary/fallback not new edge."
+  },
+  {
+    "id": "SRC-026",
+    "url": "https://docs.dune.com/api-reference/agents/mcp",
+    "kind": "external-source",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Dune MCP (onchain analytics remote MCP) - P1. Verdict: Adapt | flags: Never put an API key in a committed URL; query-string auth is specifically documented but weaker operationally than headers. OAuth adds browser/refresh-token state. Long `getExecutionResults` polls can exceed a 60-second Codex timeout and leave the transport closed; the docs recommend `tool_timeout_sec = 300` and a session restart after closure. Query scans and materialized refreshes can incur credits; this is a closed, vendor-hosted registry and the fetched docs do not establish RH 4663 coverage."
+  },
+  {
+    "id": "SRC-027",
+    "url": "https://docs.fereai.xyz",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "trading-platform - Fere AI autonomous trading agents (hosted SaaS)`n- **What it is:** Fere AI (docs.fereai.xyz) is a hosted autonomous crypto-trading-agent platform: agents that research, reason, and execute across chains with a built-in wallet (Coinbase CDP security), scheduled strategy automation with cross-run memory, a fere_tools sandbox SDK catalog, gasless cross-chain bridging/swaps, MCP support to drive Fere from Claude/ChatGPT/Cursor, and credits/subscription billing (Lite/Pro/Whale).`n- **Key pattern:** Product pattern of decomposing requests into agent actions with a wallet, strategy-automation-with-memory, and an MCP interface; all behind a closed, credit-metered platform.`n- **For Memeland:** The strategy-automation-with-memory and MCP-drive concepts are mildly interesting as UX patterns, but Fere is a competing closed trading-agent SaaS (credits/paid) that Memeland would never delegate control to; it contributes no data feed, no reusable library, and no RH-4663 or GMGN-reducing edge.`n- **Costs:** Credit-based paid subscriptions for every action; full external custody/control dependency.`n- **Verdict:** Skip <hosted paid trading-agent platform, closed and redundant with Memeland's own engine, no data or reusable pattern>`n- **Security/complexity flags:** closed custody, paid metered usage, external control plane; verdict-ready skip.`n. "
+  },
+  {
+    "id": "SRC-028",
+    "url": "https://docs.mobula.io/guides/gmgn-apis",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Mobula GMGN APIs Guide (public multi-chain alternative comparison) - P2. Verdict: Adapt | flags: “50+ chains” does not establish RH 4663 data quality or contract-level token coverage. The guide is comparative marketing and claims GMGN APIs are not public, so validate freshness, pagination, quotas, and pricing before operating it. No hardcoded key was found. A second vendor adds normalization/cache/budget complexity."
+  },
+  {
+    "id": "SRC-029",
+    "url": "https://docs.moralis.com",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Moralis Web3 data API and Streams (keyed EVM)`. "
+  },
+  {
+    "id": "SRC-030",
+    "url": "https://etherscan.io/dextracker",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Etherscan DEX Tracker. Verdict: Skip <Ethereum-only UI dashboard, no programmatic feed, redundant with GMGN/DexScreener> | flags: bot-protected HTML page, no API for tracker; verdict-ready skip as redundant data surface."
+  },
+  {
+    "id": "SRC-031",
+    "url": "https://ethglobal.com/showcase/agentstrategy-hiyug",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "research - AgentStrategy ETHGlobal multi-agent trading showcase`. "
+  },
+  {
+    "id": "SRC-032",
+    "url": "https://ethglobal.com/showcase/degenagent-zqmdu",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "DegenAgent (ETHGlobal showcase) - P3. Verdict: Study | flags: Automatic execution based on vaguely specified ML/RL conditions is not sufficient for a personal-use bot with an 80-point seven-voter gate. Wallet-based execution and third-party SDKs add key and vendor risk. Showcase claims are not production evidence; no hardcoded secrets were found and no pricing was exposed."
+  },
+  {
+    "id": "SRC-033",
+    "url": "https://ethglobal.com/showcase/meme-sentinels-12xqg",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Meme Sentinels (ETHGlobal showcase) - P2. Verdict: Adapt | flags: This is a showcase description, not an operational API contract or evidence of profitable edge. It adds Hypersync, social APIs, Groq, A2A, Hedera, and custom execution complexity. The no-withdrawal permission boundary is good, but multi-agent orchestration and high-frequency indexing increase failure modes. No hardcoded secrets/pricing were found."
+  },
+  {
+    "id": "SRC-034",
+    "url": "https://geckoterminal.com/api",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - GeckoTerminal API (CoinGecko on-chain). Verdict: Study <keyless multi-chain DEX/new-pool feed complementing GMGN; geo-blocked here and no RH-4663 confirmed> | flags: keyless REST, versioned Beta, 30-cpm cap, geo-block observed; verdict-ready study-as-secondary/fallback feed."
+  },
+  {
+    "id": "SRC-035",
+    "url": "https://github.com/0xBennie/binance-smart-money-oi-monitor",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "0xBennie/binance-smart-money-oi-monitor (TypeScript, ~105 files). Verdict: Adapt (the rate-limit circuit-breaker, weight-budget headroom, batched serial+spacing+jitter sweep, per-symbol hard-timeout, streaming persist, and notional/velocity math — all light, portable, non-GMGN, adoptable in TS for Memeland's RPC/API layer and meme metrics); Skip as a data dependency (Binance-futures-only, undocumented web API, no RH 4663/memecoin coverage). | flags: Credentials are env-only and placeholder-commented in `.env.example` (\"Never commit real tokens\"); no hardcoded secrets found. It reverse-engineers Binance's undocumented web API with browser-spoof headers — this is exactly the kind of fragile, WAF-bait edge that can break on Binance's side (the heavy 418/403 handling is the authors' own scar tissue), and it is Binance/CEX-specific (futures, no RH 4663, no memecoin), plus browser-cookie/token flows elsewhere in the repo. Complexity moderate-high."
+  },
+  {
+    "id": "SRC-036",
+    "url": "https://github.com/0xjeffro/tx-parser",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "0xjeffro/tx-parser (Go, ~73 files). Verdict: Adapt (port program-router + swap schema + mint-resolution + slippage capture to TS/viem, or run as Go sidecar). High value for Solana swap->candle and whale feed."
+  },
+  {
+    "id": "SRC-037",
+    "url": "https://github.com/0xmfox/rabiq",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "0xmfox/rabiq (TypeScript) - RH-4663 token dossier + deployer memory, two-lane RPC throttle. Verdict: Adopt the two-lane RPC throttle, `logsSplit`, and Pons phase/curve-pricing patterns as portable RH-4663 edge code that also reduces GMGN coupling. | flags: No secrets (public RPC, DexScreener, GitHub API); hostile-input sanitization and share redaction handled in test suite; low complexity, verdict-ready."
+  },
+  {
+    "id": "SRC-038",
+    "url": "https://github.com/0xuezhang985/wallet-convergence-alert",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adapt convergence-alert concept as shared signal; Skip the extension"
+  },
+  {
+    "id": "SRC-039",
+    "url": "https://github.com/0xwast3/PELLET",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "0xwast3/PELLET (JavaScript) - RH dormant-wallet wake terminal, ordered risk walls + provider isolation. Verdict: Adopt the ordered first-fail risk-gatechain with `UNKNOWN` refusal and the throw-free provider contract; both are low-coupling, chain-portable, and directly reduce GMGN dependence. | flags: Secrets only in env vars (`FOMO_BEARER_TOKEN`, `REPLYNODES_API_KEY`), none in repo; decision box is pure and unit-tested; verdict-ready."
+  },
+  {
+    "id": "SRC-040",
+    "url": "https://github.com/1009682175845693/bsc-fourmeme-bot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "1009682175845693/bsc-fourmeme-bot (TypeScript, ~17 files). Verdict: Adapt (execution/slippage + fee-on-transfer sell helpers, dry-run pattern for RH/BSC executor) + Skip (volume wash bot, naive copy-trader, incomplete bundler). | flags: Env-only private key with essentially no validation (`validator.verifyConfig` is not a real validator API and would throw at runtime); PRIVATE_KEY required even for dry-run; copy-trader is naive (detects any router tx from target then mirrors into a FIXED `defaultToken` instead of decoding the actual token path, ~7% slippage fixed); volume bot is a rate-limited buy/sell wash-trading loop (integrity problem for Memeland); bundler is half-implemented (only `kind: buy`); no tests; heavy `any` typing. README leaks a (placeholder) Telegram bot token in the doc text."
+  },
+  {
+    "id": "SRC-041",
+    "url": "https://github.com/51bitquant/ai-hedge-fund-crypto",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "51bitquant/ai-hedge-fund-crypto (Python, ~40 files). Verdict: Study - keep the deterministic multi-timeframe indicator library and the pre-computed-position-limit pattern for the quant/risk voters; skip the LangGraph/LLM decision architecture and the platform itself."
+  },
+  {
+    "id": "SRC-042",
+    "url": "https://github.com/555cute/r20-quantum-trader",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "555cute/r20-quantum-trader (Python + Vue/TS, ~479 py + 195 ts/vue). Verdict: Study (regime four-state detector, pure-function backtest metrics, single-source risk-config pattern as TS ports) / Skip (the platform, council/LLM stack, CEX futures execution)."
+  },
+  {
+    "id": "SRC-043",
+    "url": "https://github.com/6551Team/opennews-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "6551Team/opennews-mcp (Python, ~17 files). Verdict: Skip - provider-dependent closed-API MCP wrapper, redundant with existing news/sentiment adapters, no local algorithm to port; token-in-config and WS-query-string are anti-patterns. | flags: Token can live in checked-in config.json (\u0007pi_token) which is easy to leak; WSS_URL?token=... puts the bearer token in a query string (WS path, avoidable). Windows hardcodes WindowsSelectorEventLoopPolicy. Closed commercial API = single-vendor lock-in; no rate-limit/pacing logic of its own (relies on provider)."
+  },
+  {
+    "id": "SRC-044",
+    "url": "https://github.com/a-guard/malicious-validators",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "a-guard/malicious-validators (Python) - Solana sandwich/MEV validator analysis data scripts. Verdict: Skip one-off single-chain MEV data analysis with no portable, tested algorithm. | flags: RPC URL via env `RPC`; no secrets committed; not verdict-worthy code (analysis artifact)."
+  },
+  {
+    "id": "SRC-045",
+    "url": "https://github.com/aahl/mcp-aktools",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "aahl/mcp-aktools (Python, ~7 files incl. vendored day-job). Verdict: Skip for Memeland - wrong domain (China equities + CEX spot), heavy Python data-stack, open-CORS HTTP default is an anti-pattern; cache/indicator patterns add no net edge over existing modules. | flags: HTTP mode binds \u0000.0.0.0 by default on port 80 with CORS allow_origins=[\"*\"] + \u0007llow_credentials=True - client-agnostic open web endpoint, risky if ever deployed. Pulls Eastmoney news over plain http:// and scrapes unofficial endpoints; scraper/fragility risk. Heavy \u0007kshare/pandas dependency tree. No hardcoded keys/credentials found."
+  },
+  {
+    "id": "SRC-046",
+    "url": "https://github.com/aave/skills",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "aave/skills (Markdown skills + MCP config, ~24 files). Verdict: Study (workflow/skill patterns only); Adapt the simulate-then-confirm-from-state conventions into Memeland's execution and post-trade attribution path. Do not adopt the hosted Aave MCP dependency. | flags: No code to audit (markdown skills + an MCP config pointing at Aave's hosted server). The hosted MCP server is an external dependency/trust boundary; keys never handled here. Aave is a lending domain (health factor, collateral) - different mechanics from a memecoin bot, but the workflow discipline transfers."
+  },
+  {
+    "id": "SRC-047",
+    "url": "https://github.com/AgriciDaniel/claude-obsidian",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "AgriciDaniel/claude-obsidian (Python + skills) - local-first Obsidian/Claude knowledge-graph PKM system. Verdict: Skip no trading, market, or execution logic; an Obsidian/Claude knowledge-graph tool whose only transferable idea is broad PKM/ledger organization. | flags: Local-first, no committed secrets, no network trading surface; complexity is high relative to any possible trading value."
+  },
+  {
+    "id": "SRC-048",
+    "url": "https://github.com/AI-PIN/ChainPlusTrader",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "AI-PIN/ChainPlusTrader (TypeScript) - multi-chain DEX trading platform (ETH/Base/BNB/SOL) with per-network retry + V3 pool discovery. Verdict: Adapt the Uniswap V3 fee-tier pool discovery and the per-network, error-classified retry backoff; skip the monolithic platform. | flags: Private keys loaded in server process (key-custody risk); no tests; web3-based and heterogeneous across chains; extract only the small utilities, verdict-ready."
+  },
+  {
+    "id": "SRC-049",
+    "url": "https://github.com/AI4Finance-Foundation/FinRobot",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "AI4Finance-Foundation/FinRobot (Python, large — ~250+ files across finrobot/, finrobot_equity/, web_app, tutorials). Verdict: Skip — heavy LLM/equities research platform; no on-chain/memecoin edge, not chain-portable, high infra+API cost, and its LLM-orchestrates-deterministic-core philosophy is already better served by lighter sources in this audit. | flags: Heavy: AutoGen/pyautogen, langchain, OpenBB, marker-pdf, backtrader, pandas/numpy pins, pinning python <3.12. Equities-specific throughout (SEC filings, earnings calls, tickers, financial statements) — nothing about DEX/memecoin/on-chain. `config_api_keys` and `OAI_CONFIG_LIST` contain only placeholders (\"YOUR_...\", \"<your key here>\") — no hardcoded secrets committed (good). Report examples embed nothing sensitive. Requires multiple paid API keys (OpenAI/Azure, Finnhub, FMP, SEC, Reddit, Twitter) and LLM spend."
+  },
+  {
+    "id": "SRC-050",
+    "url": "https://github.com/akanz/onchain-trading-bot",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "akanz/onchain-trading-bot (TypeScript/NestJS, ~95 files incl. tests). Verdict: Adapt (deterministic gate scorer, Wilson qualification, co-buy cluster + price-chase, surge attribution, weighted rate gate - port as pure TS functions). Skip the NestJS/Mongo/Telegram app scaffolding and the GMGN-only data layer."
+  },
+  {
+    "id": "SRC-051",
+    "url": "https://github.com/alexskin/memeoy",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "alexskin/memeoy (TypeScript/Next.js, ~200 files). Verdict: Adapt (paper fill simulator, bounded self-tuning tuner, fail-closed filter chain, momentum/revival evaluators, wallet-reputation-from-snapshots; each into existing shared services/voters) + Study (LLM degen-score vibe check as advisory sentiment input) + Skip (Next.js dashboard + Turso public-mirror + whole-platform wholesale - heavy for personal use). | flags: No hardcoded secrets found (all env-driven); `WALLET_PRIVATE_KEY` read only at live-swap signing, never logged; paper-by-default is genuine. Helius key is auto-extracted from the RPC URL query param (minor smell). The LLM decision layer makes \"buy\" impossible without a key (fail-closed, good). Complexity is high for Memeland's \"practical personal deployment\" bar if adopted wholesale: Next.js dashboard + worker + SQLite/Turso sync + Helius + several heavy Solana SDKs; ~200 files. LLM per-candidate degen scoring is cost-heavy."
+  },
+  {
+    "id": "SRC-052",
+    "url": "https://github.com/alpacahq/alpaca-mcp-server",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "alpacahq/alpaca-mcp-server (Python, ~20 files incl. Helm chart + tests). Verdict: Adapt the trust-boundary envelope, per-tool output-risk registry, timeout-idempotent order submission, and toolset allowlist (small TS middleware for Memeland's LLM surfaces + executor); Skip the Alpaca brokerage/CEX data plumbing itself. Well-tested reference-grade security patterns, no memecoin/on-chain edge. | flags: Keys only from env (no hardcoded secrets found). Requires API keys for most functionality; US-brokerage-specific. Moderate code size + FastMCP/Python stack; secrets to Helm chart. No obvious unsafe defaults; paper-mode default is fail-safe. No crypto on-chain data."
+  },
+  {
+    "id": "SRC-053",
+    "url": "https://github.com/AmadeusGB/alpha-arena",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "AmadeusGB/alpha-arena (Python MVP, ~13 files). Verdict: Skip - thin CeX-only MVP with broken standalone dependency and no edge over Memeland's deterministic-consensus + fail-soft LLM voters. (Note near-duplicate with SRC-171 alpha-arena-okx.)"
+  },
+  {
+    "id": "SRC-054",
+    "url": "https://github.com/andreysuperiorgit/aegis",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "andreysuperiorgit/aegis (JavaScript/Node) - multi-chain smart sniper with EVM scam scanner + Grok AI risk analysis. Verdict: Adopt the RH/EVM scanner (ZeroAddress owner, selector scan, bundle detection, weighted tiered scoring) into the security/rug-risk voter; skip the Grok dependency and sniper plumbing. | flags: Uses XAI_API_KEY env for optional Grok; in-process signer custody for sniper; bytecode scanning is heuristic (not full verification); the EVM scanner logic itself is clean and verdict-ready."
+  },
+  {
+    "id": "SRC-055",
+    "url": "https://github.com/Argona7/stampede",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Argona7/stampede (Python) - RH rotation radar, calibrated verdicts, risk sizing, and honest paper ledger. Verdict: Adopt the portable RPC failover/accounting and distinct-wallet rotation weighting; Adapt the calibrated hard walls, Kelly/volatility sizing, and next-block paper ledger into existing Memeland risk and simulation layers. | flags: Read-only by default and API keys are redacted from errors/logs; optional Alchemy/HyperSync credentials and SQLite persistence need secret hygiene; classifier/policy thresholds are overfit risks and require calibration before live use."
+  },
+  {
+    "id": "SRC-056",
+    "url": "https://github.com/ArgosSystems/Smart-Money-Tracker",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adapt scanner abstraction+accumulation+priority-scoring; Study platform; Skip wholesale"
+  },
+  {
+    "id": "SRC-057",
+    "url": "https://github.com/asavinov/intelligent-trading-bot",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "asavinov/intelligent-trading-bot (Python) - column-oriented ML feature engineering, extremum labeling, threshold signals. Verdict: Study the extremum-label + interval-precision methodology for Memeland's calibration/anti-overfit work, and the buy/sell score combination for voter fusion; do not adopt the framework. | flags: No secrets, no network trading; pure offline research code. Verdict-ready as a methodology reference only."
+  },
+  {
+    "id": "SRC-058",
+    "url": "https://github.com/atilaahmettaner/tradingview-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "atilaahmettaner/tradingview-mcp (Python, ~90 files incl. tests + coinlists). Verdict: Adapt the walk-forward train/test + overfitting verdict concept into Memeland's quant/learning gate (port to TS, measure OOS Sharpe of consensus/voter strategies); Study the zero-dep indicator + backtest engine as a reference for Memeland's deterministic quant layer; Skip the MCP server wholesale (CEX-focused, heavy, Python/pandas, screeners). Not a memecoin/chain-edge source. | flags: No hardcoded secrets; keys/tokens/proxy creds all from env (.env.example). Marketaux token optional (graceful stub). Moderate-to-large Python/pandas dependency tree; \tradingview-screener pinned ==3.0.0 due to silent behavior change. Scrapes public Yahoo/screener endpoints (fragility risk). CEX/stock domain, not on-chain."
+  },
+  {
+    "id": "SRC-059",
+    "url": "https://github.com/autonsol/sol-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "autonsol/sol-mcp (JS/Node ESM, ~7 files; 1 large server.js 1870 lines). Verdict: Skip — closed-vendor MCP proxy, no reusable algorithmic edge, Solana-only, opaque risk methodology. (Only marginal \"Study\" of its zod-schema MCP tool pattern, already seen better in SRC-052.) | flags: No hardcoded secrets in repo (x402 configured via env with safe defaults); but all proprietary risk/momentum logic is server-side and unverifiable — no data lineage. Free tier rate-limits and obscures scores. `preview_wallet` may surface PII-ish wallet holdings without auth in free tier. No local algorithmic edge to audit; risk-score methodology is opaque."
+  },
+  {
+    "id": "SRC-060",
+    "url": "https://github.com/Benita2001/SpecterAI",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Benita2001/SpecterAI (Python/TypeScript) - Solana wallet-consensus and zombie-token paper agent. Verdict: Adapt the bounded multi-wallet consensus and bot-filter features; skip Birdeye, Claude, dashboard, and the zombie agent as a complete subsystem. | flags: Birdeye and Anthropic keys are environment variables, but the server-side agent and Telegram integrations widen secret exposure; no live signer is needed because execution is paper-only. Single-chain hosted API coupling is verdict-limiting."
+  },
+  {
+    "id": "SRC-061",
+    "url": "https://github.com/BikeTysonDegen/gmgn-terminal-bot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "BikeTysonDegen/gmgn-terminal-bot (C#/.NET WPF, ~60 files incl. tests). Verdict: Adapt (leader-bag sell-fraction tracking, watermark/dedupe poll loop, source/executor interface split, offline-replay test pattern) + Skip (GMGN-unofficial coupling, Cloudflare fragility, plaintext key-at-rest, WPF app, whole-platform). | flags: No hardcoded secrets found; `PrivateKey` is only a stub for a future live executor and is stored locally in `config.json` (plaintext key at rest - flagged in-app but still plaintext). GMGN access is unofficial: most endpoints sit behind Cloudflare browser-TLS checks, 403 on datacenter IPs, needs residential proxy; client gracefully logs + falls back to offline feed. Solana/GMGN-specific only; a WPF app has no value for Memeland's TUI/Discord/Telegram/REST surfaces. PaperBroker uses a flat placeholder fee, not realistic curve+priority fees."
+  },
+  {
+    "id": "SRC-062",
+    "url": "https://github.com/BlockRunAI/awesome-finance-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study as discovery index; Skip as integration dependency"
+  },
+  {
+    "id": "SRC-063",
+    "url": "https://github.com/blockscout/blockscout",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "blockscout/blockscout (Elixir, ~3480 files). Verdict: Skip as a component; Study the `RequestCoordinator`/`RollingWindow` backoff + batched ERC-20 `eth_call` pattern if RPC failover ever needs adaptive per-method throttling. | flags: Massive monorepo (Postgres-backed DB, Docker, Kubernetes, GraphQL); not a component you copy. No hardcoded secrets seen; RPC/db config via env. Heavy maintenance surface; Elixir/OTP runtime is foreign to Memeland's Node stack."
+  },
+  {
+    "id": "SRC-064",
+    "url": "https://github.com/bmoscon/cryptofeed",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "bmoscon/cryptofeed (Python, ~800MB repo incl. all exchange impls + test data; core package ~20 files). Verdict: Adapt - port the closed-candle timing, watchdog+backoff reconnect loop, raw-message observer tap, 429 handling, and normalized-schema taxonomy as small building blocks. Skip the full cryptofeed framework and CEX-specific exchange layer (no DEX/on-chain feeds). | flags: No hardcoded secrets in the core (config via env/config file). Market-data only - no order placement/execution code, so no signing surface to compare. `aiohttp`/`websockets` deps make the asyncio pattern portable but framework-heavy; the per-exchange layer is CEX-specific (no on-chain/DEX feeds), so only the ingestion/resilience skeleton transfers."
+  },
+  {
+    "id": "SRC-065",
+    "url": "https://github.com/brokermr810/QuantDinger",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "brokermr810/QuantDinger (Python/FastAPI + JS frontend, huge SaaS, ~600 py + admin UI) — near-duplicate: this IS `OpenByteInc/QuantDinger` (SRC-177) mirror/fork; product of Open Byte Inc.. Verdict: Adopt (fee-aware trailing-exit breakeven + free-balance spot sizing + idempotent fill/PnL reconciliation as TS modules) / Skip (the platform itself). See SRC-177 for the same repo; audit once, apply findings to both."
+  },
+  {
+    "id": "SRC-066",
+    "url": "https://github.com/buddies2705/awesome-memecoin-trading",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "buddies2705/awesome-memecoin-trading (Markdown curated list, 4 files). Verdict: Study (as a discovery/reference list for Memeland's tooling gap analysis, mainly to confirm category landscape and pitfalls — e.g. which providers are Solana-only vs EVM-portable); Skip as anything adoptable (no code, sponsor-biased, no RH 4663 edge). | flags: Contains many affiliate/referral links (marked 🎟️) and heavily promotes Bitquery as the featured sponsor data layer — treat endorsements as marketing, not neutral analysis. Several listed tools are closed, GMGN-style paid SaaS. No code/keys to audit."
+  },
+  {
+    "id": "SRC-067",
+    "url": "https://github.com/build23w/fdv.lol",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "build23w/fdv.lol (JavaScript) - client-side SOL memecoin radar with a multi-policy sell engine. Verdict: Adapt the HWM trailing hard-stop, profit-lock floor, momentum-fade, and rug blacklist exit policies; skip the rank/shill, LLM agent, and browser dashboard. | flags: Contains client-side RPC handling and encrypted/decryptable data (shill CSVs, ads), plus LLM agent keys; heavily obfuscated/minified vendor code; risk of carrying failure-silent try/catch around all policies. Verdict-ready only for the isolated exit-policy patterns."
+  },
+  {
+    "id": "SRC-068",
+    "url": "https://github.com/ccxt/ccxt",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ccxt/ccxt (TypeScript, monorepo, 100+ CEX exchange implementations) - P2. Verdict: Adapt (port the `Precise` `bigint`-decimal math class and the leaky-bucket Throttler as small, dependency-free TS primitives for Memeland's quoting/sizing + RPC 429 pacing); Skip the ccxt library itself (CEX-only, no DEX/RH-4663/on-chain coverage, heavy 100+-exchange abstraction not used). | flags: No committed secrets (exchange keys are runtime credentials, never in-repo). CEX-only surface: ccxt's unified API covers centralized order-book exchanges — no DEX/AMM/rug/memecoin/RH-4663/on-chain logic at all. Adding it as a dependency would drag in a massive multi-exchange abstraction that Memeland does not use (Memeland trades RH 4663 + Solana + BSC on-chain, not via CEX order books). Only the two small primitives (`Precise`, Throttler) transfer."
+  },
+  {
+    "id": "SRC-069",
+    "url": "https://github.com/chainbase-labs/manuscript-core",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chainbase-labs/manuscript-core (Rust/Go) - omnichain data streaming language and Flink runtime. Verdict: Skip heavy monolithic chainbase data-streaming framework with no transferable trading or risk algorithm; rejects Memeland's low-complexity, chain-portable goals. | flags: Large multi-language attack surface and dependency footprint; no secrets in the inspected surface but huge operational complexity and an external hosted-data coupling; verdict-ready as a skip."
+  },
+  {
+    "id": "SRC-070",
+    "url": "https://github.com/chainstacklabs/fomo-solana-rh-listeners",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study listen/wallet-resolve arch; Adapt RPC-listener pattern to RH/other EVM"
+  },
+  {
+    "id": "SRC-071",
+    "url": "https://github.com/chainstacklabs/pumpfun-bonkfun-bot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chainstacklabs/pumpfun-bonkfun-bot (Python 3.11, ~120 files incl. IDLs/learning-examples). Verdict: Adapt (RPC deadline + null-result fill handling, `TradeResult.failure_reason`, token-bucket limiter, dynamic priority/fee median for the Solana executor) + Study (extreme-fast zero-RPC event-driven buy as a Solana-feed concept; platform/listener abstraction shape) + Skip (wholesale - Python, heavy, Solana-only, not-for-production). | flags: No hardcoded secrets found; private key env-driven, keypair loaded at start. Complexity is high for personal use: geyser proto/gRPC, four listeners, platform factory, IDL parsing, multiple IDL JSONs; Python 3.11 + solana/solders/grpcio. Solana-only; author keeps a scam-alert and a not-for-production banner. Learning examples are standalone and do not sign."
+  },
+  {
+    "id": "SRC-072",
+    "url": "https://github.com/chasepal/gmgn-wallet-holdings",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chasepal/gmgn-wallet-holdings (JS/Chrome extension, ~17 files). Verdict: Adapt (port `lib/holdings.js` batch-RPC + `lib/chains.js` chain/alias config + cache/in-flight dedupe as a local holdings watcher; add hold-duration/positioning on top) + Skip (extension UI, FOMO session bridge wholesale). | flags: Minimal permission surface (`storage`, `webRequest`) asserted in tests; sender-origin trust check before serving FOMO data; bearer stored only in memory, never on disk. Public RPCs see your wallet+token queries (documented tradeoff). Body logic has a decent footnote: it only reads balances; doesn't do hold-duration tracking by itself (that must be layered on)."
+  },
+  {
+    "id": "SRC-073",
+    "url": "https://github.com/ChipaDevTeam/GmGnAPI",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Skip (redundant with official OpenAPI, fragile SRP/captcha auth)"
+  },
+  {
+    "id": "SRC-074",
+    "url": "https://github.com/crownobyl/trenchkit",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "crownobyl/trenchkit (Python, ~24 files). Verdict: Study (port the metric formulas as RH 4663 analytics queries; not code to integrate at runtime). | flags: No hardcoded secrets seen. Data obtained only via Flipside MCP SQL — no own RPC/paid API/GMGN dependency (GMGN appears only as an explorer deep-link). No fill simulation / execution — CSV-analytic output only."
+  },
+  {
+    "id": "SRC-075",
+    "url": "https://github.com/ctubio/Krypto-trading-bot",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ctubio/Krypto-trading-bot (C++) - self-hosted low-latency market-making bot with fair-value and EWMA trend-position model. Verdict: Study the EWMA-of-EWMA fair-value smoothing and trend-diff auto-position as possible voter/sizing inputs; skip the C++ market-making engine for Memeland. | flags: No committed secrets found; a large native build surface and centralized-exchange key handling would require hardening; verdict-ready as a Study reference for the EWMA/trend math only."
+  },
+  {
+    "id": "SRC-076",
+    "url": "https://github.com/cvxv666/fomo-robinhood-radar",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adapt resolve/track/safety patterns (RH-first, port to TS); Study full Telegram app"
+  },
+  {
+    "id": "SRC-077",
+    "url": "https://github.com/danilobatson/ai-trading-agent-gemini",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "danilobatson/ai-trading-agent-gemini (TypeScript/Next.js, ~25 ts files, light demo). Verdict: Study (LunarCrush social-metrics client/schema + the deterministic positive-indicator social BUY/SELL fallback as a possible secondary input to Memeland's retail-hype voter) / Skip (the platform - demo web app, no execution/risk, paid top-100 API)."
+  },
+  {
+    "id": "SRC-078",
+    "url": "https://github.com/dartkomnitibe/solana-meme-tool",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "dartkomnitibe/solana-meme-tool (marketing README only, 1 file). Verdict: Skip — repo publishes no source code, only a sales README; nothing to deep-read or port. | flags: Heavy stack (Next.js 14 + Mongo + Redis + Yellowstone gRPC + Jito + BirdEye + GMGN/TradingView), 8 GB heap, 16 API routes — far from a lightweight edge. Risk signals above are described, not present. Keys \"AES-encrypted in browser\" but secret hygiene depends on user infra; no code to audit for real hardcoded keys."
+  },
+  {
+    "id": "SRC-079",
+    "url": "https://github.com/dbotx/dbot-mcp-servers",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "dbotx/dbot-mcp-servers (TypeScript, ~30 files across 4 packages). Verdict: Skip for ownership reasons (remote execution, closed backend). Study its zod tool-schema style + trading-parameter taxonomy as a spec for Memeland's own TS toolset. | flags: No hardcoded secrets found (API key enforced from env, throws if missing); but key + wallet custody sits entirely on a third-party vendor — code signs nothing locally, so wallet keys OR wallet IDs are remote-trust. Broad default knobs (JITO enabled, 0.1 slippage) are unsafe defaults for a personal bot. All count-life logic (trade execution, order matching) is closed source: unverifiable and a big veto on green-label trust."
+  },
+  {
+    "id": "SRC-080",
+    "url": "https://github.com/degenfrends/solana-rugchecker",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adapt rug-score heuristics (esp Solana); Skip wholesale"
+  },
+  {
+    "id": "SRC-081",
+    "url": "https://github.com/Denzz102/memecoin-agent",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Denzz102/memecoin-agent (Node.js/Express+MySQL, ~25 files). Verdict: Adapt (port the weighted scoring model + smart-wallet-participation + holder-concentration edge; keep AI narrative optional) + Study (whale heuristic is crude — replace with real on-chain whale detection) + Skip (MySQL+Express+dashboard+Telegram stack wholesale). | flags: No private-key handling at all (screener-only) — strong default. Helius key passed in URL query string (`?api-key=`) risks log/proxy leakage (prefer Authorization header). No hardcoded secrets found (all via `.env`). Errors swallowed to fail-open defaults (e.g. holder=100 on failure lowers score → effectively fail-safe toward AVOID). Moderate stack: Express+MySQL+socket.io+Telegram; `config/gmgn.js` is misnamed (it's Helius config) — actual GMGN coupling is zero."
+  },
+  {
+    "id": "SRC-082",
+    "url": "https://github.com/dragon1086/prism-insight",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "dragon1086/prism-insight (Python) - AI stock analysis/trading system with a deterministic regime-scoped entry gate. Verdict: Adapt the deterministic regime-scoped entry gate pattern (fail-closed, floor tables, R/R recompute, vol noise-floor stops, hard-vs-shadow) into Memeland's risk layer; skip the monolithic AI stock system. | flags: The broader repo risks exposure via an OAuth/ChatGPT proxy and many LLM keys; no secrets found in the inspected gate files. Only the self-contained buy_gate logic is verdict-ready for reuse, and it must be re-validated for memecoins."
+  },
+  {
+    "id": "SRC-083",
+    "url": "https://github.com/Drakkar-Software/OctoBot",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Drakkar-Software/OctoBot (Python/asyncio monorepo, ~3200 py files). Verdict: Study (live/sim channel pattern, evaluator plugin-input schema, realistic simulated-exchange backtester) / Skip (the platform)."
+  },
+  {
+    "id": "SRC-084",
+    "url": "https://github.com/dynamolabs/solana-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "dynamolabs/solana-mcp (TypeScript, ~8 files, 2 core src files). Verdict: Adapt — port the risk-scoring rubric, LP/holder-concentration checks, and bundle detection to Memeland's multi-chain stack; the Helius/pump.fun specifics are Solana-only. Lightweight, no secrets, genuinely reusable edge. | flags: No hardcoded secrets (Helius key from `process.env.HELIUS_API_KEY`, empty-string default that produces a broken RPC URL rather than failing fast — a mild footgun). No auth surface (read-only queries). `puppeteer` declared in deps but never imported (dead dependency ~heavy). Solana-specific (Helius + SPL token accounts + pump.fun constants), though the *rubric structure* ports to RH chain/BSC."
+  },
+  {
+    "id": "SRC-085",
+    "url": "https://github.com/edtechre/pybroker",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "edtechre/pybroker (Python, ~65 files, compact backtesting framework). Verdict: Study (read-only reference: BCa bootstrap CI, jackknife profit-factor/Sharpe, Decimal position-ledger with epsilon clamping, declarative stops, walk-forward) - port the small math to TS for Memeland's backtest/replay evaluator; no platform adoption. Consider Adapt for the metric functions if Memeland builds a TS backtest analyzer."
+  },
+  {
+    "id": "SRC-086",
+    "url": "https://github.com/ejfxgit2025/memenet",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ejfxgit2025/memenet (TypeScript, React/Vite + Express + Supabase, ~40 files). Verdict: Adapt (port the fail-closed `classifySignal`/`scoreSignal`/`antiSpam` signal model + multi-source fusion with `Promise.allSettled` + TTL caching for free DexScreener/CoinGecko + `costControl` guardrail) + Skip (React/Supabase social feed and paid Firecrawl/Twitter news channels wholesale). | flags: All keys via `.env` (Supabase anon, OpenRouter, Firecrawl, Twitter bearer) — no hardcoded secrets. Twitter & Firecrawl are paid/gated (Twitter off by default via `ENABLE_TWITTER`). Heavy stack (React + Supabase + Firecrawl + OpenRouter). `whale_activity` is a crude `volume > 0.5×liquidity` heuristic, not real whale tracking; sentiment is keyword-counting. No private-key handling anywhere (platform is read-only data)."
+  },
+  {
+    "id": "SRC-087",
+    "url": "https://github.com/ennriqe/crypto-agent-memecoin-prototype",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ennriqe/crypto-agent-memecoin-prototype (Python, hackathon, ~3 code files + ML artifacts). Verdict: Adapt (port the subgraph swap→OHLCV local candle-builder as a deterministic on-chain data primitive) + Study (LSTM sequence prediction as a research experiment, low-confidence edge) + Skip (CDP AgentKit execution agent + TensorFlow stack wholesale). | flags: CDP MPC wallet export handled (`agentkit.export_wallet()`) with commented-out disk persistence — if enabled, a private wallet file lands on disk. Autonomous mode (\"do something interesting on the blockchain\") with a live wallet is risky. Missing env keys only print a warning (not fail-closed). Massive dependency footprint (TensorFlow/Keras/LangChain/LangGraph/CDP/Web3). Hardcoded Base WETH contract. LLM-generated pandas query is evaluated with `exec`-adjacent semantics — injection-prone. Not a bot you run unattended."
+  },
+  {
+    "id": "SRC-088",
+    "url": "https://github.com/enviodev/hyperindex",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "enviodev/hyperindex (Rust CLI + ReScript core, ~827 files). Verdict: Skip as a framework/dependency; Study the block-range batching + cursor + reorg-guard + dynamic contract-registration pattern to harden the RH chain-flow adapter if reorg handling is currently weak. | flags: Full Postgres-backed indexer + Rust build + ReScript toolchain; heavy to self-operate (memory, DB, migrations). `.env.example` only `ENVIO_API_TOKEN=your-api-token-here` placeholder - no hardcoded secrets. Framework-grade complexity, not a component you lift into a Node bot."
+  },
+  {
+    "id": "SRC-089",
+    "url": "https://github.com/enzoampil/fastquant",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "enzoampil/fastquant (Python, ~53 files, thin backtrader wrapper). Verdict: Skip - thin, backtrader-bound educational wrapper with no chain edge and stale deps; nothing Memeland can use beyond a trivial registry scheme it already has. (No near-duplicate noted.)"
+  },
+  {
+    "id": "SRC-090",
+    "url": "https://github.com/Erfaniaa/financial-dataset-generator",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Erfaniaa/financial-dataset-generator (Python) - small ML dataset generator with forward-window labels and augmentation. Verdict: Study the forward-WMA label and the strided train-row de-correlation for calibration; skip the generator as a tool. | flags: Includes an empty tracked API_KEY file placeholder (0 bytes) and reads the key from disk at runtime; no committed secret value, but the pattern is a secret-hygiene flag. Verdict-ready as a methodology-only reference."
+  },
+  {
+    "id": "SRC-091",
+    "url": "https://github.com/Erfaniaa/financial-indexes-correlation",
+    "kind": "github-repository",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Erfaniaa/financial-indexes-correlation (Python, ~6 files). Verdict: Study (time-series alignment + correlation technique only); Skip as a data source / codebase for Memeland (CEX/equity feeds, toy scale). | flags: API key read from a local `API_KEY` file (not hardcoded) — fine. No hardcoded secrets, no network exposure, no dangerous defaults. Extremely low complexity; but `pd.concat` in a per-row loop is O(n^2)-ish and slow on long ranges."
+  },
+  {
+    "id": "SRC-092",
+    "url": "https://github.com/Erfaniaa/undervalued-crypto-finder",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Erfaniaa/undervalued-crypto-finder (Python) - mean-reversion screen of cryptos below their long moving average. Verdict: Skip a trivial single-indicator daily MA screen with no concrete, testable trading algorithm for Memeland's context. | flags: No secrets or key handling; reads public Yahoo data; no network or wallet surface. Verdict-ready as a skip."
+  },
+  {
+    "id": "SRC-093",
+    "url": "https://github.com/EthanAlgoX/LLM-TradeBot",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "EthanAlgoX/LLM-TradeBot (Python/TypeScript) - multi-agent LLM trading system with risk override/downgrade and profile calibration. Verdict: Adapt the veto/downgrade risk-override-with-audit-reason and the per-bucket min-sample calibration into Memeland's risk gates and voter calibration; skip the multi-agent monolith. | flags: Large surface with broker integration, auth middleware and many env-driven keys; only the risk-override and calibration logic are reusable and must be re-implemented in TypeScript. Verdict-ready for those two patterns."
+  },
+  {
+    "id": "SRC-094",
+    "url": "https://github.com/financial-datasets/mcp-server",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "financial-datasets/mcp-server (Python, ~8 files, single server.py). Verdict: Skip — stock-market vendor proxy, zero algorithmic value, wrong domain. (MCP-tool boilerplate is the only lesson, already covered by better sources.) | flags: No hardcoded secrets (API key read from env, sent as `X-API-KEY` header). Simplicity is a plus but so is triviality. Stock/fundamental focus is entirely off-domain for a memecoin DEX bot."
+  },
+  {
+    "id": "SRC-095",
+    "url": "https://github.com/Fincept-Corporation/FinceptTerminal",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Fincept-Corporation/FinceptTerminal (C++20 / Qt6 + embedded Python) - finance analytics desktop terminal with paid SaaS. Verdict: Skip heavy Qt desktop research monolith whose trading/backtest value is SaaS-gated; nothing portable for a memecoin swarm bot. | flags: Bulk of the repo is proprietary/binary and SaaS-gated; reading it adds heavy monolith complexity with no portable edge. Verdict-ready."
+  },
+  {
+    "id": "SRC-096",
+    "url": "https://github.com/FinStep-AI/ContestTrade",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "FinStep-AI/ContestTrade (Python) - multi-agent equity trading with internal contest: forward-outcome rewards and sharpe-weighted voter allocation. Verdict: Adopt the forward-outcome reward label plus predicted-Sharpe-weighted voter allocation and only-deduct multi-judge critique as Memeland calibration and consensus-weights machinery. | flags: LLM api keys read from python config files (plaintext-ish); loads third-party equity APIs and cached data; no crypto/wallet surface. Only the re-implemented contest math is useful. Verdict-ready."
+  },
+  {
+    "id": "SRC-097",
+    "url": "https://github.com/flash131307/multi-agent-investment",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "flash131307/multi-agent-investment (Python) - deterministic signal-fusion Decision Hub with consistency gates, no LLM in critical path. Verdict: Adopt the consistency-gate lookup, risk-mode dampening, regime-weighted voters, degradation multipliers, and deterministic no-LLM fusion path as Memeland consensus/risk-gate machinery. | flags: API keys (OpenAI, Finnhub, Adanos, Qdrant) in .env via pydantic-settings; SEC EDGAR user-agent and external LLM calls; no wallet/crypto surface. Only the decision-hub math is reusable. Verdict-ready."
+  },
+  {
+    "id": "SRC-098",
+    "url": "https://github.com/freqtrade/freqtrade",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study backtest/hyperopt + risk patterns; Skip wholesale"
+  },
+  {
+    "id": "SRC-099",
+    "url": "https://github.com/ginlix-ai/LangAlpha",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ginlix-ai/LangAlpha (Python 3.13 + FastAPI + LangChain/LangGraph, very large monorepo ~hundreds of files + Next.js web + Electron desktop). Verdict: Study (the OHLCV `Coverage`/`gaps`/`revision`/`watermark` protocol model for Memeland's candle/replay data-integrity; PTC's process-data-in-code pattern for LLM voter context) / Skip (the platform - equities research harness, huge stack, no on-chain/execution edge)."
+  },
+  {
+    "id": "SRC-100",
+    "url": "https://github.com/GMGNAI/gmgn-skills",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adopt wallet-scoring algorithms in whale/copy voter; Study signed-order path"
+  },
+  {
+    "id": "SRC-101",
+    "url": "https://github.com/GMGNAI/skillmarket-demos",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adopt candidate-only + LLM-explainer pipeline reference; Adapt escape-monitor"
+  },
+  {
+    "id": "SRC-102",
+    "url": "https://github.com/GMGNAI/skillmarket-demos/tree/main/aitrader",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "GMGNAI/skillmarket-demos/aitrader (Python 3.10+/FastAPI, ~9 files). Verdict: Adapt (the deterministic-filter→LLM-explain→human-execute pipeline, escape monitor separate from LLM, dev-reputation scoring, per-chain adapter with keyless mock, fixed-fractional sizing + portfolio risk gate, sanitize-before-LLM — all light, portable, and directly cover RH 4663); Skip as a code dependency (Python/FastAPI, GMGN-CLI data lock-in, live trading path unverified on EVM/RH, display-only exit plans). Adoptable as a TS port of the pattern. | flags: `LIVE_TRADING_DISABLED` is currently `False` (live unlocked) — advisory; SPEC itself warns real trading is irreversible and EVM/RH buy/sell is unverified with real funds (only Solana fully tested). It is heavily GMGN-CLI-coupled (data is GMGN's trending/security/portfolio — exactly the dependency Memeland wants to reduce). Known real gap: the TP/SL ladder in the UI (`exit_plan()` + `tp_ladder` CFG) is display-only — `do_buy`'s `swap()` call carries no `--condition-orders`, so exits are not actually submitted (flagged in SPEC §11). Dev-profile fetch does up to ~5 CLIs per evaluated dev (only on top-24, cached). RiskManager state is in-memory (resets on reload). No hardcoded real secrets found. MockGMGN is keyless, so the demo runs out-of-the-box."
+  },
+  {
+    "id": "SRC-103",
+    "url": "https://github.com/GMGNAI/skillmarket-demos/tree/main/memex",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "GMGNAI/skillmarket-demos/memex (HTML/JS single file, 3 files). Verdict: Study (the missing-data→`unknown` handling, AI-never-scores doctrine, and weighted-skill-with-capped-catalyst scoring are genuinely reusable scoring-hygiene patterns, portable and non-GMGN in concept); Skip as a dependency (BSC-only single-file GMGN browser demo, no RH 4663, no backend/chain logic to reuse). Adopt the scoring conventions in Memeland's own RH 4663 safety/candidate model. | flags: Fully GMGN-OpenAPI-dependent and BSC-only in this demo — no Robinhood 4663 (upstream MemeX-Agent is the broader version). It accepts an API key in the browser (localStorage only, no backend to leak it to). Several data categories are deliberately unavailable browser-direct (risk stats, early-buyer full feed, X/Web2) and surfaced as `unknown`, not faked. A 530KB single-file HTML is heavy to maintain, and the \"rules inlined JS\" form is demo-quality. No hardcoded secrets found."
+  },
+  {
+    "id": "SRC-104",
+    "url": "https://github.com/guangxiangdebizi/FinanceMCP",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "guangxiangdebizi/FinanceMCP (TypeScript, ~130 files, multi-package with tests). Verdict: Adapt (router pattern + TA indicators + HTTP hardening) / Skip (the broader equity MCP, its weight, and its domain). | flags: No hardcoded secrets (tokens via env; gateway master key generated). But `cors({ origin: '*' })` on the HTTP endpoint is a permissive default (mitigated by loopback default bind). Overall heavy: dozens of tools, 100+ isolated formatters, Docker/image playbooks, star-history bots — too much machinery for a \"simple/green\" Memeland. Domain-specific (A-shares, fund data) is irrelevant."
+  },
+  {
+    "id": "SRC-105",
+    "url": "https://github.com/GuntharDeNiro/gunbot-quant",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "GuntharDeNiro/gunbot-quant (Python + React/JS, ~25 py + frontend). Verdict: Adopt (port `volume_concentration_pct`, `max_daily_spike_pct`, `volatility_consistency`, distance-from-ATH + liquidity screening metrics and the declarative filter schema into Memeland's universe/bot-rug voters) / Skip (backtest engine & platform - crude fill model, Python, CEX/Gunbot-bound)."
+  },
+  {
+    "id": "SRC-106",
+    "url": "https://github.com/gustaffsonKotte/qlo",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "gustaffsonKotte/qlo (Python) - pump.fun \"slow graduation\" scanner: time-on-curve as organic-demand filter. Verdict: Study the time-on-curve organic-demand filter (evidence-backed, chain-portable-concept) and adopt the early-stop pagination + raw-pool-state pricing verification; skip the single-chain alert-bot shell. | flags: Config holds helius_key and Telegram bot token in a plaintext local config.json (gitignored); the RPC URL embeds the API key in the query string; no hardcoded secrets in the repo. Verdict-ready for the two portable patterns."
+  },
+  {
+    "id": "SRC-107",
+    "url": "https://github.com/h100envy/nerve",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "h100envy/nerve (Python) - seven-node memecoin protocol for Robinhood Chain Uniswap V3 with SENTINEL round-trip simulation, reflexes, and reconcile. Verdict: Adopt SENTINEL eth_simulateV1 round-trip honeypot/tax detection, the bytecode PUSH4 risk-flag scan, and reconcile-by-nonce exactly-once send; plus owns/boundary node discipline, fail-closed scored gates and pinned-block staleness for the swarm. RH-4663 native, no GMGN dependency. | flags: PRIVATE_KEY is env-only, held in a separate signer process and explicitly never placed on an Impulse; Alchemy key in RPC URL; the signer refuses to leak nonce/hash; design is deliberately fail-closed and read-only by construction. No hardcoded secrets in repo. Verdict-ready."
+  },
+  {
+    "id": "SRC-108",
+    "url": "https://github.com/harutocodes/pumpfun-copytrade",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adapt copy-trade sizing/execution + paper-broker for Solana feed; Skip wholesale"
+  },
+  {
+    "id": "SRC-109",
+    "url": "https://github.com/HKUDS/Vibe-Trading",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "HKUDS/Vibe-Trading (Python 3.11+, ~400 files). Verdict: Study (fail-closed figure-grounding gate concept + backtest validation metrics/annualisation + deterministic margin/liquidation model as correctness reference) + Skip (adoption: heavyweight LLM research platform, not an on-chain memecoin spot/perpetual execution edge; not portable across chains). | flags: .env.example is clean (all placeholder keys `sk-xxx`, nothing committed). Heavy stack: langchain>=1.3.9, langgraph 1.2, duckdb, scikit-learn, joblib + many broker connectors (upbit, tushare, IBKR MCP). ~400 files, monolithic. LLM-gate correctness depends on meticulous edge-case handling (Chinese field aliases, metric-kind disambiguation) — a lot to maintain."
+  },
+  {
+    "id": "SRC-110",
+    "url": "https://github.com/HKUSTDial/DeepEar",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "HKUSTDial/DeepEar (Python) - LLM deep-research + financial signal tracking with ISQ multi-dimension signal scoring. Verdict: Study the ISQ weighted multi-dimension signal-quality scoring schema and the dual-model scanner/evaluator + news-ablation evaluation discipline; skip the heavy LLM research/dashboard/monolith. | flags: LLM API keys via .env; a trained model checkpoint and large data files are committed to the repo; no wallet/crypto surface. Not verdict-ready beyond the two portable patterns."
+  },
+  {
+    "id": "SRC-111",
+    "url": "https://github.com/holaplex/indexer",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "holaplex/indexer (Rust, ~576 files). Verdict: Skip - Solana-only geyser/RabbitMQ/Postgres infra, irrelevant to RH EVM and too heavy for a personal bot. | flags: No private keys in `.env` (URLs + exclusion wallet addresses only). Heavy infra: solana validator geyser plugin + RabbitMQ + PostgreSQL + GraphQL + Rust. Requires running/connecting to a Solana validator for live data - operationally expensive and Solana-only."
+  },
+  {
+    "id": "SRC-112",
+    "url": "https://github.com/holdout-labs/lookahead-free",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "holdout-labs/lookahead-free (Python, ~10 files). Verdict: Adopt - port the DAG + linear-time decision-availability checker and the P0/P1 severity + \"value-dependent can't be proven\" honesty boundary as a small TS library; wire it into Memeland's backtest/dry-run attribution so every signal build and trade decision is accompanied by a machine-checkable timing evidence layer. | flags: No network calls, no secrets. Model is a dataclass (not pydantic) with hand-rolled validation - fine for this scope. Small, single-responsibility, ~450 LOC total."
+  },
+  {
+    "id": "SRC-113",
+    "url": "https://github.com/hummingbot/hummingbot",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study connector/controller abstraction; Skip wholesale"
+  },
+  {
+    "id": "SRC-114",
+    "url": "https://github.com/Im-Madhur-Gupta/maverick",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Im-Madhur-Gupta/maverick (TypeScript, NestJS) - meme-coin AI trading agent with structured LLM trading signals and a signal pipeline. Verdict: Study the structured direction/strength/percentage signal schema, the strength-tier gate, and percentage-based partial sizing; skip the Farcaster-social + Fere-API pipeline and the retry-with-duplicates execution path. | flags: Hosted Fere API key and LLM keys via env; wallet-signature auth with nonce/signature utils; acknowledged duplicate-order risk on retry is an anti-pattern to avoid. Verdict-ready for the schema/gate/sizing patterns only."
+  },
+  {
+    "id": "SRC-115",
+    "url": "https://github.com/immortalhowwl/fly-high",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "immortalhowwl/fly-high (Python) - causal evolutionary paper-trading lab for RH chain: next-close fills, depth-capped fitness, cold holdout. Verdict: Adopt the causal next-close simulator (gap-cancelling fills, depth-capped equity/fitness, conservative fee+slippage) and the cold-out holdout + drawdown-penalized fitness search as Memeland's strategy/voter validation discipline. Data-agnostic, chain-portable, no GMGN dependency. | flags: No secrets, no wallet, no keys; pure stdlib Python; public HTTP server binding 0.0.0.0 with strict Host allowlist and same-origin 405 rejection if made public. The discipline of labeling assumptions is a strong model for honest reporting. Verdict-ready."
+  },
+  {
+    "id": "SRC-116",
+    "url": "https://github.com/ironclad-protocol/solana-copy-trading-bot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ironclad-protocol/solana-copy-trading-bot (TypeScript, ~80 files). Verdict: Adapt (sizing, arbitrage-skip, sim-mode, queue patterns into Memeland TS); Skip the Solana DEX parser layer. Rotate/don't reuse the exposed keys. | flags: HIGH severity — live paid-API keys committed in plaintext: Helius key `cf0c20ed-…022c` in `config/index.ts` and `dex/pumpfun/sdk/util.ts`; Jupiter key `46a30830-…42bd` in `dex/jupiter/swap.ts`. Wallet key is env-based. No rug/bundle detection beyond the arbitrage skip; no PnL/leaderboard scoring; copy-trade executes live swaps (paper broker only via SIMULATION_MODE)."
+  },
+  {
+    "id": "SRC-117",
+    "url": "https://github.com/itsnex1s/fomopulse-robinhood-chain-tape",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Adapt fill-parse+resolve+cursor/lag into whale feed (RH); Skip CF/Durable-Object deploy"
+  },
+  {
+    "id": "SRC-118",
+    "url": "https://github.com/jamsturg/crypto-whale-tracker",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Skip (incomplete stub)"
+  },
+  {
+    "id": "SRC-119",
+    "url": "https://github.com/jito-labs/jito-ts",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "jito-labs/jito-ts (TypeScript SDK, ~30 ts files + generated protos, Apache-2.0, Node 20). Verdict: Study (SDK for the future Solana execution leg: Jito bundle + tip-account + confirm-to-final-state loop, Geyser as a non-GMGN data stream; borrow the `Result<T,E>` + retry-with-backoff + token-refresh patterns for Memeland's gateway layer) / Skip (as a current core dependency - RH-chain primary venue, gRPC/auth-keypair weight, older web3.js pin). No near-duplicates noted."
+  },
+  {
+    "id": "SRC-120",
+    "url": "https://github.com/JulienPlanchetCoineo/frostybot-js",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "JulienPlanchetCoineo/frostybot-js (JavaScript) - CEX/tradingview webhook order-execution gateway with target-position sizing. Verdict: Skip CEX-only webhook-to-exchange gateway plumbing; position-target sizing is only marginally related and Memeland already covers sizing with on-chain semantics. | flags: Sizable install-heavy codebase (DB, GUI, encryption module); default-credential SSH/PASS env noted in README; not chain-portable to RH-4663. Verdict-ready."
+  },
+  {
+    "id": "SRC-121",
+    "url": "https://github.com/kabbersokhi-boop/crypto-trend-hunter",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kabbersokhi-boop/crypto-trend-hunter (JavaScript/Python) - Reddit-sentiment to memecoin correlation pipeline with deterministic scoring. Verdict: Skip README/dashboard-driven LLM-sentiment pipeline; only the deterministic momentum formula and per-agent fault-isolation are mildly Study-worthy, neither is a Memeland-specific edge. | flags: OpenAI key read from env; no secrets committed; includes a committed `trends.db`. Verdict-ready."
+  },
+  {
+    "id": "SRC-122",
+    "url": "https://github.com/Kelows/million",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Kelows/million (TypeScript, NestJS) - Solana whale/copy-trading deck with risk gauntlet, consensus, decision log, control-group calibration. Verdict: Adopt the chain-portable risk-gate structure (one-way-door caching, concurrent check chains, distribution grace, owner de-dup consensus, control-group calibration, decision ledger); Solana data adapters are not portable. | flags: No secrets committed (env-based Helius key); self-hosted local tool, `misc` experimental disclaimer. Verdict-ready."
+  },
+  {
+    "id": "SRC-123",
+    "url": "https://github.com/kocer6/MEERKAT",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kocer6/MEERKAT (TypeScript, viem) - RH-4663 native Pons V2 token lifecycle + wallet intelligence, evidence-first and fail-closed. Verdict: Adopt the fail-closed unreadable-gate discipline, evidence-carrying composable scoring with coverage-gated readiness, and per-client admission control + reorg-overlap scanner checks; all map directly to Memeland's risk gates and RH-4663 data layer. | flags: RPC-credential scrubbing in error paths is a good practice to mirror; `no signer` so no signing-risk surface; moderately large codebase but pattern surfaces are small and clean. Verdict-ready."
+  },
+  {
+    "id": "SRC-124",
+    "url": "https://github.com/krakenfx/kraken-cli",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "krakenfx/kraken-cli (Rust, ~370 files). Verdict: Adapt/Study — Adapt the event-sourced paper journal + replay-anchored honest scorecard and MCP-registry/research-LAB patterns in TS; Study the session/timeline and recording-frame design as reference architecture. | flags: Excellent — `secrecy` SecretString wrapping with zeroize on drop, config file 0600 permissions, flag>env>config precedence, private Debug redaction, deliberate `serialize_secret` opt-in. No hardcoded keys found. Complexity is HIGH (large workspace, 9 crates, heavy lints) but it is genuinely an enterprise-grade reference."
+  },
+  {
+    "id": "SRC-125",
+    "url": "https://github.com/kukapay/crypto-indicators-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kukapay/crypto-indicators-mcp (JavaScript CJS, ~12 files). Verdict: Skip — CEX OHLCV passthrough with delegated math and a packaging bug; no ownable edge. (Reference the `indicatorts` library name if Memeland wants a ready TA lib, but prefer SRC-104's zero-dep math.) | flags: `ccxt` is imported in `fetchOhlcvData.js` but missing from package.json dependencies — will fail on a clean install (latent packaging bug). No secrets. But it defaults to CEX OHLCV (Binance), which Memeland memecoins largely don't trade on; timeframe/pair conventions are CEX-centric. All TA logic delegated to third-party libs — no transparency/verification of indicator math."
+  },
+  {
+    "id": "SRC-126",
+    "url": "https://github.com/kukapay/crypto-sentiment-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kukapay/crypto-sentiment-mcp (Python, ~5 files, single main.py). Verdict: Skip — vendor-token passthrough for major-coin sentiment, injection-prone query building. Study the baseline-shift alert pattern (apply to Memeland's own volume/activity series) without adopting the source. | flags: No hardcoded secrets (key from env, fail-fast `raise ValueError` if missing — good). BUT GraphQL queries are built via f-string interpolation of user/LLM-supplied `asset` and `metric` values into the query string — a GraphQL injection vector from a prompt-injection angle (asset strings could alter the query). No validation/escaping. Whole edge is third-party data passthrough (sentiment balances etc. come from Santiment, not computed locally)."
+  },
+  {
+    "id": "SRC-127",
+    "url": "https://github.com/kukapay/dexscreener-trending-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kukapay/dexscreener-trending-mcp (JavaScript CJS, ~4 files, single index.js). Verdict: Skip the vm/page-scrape approach. Study the pair-normalization schema + Markdown/structured dual output and the DexScreener-feed idea, but implement against DexScreener's official JSON endpoints instead (see SRC-084/226). | flags: Running untrusted page JS through `vm.runInNewContext` with regex-extracted code is a code-execution surface (sandbox mitigates but relies on the regex capturing only JSON; `displayErrors:true` leaks internals). Rate-limit-free scraping of DexScreener is ToS-fragile and breaks silently. Hardcoded `CHAIN_URLS` only for bsc/solana — no RH chain 4663. Note: the \"sort by volume\" line is actually commented out (`//const sorted = allPairs.sort(...)`), a bug — output isn't actually sorted."
+  },
+  {
+    "id": "SRC-128",
+    "url": "https://github.com/kukapay/honeypot-detector-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study honeypot.is as EVM witness; Skip MCP wrapper"
+  },
+  {
+    "id": "SRC-129",
+    "url": "https://github.com/kukapay/jupiter-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kukapay/jupiter-mcp (JavaScript CJS, ~4 files, single index.js). Verdict: Skip for Memeland (Solana/Jupiter-only, insecure-by-default signing surface). Adapt at most the order/execute split + mint-decimals conversion into Memeland's own execution layer — but with SRC-052's trust-boundary and tx-allowlist safety. | flags: Private key lives in the same process as an LLM-facing MCP server, and `execute-ultra-order` signs *whatever base64 transaction the model passes* — a classic prompt-injection money-laundering surface (no validation/allowlist of tx contents). That alone is a strong counterexample to Memeland's security design: Memeland should follow SRC-052's trust-boundary envelope + action-allowlist instead of this trust-everything-serialized-tx style. Also destructures `{requestId, transaction, inputMint, outputMint, amount}` but the schema only declares requestId/transaction (latent undefined vars). Solana-only, Jupiter-API coupled (not portable to RH chain/BSC, though Jupiter's pattern of an unsigned-tx/confirm API is portable in concept)."
+  },
+  {
+    "id": "SRC-130",
+    "url": "https://github.com/kukapay/pumpfun-wallets-mcp",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kukapay/pumpfun-wallets-mcp (Python MCP server, ~1 code file). Verdict: Skip — thin proxy over opaque Dune SQL, platform-locked to Pump.fun, no self-contained/portable edge. (Pattern note only: expose self-computed analytics via a thin tool layer rather than proxying someone else's.) | flags: DUNE_API_KEY from env, no hardcoded keys. Broad `except: return 0/\"\"` swallows all errors (read-only so low blast radius, but masks failures). No input validation; `limit` passed straight to Dune. Read-only — touches no funds. Opaque external dependency (Dune Analytics, which needs a paid/tiered API key)."
+  },
+  {
+    "id": "SRC-131",
+    "url": "https://github.com/kukapay/rug-check-mcp",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Skip (redundant, Solana-only, key dependency)"
+  },
+  {
+    "id": "SRC-132",
+    "url": "https://github.com/kukapay/whale-tracker-mcp",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "kukapay/whale-tracker-mcp (Python MCP server, ~1 code file). Verdict: Skip — thin proxy over a whale data source that doesn't cover meme DEX chains; no self-contained or portable edge. | flags: `raise ValueError` if key missing (good fail-fast). `WHALE_ALERT_API_KEY` from env, not hardcoded. No input bounds on `limit`/`min_value`. Read-only, no key handling."
+  },
+  {
+    "id": "SRC-133",
+    "url": "https://github.com/liangdabiao/autogen-financial-analysis",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "liangdabiao/autogen-financial-analysis (Python) - enterprise AutoGen multi-agent equity analysis with VaR/ES risk models and phased orchestration. Verdict: Study the historical/parametric/Monte-Carlo VaR + Expected-Shortfall functions and the LOW/MED/HIGH/CRITICAL threshold-bucket pattern as a tail-risk sizing input; Skip the AutoGen/equity monolith around them. | flags: Standard env-based API keys; heavy dependency surface (scipy, sklearn, AutoGen, FastAPI, orchestration services); no secrets committed. Verdict-ready."
+  },
+  {
+    "id": "SRC-134",
+    "url": "https://github.com/LLMQuant/awesome-trading-agents",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Duplicate of SRC-136 (LLMQuant/awesome-trading-agents), already deep-read in Batch 8 as a curated agent/MCP/skills directory. SRC-135 points at the agents-atlas-gic section of the same repo. No separate deep-read needed."
+  },
+  {
+    "id": "SRC-135",
+    "url": "https://github.com/LLMQuant/awesome-trading-agents#agents-atlas-gic",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Duplicate of SRC-136 (LLMQuant/awesome-trading-agents), already deep-read in Batch 8 as a curated agent/MCP/skills directory. SRC-135 points at the agents-atlas-gic section of the same repo. No separate deep-read needed."
+  },
+  {
+    "id": "SRC-136",
+    "url": "https://github.com/LLMQuant/awesome-trading-agents#mcps-tradingagents-mcpmode",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study as research index; Skip direct integration from listing alone"
+  },
+  {
+    "id": "SRC-137",
+    "url": "https://github.com/LLMQuant/data-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "LLMQuant/data-mcp (TypeScript, ~60 files incl. large test suite). Verdict: Adapt its error-contract + api-provider patterns (and testing rigor) into Memeland; Skip the server/data source itself (vendor-metered, equity-domain, heavy). | flags: No hardcoded secrets (only test fixtures); session-scoped authz + internal secret via env is solid. But it's a vendor-credit-metro meter: every call can deduct credits, and the data is 90% equities/macro/wiki — a heavy dependency surface (fastmcp, zod, tsup build, full test matrix). Crypto support is minimal (CEX-style klines for major coins, ticker in BASE-QUOTE), irrelevant to memecoin DEX tokens."
+  },
+  {
+    "id": "SRC-138",
+    "url": "https://github.com/LuckyOne7777/LLM-Trading-Lab",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "LuckyOne7777/LLM-Trading-Lab (Python) - real-money LLM-managed micro-cap portfolio lab with FIFO exits and peak-capture evaluation. Verdict: Study Peak Capture Ratio as an exit-capture calibration metric and the FIFO lot accounting as a PnL telemetry reference; Skip the LLM-managed portfolio orchestration (LLM in critical path, equities data). | flags: Env-based API keys; artifacts include real trade data/CSVs of the author's live portfolio; the false-rejection TODOs are a good caution about runtime-missing-data handling. Verdict-ready."
+  },
+  {
+    "id": "SRC-139",
+    "url": "https://github.com/Lumiwealth/lumibot",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Lumiwealth/lumibot (Python) - full algo-trading framework: mid+slippage fill model, smart limits, DataSource abstraction. Verdict: Study the mid+slippage/clamp/round-to-tick fill model with per-fill audit payload and the DataSource ABC as the pattern for a pluggable market-data interface to cut GMGN coupling; Skip the monolithic framework itself. | flags: Large attack/dependency surface; `.secrets` template uses env vars; very heavy install; no on-chain secrets handling relevant to Memeland. Verdict-ready."
+  },
+  {
+    "id": "SRC-140",
+    "url": "https://github.com/lunarresearcher/copy",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "lunarresearcher/copy (TypeScript/Node ESM) - CLI-first copy-trading bot with rule walls and webhook executor boundary. Verdict: Study - copy walls and webhook executor state machine are portable and match existing anchors, but need validation against Memeland's current voters before adoption. | flags: Non-custodial by design; secrets (FOMO_BEARER_TOKEN, NATIVE_EXECUTOR_TOKEN) are env-only. README fetch failed over our network, so this review used docs/ARCHITECTURE, docs/SAFETY, docs/STRATEGY plus source. Low complexity."
+  },
+  {
+    "id": "SRC-141",
+    "url": "https://github.com/LW-ARTS/trenchkit",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "LW-ARTS/trenchkit (TypeScript, ~300 files incl tests). Verdict: Adapt — port the scoring/convergence/riskgate architecture (chain-agnostic, fail-closed) but Skip as a GMGN-coupled dependency run as-is (Memeland wants low GMGN coupling). | flags: No hardcoded secrets — config/env-based, key zeroed after load, sanitized on errors (low severity — exemplary). GMGN-centric: signing/auth, condition orders, kline, security data all GMGN API shapes → strong coupling to GMGN data contract. Deterministic fail-closed gates (rug ratio absent → reject) are the standout safety pattern."
+  },
+  {
+    "id": "SRC-142",
+    "url": "https://github.com/lyc0603/copytrading",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "lyc0603/copytrading (Python) - WWW'26 multi-agent manipulation-resistant meme copy trading. Verdict: Study - the t-stat profitability filter and bot-manipulation feature list are worth copying; the Snowflake+LLM pipeline itself is too heavy. | flags: Needs SNOWFLAKE_USER and OPENAI_API from .env; no hardcoded secrets seen. Research/data pipeline complexity is high relative to the portable signal. Verdict-ready once the two algorithms are extracted."
+  },
+  {
+    "id": "SRC-143",
+    "url": "https://github.com/manavaga/web3-signals-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "manavaga/web3-signals-mcp (Python, ~90 files incl. ML models + big research docs). Verdict: Adopt the IC-weight-learning + Platt-calibration + regime-gating + walk-forward-validation methodology as the core of Memeland's scoring edge; Skip the repo's heavy Python ML/Postgres/x402/LLM stack and its major-coin data coupling. Highest-value source so far. | flags: No hardcoded secrets (all keys via env; scanned `0x` addresses are public contracts/hot wallets, not keys; one commented \"never hardcode\" note + default-arg key in a payment bot). But it is heavy: Python ML stack (lightgbm, scikit-learn, scipy, pandas), Postgres, x402/CDP, Anthropic, multi-agent orchestration — overkill for Memeland's \"simple, not too heavy\" goal. LLM rationales add a vendor dependency. Major-coin (BTC/ETH/SOL...) focus with Coinglass/Binance/Arkham data — those feeds don't exist for long-tail DEX memecoins on RH chain 4663."
+  },
+  {
+    "id": "SRC-144",
+    "url": "https://github.com/marc-shade/world-intel-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "marc-shade/world-intel-mcp (Python, ~181 files). Verdict: Skip as a server/dependency (domain mismatch, heavy); Study the per-source circuit-breaker-with-stale-serve pattern for Memeland's market-data/RPC adapter if fail-soft behavior on provider outages is currently a hard cut-off. | flags: Large surface (132 tools, optional Qdrant/vector + dashboard extras); Python stack foreign to Memeland's Node/TS. No hardcoded secrets in deps; free APIs/keyless by design. Domain is geopolitics/macro - most tools are irrelevant to memecoin trading, and the \"vector store + LLM brief\" path is exactly the heavy/LLM overhead Memeland avoids."
+  },
+  {
+    "id": "SRC-145",
+    "url": "https://github.com/marksantiago290/KOLscan-leaderboard-scraping",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "marksantiago290/KOLscan-leaderboard-scraping (Python, 1 file). Verdict: Study (leaderboard field schema as a data-model idea); Skip the scraper as implemented. | flags: No secrets. Extremely fragile: hardcoded hashed CSS classes (`leaderboard_leaderboardUser__8OZpJ`, `leaderboard_totalProfitNum__HzfFO`) and Next.js RSC string-slicing break on any frontend change. Scrapes a public site (ToS/anti-bot risk). No PnL math — reads displayed values only. No risk/sizing/execution logic."
+  },
+  {
+    "id": "SRC-146",
+    "url": "https://github.com/massive-com/mcp_massive",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "massive-com/mcp_massive (Python, ~47 files). Verdict: Skip as a dependency (equity-domain commercial API, Python); Study the closed typed function-registry design as a fail-closed pattern for LLM-triggered computation. | flags: API key is env-driven (`MASSIVE_API_KEY`, placeholder in docs - no hardcoded secrets). Python + numpy; `apply` accepts only registry functions (good). Domain is equities/options via a commercial API - not a crypto/meme feed, and another provider dependency Memeland doesn't need. Max-table/row caps and `MAX_APPLY_STEPS=20` bound resource use."
+  },
+  {
+    "id": "SRC-147",
+    "url": "https://github.com/MayurK-cmd/4Meme-Pilot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "MayurK-cmd/4Meme-Pilot (Python agent + Node backend + React frontend, ~60 files). Verdict: Adapt (bonding-curve stage framework, rug_risk composite, fail-closed deterministic scoring, slippage-protected buy/sell + on-chain estimates for the BSC 4.meme leg) + Skip (Gemini-LLM loop, Elfa sentiment, full-stack dashboard, and especially the shared-backend wallet-credential model with its leaked hardcoded secret — keep keys local-only). | flags: ⚠️ Hardcoded agent secret — `AGENT_API_SECRET=aa78d2bdf36c0144bbf31ff05450d8d183f144b03a76a65e811e18af47d83480` is committed in BOTH `agent/.env.example` and `agent/.claude/settings.local.json` (concrete value, not a placeholder). That secret gates the backend's `GET /api/agent/wallet`, which returns the decrypted BSC private key; the route also grabs the *first onboarded user's* wallet (single-key shared model). If deployed as-is, anyone with the leaked secret can pull the live wallet key. AES uses sha256(secret) with a default-empty `ENCRYPTION_SECRET` (fail-open to \"\"). Root `.env.agent` is committed (only placeholders, but references the real Pacifica prod URLs). `agent/.gitignore` only ignores `.env`, so `positions.json`/`trades.json` (wallet addresses, entry prices) are tracked. Per-token execute in threads but position store is a plain dict written without a lock — race on concurrent threads. Complexity is high (agent+backend+frontend)."
+  },
+  {
+    "id": "SRC-148",
+    "url": "https://github.com/messari/subgraphs",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "messari/subgraphs (TypeScript/AssemblyScript GraphQL subgraphs, ~10693 files). Verdict: Skip as a dependency/source (no RH coverage, heavy); Study the standardized DEX schema and multi-oracle price-fallback design as a reference if Memeland consolidates per-chain pool analytics. | flags: Monorepo is enormous (10.7k files, 173 subgraphs) and coupled to TheGraph/AssemblyScript toolchain. `_reference_` package has no obvious hardcoded secrets; deployments/config are per-chain. Streamlit apps are Python dashboards - irrelevant to Memeland's Node stack. The `Network` enum has no RH chain 4663 entry - the library does not model the home chain."
+  },
+  {
+    "id": "SRC-149",
+    "url": "https://github.com/Miasyster/QuantGPT",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Miasyster/QuantGPT (Python + Rust engine + React/TS, ~100 py + rust + frontend). Verdict: Adapt (port the 4-test anti-overfit battery + the rules/findings/failures knowledge-base and `[Agent+DS Consensus/Disagreement]` convention for Memeland's voter-learning/edge validation) / Skip (the factor-mining platform, Rust engine, WorldQuant/equity integration)."
+  },
+  {
+    "id": "SRC-150",
+    "url": "https://github.com/milesdeutscher/garchmethod",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "milesdeutscher/garchmethod (Python) - GARCH(1,1) walk-forward vol forecast and vol targeting. Verdict: Adapt - port the walk-forward GARCH(1,1) + vol-target sizing into RiskManager for vol-aware position sizing. | flags: No secrets, no network keys (optional yfinance ticker). Math is explicit and auditable; low complexity. Verdict-ready."
+  },
+  {
+    "id": "SRC-151",
+    "url": "https://github.com/mnemox-ai/tradememory-protocol",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "mnemox-ai/tradememory-protocol (Python) - trading memory layer with adaptive risk and outcome-weighted recall. Verdict: Adapt - copy the AdaptiveRisk worst-status-wins constraint merge and the outcome-weighted recall-to-Kelly sizing as lightweight TS modules; skip the MCP, evolution, and simulation scaffolding. | flags: No secrets in core modules; audit-chain hashing adds minimal risk. Main complexity risk is importing the heavy OWM/evolution surface - restrict adoption to adaptive_risk.py and the Kelly recall math, not the MCP layer."
+  },
+  {
+    "id": "SRC-152",
+    "url": "https://github.com/moazamdotdev/Trading-platform-frontend",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "moazamdotdev/Trading-platform-frontend (Next.js/React) - Solana memecoin swap frontend. Verdict: Skip - a wallet-connected swap UI with no backend, no edge, and no transferable logic. | flags: NEXT_PUBLIC-adjacent frontend demo; relies on browser wallet integration (not suitable for a server-side bot). Low complexity, zero audit value."
+  },
+  {
+    "id": "SRC-153",
+    "url": "https://github.com/mocasus/trade-agent",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "mocasus/trade-agent (Python 3.11, ~30 py files / ~3700 LOC, MIT, 39 tests 100% coverage). Verdict: Adapt (port: RiskProfileInterface shape + confidence-scaled min/max sizing with reserve + daily-loss/max-position gates, fractional-Kelly with realized-trade parameters, activation-threshold trailing stop, rule-builder condition DSL, and paper-first/auto-stop/kill-switch/audit loop defaults) / Study (partial-exit ladder, plugin-registration interface) / Skip (the platform runtime, LLM strategy slot, ccxt/Bybit-futures execution, thin paper-exchange backtester)."
+  },
+  {
+    "id": "SRC-154",
+    "url": "https://github.com/monarchjuno/tradingcodex",
+    "kind": "github-repository",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "monarchjuno/tradingcodex (Python/Django, ~600 files). Verdict: Adopt (execution-governance concepts: idempotent reservation, payload-hash-locked approval receipts, append-only audit, deny-first capability RBAC — port to TS, not heavy); Skip (the Django/Codex runtime itself). | flags: Very well-designed security posture (fail-closed, append-only audit, idempotent execution, credentials never in prompts/artifacts, explicit \"needs review\" on uncertain provider outcomes). Flags: it is a Codex-CLI+Django+uv runtime dependency (Node-free end-user, Python-only) — not a library you can drop into TS. Heavy machinery (Django ORM, migrations, MCP runtime, viewer frontend, workspace-templates skill bundles) far beyond Memeland's scale. Low risk, high effort."
+  },
+  {
+    "id": "SRC-155",
+    "url": "https://github.com/moorcheh-ai/memanto",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "moorcheh-ai/memanto (Python) - Memory Agent that manages other agents' memories. Verdict: Study - the memory-lifecycle/conflict-resolution protocol is a good fit for the voter swarm, but the package is heavy and not trading-specific. | flags: No secrets committed; large dependency/plugin surface (Docker, MCP, vector stores) is overkill for a personal bot. Verdict-ready once the lifecycle/conflict rules are isolated."
+  },
+  {
+    "id": "SRC-156",
+    "url": "https://github.com/mortdeus/solana-copy-sniper-mev-trading-bot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study Solana MEV/WS techniques; Skip wholesale"
+  },
+  {
+    "id": "SRC-157",
+    "url": "https://github.com/muratmula/ai-robinhood-chain",
+    "kind": "github-repository",
+    "category": "robinhood",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study comparison baseline; Skip (sibling of Memeland)"
+  },
+  {
+    "id": "SRC-158",
+    "url": "https://github.com/mvanhorn/last30days-skill",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "mvanhorn/last30days-skill (Python + MCP) - agent-led search engine plugin. Verdict: Skip - a research/search plugin with no trading edge and no transferable trading algorithm. | flags: Large attack surface (browser automation, cookie extraction, many API integrations); very high complexity relative to any Memeland need. README-only relevance."
+  },
+  {
+    "id": "SRC-159",
+    "url": "https://github.com/nansen-ai/nansen-cli",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nansen-ai/nansen-cli (Node.js, ~100 source files + large test suite). Verdict: Study (overall framework too heavy, private-API-coupled, execution-only). Adapt the specific fail-closed swap-outcome simulation + sanity-ceiling gate pattern as a portable TS helper for Memeland's execution-governance layer. | flags: No hardcoded secrets - all keys/credentials come from env (test files use obvious fake `test-key`/`nk_test_*` values; no live key found). Complex app surface (Privy, x402 Permit2/Perp, walletconnect, webhooks) far beyond Memeland's personal-bot scope; a private/commercial backend is the real dependency, so the \"source\" is not self-contained. No ML/backtest/anti-overfit code at all - it is pure execution/ops tooling."
+  },
+  {
+    "id": "SRC-160",
+    "url": "https://github.com/natebag/TrenchTools",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "natebag/TrenchTools (TypeScript monorepo, ~400+ files). Verdict: Adapt — port the clean logic modules into Memeland TS; Skip as a dependency (too heavy, Solana-locked, paid-API-backed). | flags: No hardcoded secrets in scanned modules (check `.env.example` for placeholders). Heavy coupling: Allium paid-SQL API (manipulation monitor), Helius paid API (wallet data). Huge monorepo (UI/landing/docs/bot packages + market-making/volume generators + treasury/bridges) — too heavy as a dependency. No RH 4663. Copy-trade executes live swaps — no paper broker / fill simulation."
+  },
+  {
+    "id": "SRC-161",
+    "url": "https://github.com/nautechsystems/nautilus_trader",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nautechsystems/nautilus_trader (Rust core + Python control plane, very large ~30+ crates). Verdict: Study (adapt the `PortfolioStatistic` interface, same-code-backtest-and-live principle, engine-level risk/portfolio enforcement into Memeland's TS design) / Skip (the platform - Rust core, huge, institutional venue focus, no memecoin/chain-native edge)."
+  },
+  {
+    "id": "SRC-162",
+    "url": "https://github.com/nhovongoc0-max/meme-radar",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nhovongoc0-max/meme-radar (JavaScript/ESM Node app + local web UI, ~60 files incl. 20 tests). Verdict: Study (reusable fail-closed risk-filter + wallet-classification + chart-risk + sellability patterns, and the per-chain/request-budget design — port the *scoring architecture*, not the GMGN data layer) + Skip (GMGN-only coupling conflicts with the green-label bar, no trade execution, heavy local-app/dashboard package). | flags: No hardcoded secrets found; key-store is genuinely careful (restrictive perms, symlink guard, never returns private key to the browser). `gitignore` excludes state. Risk fields are handled conservatively (missing ≠ safe) — this is the project's strongest trait. Main concern: entirely GMGN-coupled — every data source (discovery, security, holders, traders, candles) goes through `gmgn-cli`; GoPlus/DexScreener only supplement. It's read-only (no trading) so no money at risk, but a GMGN outage or API-key tightening kills all discovery. Fairly heavy: a local server + frontend dashboard + packaging + supervisor + ~20 test files for what is essentially a scanner; some mojibake-named `.bat` launcher files (benign — just node checks + open.mjs). AGPL-3.0 license (ignored per personal-use rule)."
+  },
+  {
+    "id": "SRC-163",
+    "url": "https://github.com/nikmcfly/MiroFish-Offline",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nikmcfly/MiroFish-Offline (Python + Neo4j) - local multi-agent social sentiment simulation engine. Verdict: Study - the persona-based sentiment-simulation concept is novel for a sentiment voter, but infra and offline nature make adoption premature. | flags: No cloud API keys required (offline). High complexity (Neo4j, Docker, Ollama); verdict-ready only if a sentiment voter becomes a priority."
+  },
+  {
+    "id": "SRC-164",
+    "url": "https://github.com/nirholas/crypto-vision",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nirholas/crypto-vision (TypeScript/Hono) - large crypto intelligence monolith with failover, cache and anomaly modules. Verdict: Study - extract the circuit-breaker/failover and anomaly-detector modules; skip the platform. | flags: Repo ships solwallets.json and pump-fun-sdk-main.zip (data-leak risk) and a large .env.example with many provider keys. Very high overall complexity; verdict-ready only after isolating the 3-4 modules."
+  },
+  {
+    "id": "SRC-165",
+    "url": "https://github.com/nirholas/kol-quest",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nirholas/kol-quest (TypeScript / Next.js + Bun + MCP, large multi-package). Verdict: Adapt (`fetchJSON` util, idempotent ingest/poll, multi-source merge + leaderboard data model into TS); Skip as a GMGN-coupling dependency and runnable platform. | flags: No hardcoded secrets found in scanned source — keys env-provided (GMGN_TOKEN, Helius/Birdeye/Moralis/etc. optional). GMGN access uses browser UA + `Referer` tokenless scraping (`fetchers/sources/gmgn.ts`) — ToS risk. GMGN-native data (PnL comes from GMGN, not computed locally). No execution/sizing/risk gates — analytics only, no rug/bundle detection."
+  },
+  {
+    "id": "SRC-166",
+    "url": "https://github.com/nirholas/memescope-monday-directory",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nirholas/memescope-monday-directory (TypeScript/Next.js 14, ~85 files). Verdict: Adapt (the weighted safety-score-with-explained-deductions model, missing-data-never-clean handling, and keyless DexScreener client pattern — light, portable, non-GMGN, adaptable to TS for Memeland's RH 4663 candidate scoring); Skip as a dependency/app (Next.js full-stack directory with auth+payments, no RH 4663, placeholder fake news, not a trading/execution tool). | flags: No hardcoded secrets — all keys/env (`TURSO_AUTH_TOKEN`, `STRIPE_SECRET_KEY`, `NOWPAYMENTS_API_KEY`, `ADMIN_SECRET`) are `.env` placeholders. Full-stack app complexity is high for Memeland's needs: auth + payments + chat + watchlists + a DB. `analyzeSentiment` in `news.ts` is naive (counts `sentiment` field, and the fallback news is literally placeholder/fake articles — marked \"In production this would be replaced\"). Chain map is only solana/base/bsc — no Robinhood 4663. Not a trading bot; it is a curated directory/community site (memecoins on its own radar, not execution)."
+  },
+  {
+    "id": "SRC-167",
+    "url": "https://github.com/nirholas/pump-fun-sdk",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nirholas/pump-fun-sdk (TypeScript, ~1300+ files, huge monorepo). Verdict: Skip as a dependency (Solana/Pump.fun-only, zero RH 4663, huge heavy monorepo — no install; it would drag in Solana/anchor surface Memeland doesn't want); Adapt the `fallback.ts` RPC-failover + `fetchWithFallback` HTTP fallback pattern and the pure-BN price-impact-BPS/quote-math module into Memeland's TS RPC & quoting layers (replaces/plugs alongside the rolling-window backoff from SRC-063). | flags: No hardcoded secrets found in the TS scan — keys are env-based (`.env.example` in `mcp-server`); `puppeteer-stealth` sits in devDeps (anti-bot intent — eyebrow-raising but not a credential issue). The complexity is the real flag: a ~30-package monorepo (multiple trading bots, rust, x402 payments, an agent/plugin marketplace with hundreds of localized JSON agent/plugin manifests) is wildly larger than Memeland. Zero Robinhood-chain 4663 coverage — Solana/Pump.fun only, with `@solana/web3.js`/anchor root deps. Pump's bonded-curve mechanics don't transfer to an EVM 4663 AMM."
+  },
+  {
+    "id": "SRC-168",
+    "url": "https://github.com/nirholas/pump-fun-workers",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "nirholas/pump-fun-workers (TypeScript, ~7 files, Cloudflare Worker). Verdict: Adapt the pattern (closed read-only MCP tool registry + hand-rolled Streamable HTTP transport + env RPC URL + formatted-output/limit-clamp/timeout helpers — light, portable, non-GMGN, directly retargetable to RH 4663); Skip as a dependency/app (Solana pump.fun-only data, no RH 4663, no execution — it's just a thin public-API client). | flags: No secrets/keys needed (env-only RPC/API URLs). Minor CORS nuance: when an unallowed `Origin` hits, it replies `Access-Control-Allow-Origin` with the first allowlisted origin (permissive-ish, but harmless for read-only public data). `GRADUATION_SOL_THRESHOLD = 85` is a hardcoded domain constant (fine). Zero RH 4663 — everything is Solana pump.fun. Not a trading engine; a read-only data MCP."
+  },
+  {
+    "id": "SRC-169",
+    "url": "https://github.com/nirholas/robinhood-chain-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "RH-chain MCP. Data server keyless public-RPC reads; trading server kill-switch env + eligibility gate + SpendLedger pre-sign caps + confirm gate. Adapt guard model; Study data reads."
+  },
+  {
+    "id": "SRC-170",
+    "url": "https://github.com/nirholas/scrape-smart-wallets",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study overlap/dedup + retry patterns; Skip scraper as production"
+  },
+  {
+    "id": "SRC-171",
+    "url": "https://github.com/oficcejo/alpha-arena-okx",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "oficcejo/alpha-arena-okx (Python, ~6 files, small single-symbol BTC bot) — near-duplicate NAME of SRC-053 alpha-arena, but a different project (BTC/OKX LLM auto-trader, not an LLM-comparison MVP). Verdict: Adapt (LLM-signal deterministic validation/clamping rules + ATR-regime-conditional dynamic TP/SL as patterns for Memeland's voter gating and exit sizing) / Skip (the platform - single-pair CEX BTC bot, low code quality, no chain-native edge). Note name near-duplicate of SRC-053 alpha-arena; unrelated projects."
+  },
+  {
+    "id": "SRC-172",
+    "url": "https://github.com/okx/agent-skills",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "okx/agent-skills (Markdown skill packs, ~49 files). Verdict: Skip as a data/execution dependency (CEX OKX, no RH memecoin edge); Study the skill-format/routing and credential-preflight pattern for Memeland's own agent-facing skills. | flags: Good credential hygiene: secrets live in `~/.okx/config.toml`, never typed into chat; 401 -> stop and re-auth, no retry loop. Domain is CEX (OKX) with a closed CLI dependency; skills are prompts, no code. No hardcoded secrets in the repo."
+  },
+  {
+    "id": "SRC-173",
+    "url": "https://github.com/okx/agent-trade-kit",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "okx/agent-trade-kit (TypeScript, ~337 files). Verdict: Adapt — port the MCP safety architecture (read-only/demo gates, capability snapshot, remediation-write veto, module filter, rate limiter, atomic safe-file) into Memeland; Skip the OKX-specific trading modules for chain portability. | flags: Good. No hardcoded keys found; `.env.example`/`config.toml.example` use placeholders; secrets via `~/.okx/config.toml` + env + wizard. Demo profile default is a nice fail-closed touch. Complexity moderate (monorepo, tool-generation layer); codebase is large but focused. CEX-specific (OKX REST/signatures, instrument IDs) so the tools themselves aren't portable."
+  },
+  {
+    "id": "SRC-174",
+    "url": "https://github.com/okx/onchainos-skills",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "okx/onchainos-skills (Markdown skills + workflows, ~562 files). Verdict: Study (workflow/security patterns only); Skip the OKX onchainos CLI/MCP dependency (no RH 4663, closed vendor + agent-wallet custody). Reuse the read/write-gate + untrusted-content + top-N enrichment conventions in Memeland's own meme scanner. | flags: The whole pack is a thin prompt layer over OKX's proprietary `onchainos` CLI/MCP - a closed vendor dependency. Wallet/tx gateway implies an OKX-managed agent wallet and payments protocol (x402/MPP) - a third-party custody surface Memeland should not adopt for private-key flows. `chain-support.md` confirms 9-17+ chains (XLayer, Solana, Ethereum, Base, BSC, Arb, Polygon, SUI...) with no Robinhood Chain 4663 - no home-chain coverage. Skills are prompts, no code; no hardcoded secrets."
+  },
+  {
+    "id": "SRC-175",
+    "url": "https://github.com/olaxbt/ai-market-maker",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "olaxbt/ai-market-maker (Python/LangGraph/FastAPI + Next.js web, ~150 py + ~120 ts/vue). Verdict: Adapt (port Memeland's voter layer to: per-voter canonical JSON contract with status, factor-normalization to [0,1], two-level weighted fusion with confidence = magnitude*consensus_ratio, min-factors alignment gate, and a veto-vs-caution risk guard with MDD-stop-blocks-risk-increase + gross-leverage clamp; adopt the Pydantic VetoRule/AlphaFactor/ATR-stop/RR-TP blueprints as TS schemas) / Skip (the platform, Nexus data coupling, LangGraph/FastAPI/web stack)."
+  },
+  {
+    "id": "SRC-176",
+    "url": "https://github.com/OpenBB-finance/OpenBB",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "OpenBB-finance/OpenBB (Python, large FastAPI \"Open Data Platform\" monorepo) - P2. Verdict: Study the provider-extension/plugin-behind-unified-facade architecture and the one-core-multi-surface (REST/MCP/Python) exposure pattern as a design reference for Memeland's data layer (superseded by lighter equivalents in SRC-218/159); Skip OpenBB as a dependency/platform (AGPL, equities-centric, no RH 4663/memecoin/trading, heavy FastAPI stack not portable to Memeland's TS bot). | flags: AGPL license; equities/macro-centric — its provider set is stocks/funds/options and some on-chain aggregates, not memecoin/RH-4663/Solana/BSC trading. Heavy platform (FastAPI + many optional providers + terminal app). No secrets committed (keys injected per provider at runtime)."
+  },
+  {
+    "id": "SRC-177",
+    "url": "https://github.com/OpenByteInc/QuantDinger",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "OpenByteInc/QuantDinger (Python/FastAPI + JS, huge SaaS monorepo, ~600 py + docs/mcp/ops) — near-duplicate: this is the CANONICAL repo; SRC-065 brokermr810/QuantDinger is a mirror/fork of it (same project, verified: identical `app/services/live_trading/spot_sizing.py`, `app/utils/risk_guard.py`, grid cells present here). Product of Open Byte Inc.. Verdict: Adopt (the three fee/sizing/reconcile primitives as TS modules) / Skip (the platform). Duplicate of SRC-065 - audit once, apply findings to both; keep a single \"QuantDinger\" note in Memeland's edge inventory. | flags: `.env.example` defaults `ADMIN_PASSWORD=123456` (first-login reminder - unsafe default to note, not copy) and empty `SECRET_KEY` (refuses to start); gitleaks config + `SECURITY.md` + dependency-scan CI = good hygiene; no hardcoded exchange private keys in source. Enormous footprint (FastAPI+Celery+Postgres+Redis+MCP+web), CEX/broker-only, no on-chain memecoin/flow/rug awareness, no Robinhood Chain/Solana."
+  },
+  {
+    "id": "SRC-178",
+    "url": "https://github.com/openpumpio",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "openpumpio (TypeScript monorepo, ~100+ files, 4 npm packages). Verdict: Skip as a dependency/service (hosted closed Solana pump.fun trading API — single-chain, no RH 4663, custody delegated to a third party, API-key-gated vendor lock; nothing portable or self-hostable); Study the SDK's typed-HTTP-client/typed-error-hierarchy and per-session MCP-factory patterns as a formatting reference only. | flags: No hardcoded real secrets — API keys are user-supplied (env/secrets) and format-validated. But the product delegates custody & execution to a third-party hosted backend (openpump.io): Memeland would hand over its keys/wallet control and depend on an external paid API for every trade — a vendor/lock-in risk plus a central point of failure. The repo contains no on-chain/RPC logic (it's a pure REST proxy client), so there's nothing to reuse for chain portability. Solana pump.fun only — zero RH 4663."
+  },
+  {
+    "id": "SRC-179",
+    "url": "https://github.com/oratis/influencex",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "oratis/influencex (Node/Express + React) - KOL marketing automation platform. Verdict: Skip - a KOL marketing platform with no trading edge or transferable algorithm. | flags: Multi-provider API keys (YouTube, Apify, Resend, Hunter); large web surface (auth, RBAC, CORS). High complexity, no Memeland value."
+  },
+  {
+    "id": "SRC-180",
+    "url": "https://github.com/pamgarcia1993/robinhood-lp-bot",
+    "kind": "github-repository",
+    "category": "robinhood",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "robinhood-lp-bot (best RH source). fast-submit sequencer, Arbitrum Nitro broadcast-feed tape, Quoter honeypot, txlock nonce serializer, graceful gmgn. Adopt as RH execution reference; Adapt pieces."
+  },
+  {
+    "id": "SRC-181",
+    "url": "https://github.com/Panniantong/Agent-Reach",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Panniantong/Agent-Reach (Python, ~90 files). Verdict: Adapt (the ordered multi-backend probe/override pattern is lightweight, portable, non-GMGN; adoptable for RPC/price-source failover) + Skip (as a dependency — no chain logic, social-scraping focus, Python stack different from Memeland's TS). | flags: Cookies/credentials (`TWITTER_AUTH_TOKEN`/`CT0`, browser cookies) handled carefully — child-env only, never mutates `os.environ`; explicit policy that Doctor never auto-reads browser cookies. `.env.example` keys are placeholders only. Design is intentionally conservative about credential handling. Complexity moderate (many per-platform adapters), but each is small."
+  },
+  {
+    "id": "SRC-182",
+    "url": "https://github.com/paperswithbacktest/pwb-alphaevolve",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "paperswithbacktest/pwb-alphaevolve (Python, ~38 files, compact evolution/backtest framework). Verdict: Study (the island/elite-archive/lineage selection + staged exploration-exploitation search loop as a TS pattern for robust voter-weight/preset search) / Skip (the LLM strategy-code evolution engine - Backtrader, OpenAI o3, equities data, arbitrary-code-exec by LLM)."
+  },
+  {
+    "id": "SRC-183",
+    "url": "https://github.com/paradigmxyz/cryo",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "paradigmxyz/cryo (Rust, ~236 files). Verdict: Skip as tooling; Study/Adapt the ERC-20 transfer log-filter/decode shape and RPC rate-limit gauging into the RH chain-flow adapter. | flags: Rust + polars + alloy build; a full data-engineering tool, not a TS library. No hardcoded secrets (RPC via env/flag). Running the binary in a pipeline adds a Rust maintenance dependency and parquet/polars machinery far beyond a personal bot's needs."
+  },
+  {
+    "id": "SRC-184",
+    "url": "https://github.com/pgen0x/azimuth",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "pgen0x/azimuth (Go daemon + Node executors) - layered multi-mode screen with fail-open safety and sizing governance on Solana DLMM + RH-4663 Uni v3/v4. Verdict: Adapt - copy the keyless multi-source discovery, fail-closed-on-positive-security with sticky convictions, layered live-flow gates, lone-candidate conviction floor, PVP guard, tenure sizing and escalating cooldown; skip the heavy daemon, Redis and executor shell. | flags: GMGN API key lives server-side in env only and is guarded by a secrets hook; the deliberate fail-open default is acceptable only because the positive-detection arm fails closed and convictions are sticky. Pattern complexity is low once extracted; watch GeckoTerminal rate limits (the daemon explicitly sequences modes so a spent budget starves lower-priority feeds last)."
+  },
+  {
+    "id": "SRC-185",
+    "url": "https://github.com/PillCrew/claimchain",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "PillCrew/claimchain (Python + JS port) - on-chain groundedness checker for AI analysis. Verdict: Adapt Groundedness-gate is a real, low-complexity, chain-portable cross-check that belongs in the consensus/sanction path. | flags: No secrets (keyless public API); all stdlib, low complexity; regex precision is the main fragility risk to test; port to TS rather than pull in a Python runtime for Memeland."
+  },
+  {
+    "id": "SRC-186",
+    "url": "https://github.com/PillCrew/PillCrew",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "PillCrew/PillCrew (JavaScript/Electron) - desktop pet meme-coin UI with multi-source keyless data. Verdict: Skip No real edge; Solana-only UI app whose only useful patterns (resilient keyless fetch, simple scorecard) are already covered by Memeland anchors. | flags: Keyless and secret-free; desktop app code is UI-heavy and low relevance; nothing risky to take, and nothing worth the port."
+  },
+  {
+    "id": "SRC-187",
+    "url": "https://github.com/rckprtr/pumpdotfun-sdk",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "rckprtr/pumpdotfun-sdk (TypeScript library, ~20 files incl. ESM/CJS/browser builds + tests + examples). Verdict: Adopt (vend the bonding-curve math, AMM simulator, slippage and event-parsing into Memeland's Solana engine — pure, simple, no external-data coupling) + Adapt (transaction builders + priority-fee sendTx to match Memeland's RPC/relay setup). | flags: No hardcoded secrets; caller owns the Keypair (non-custodial). `.env.example` only `HELIUS_RPC_URL`. Uses `skipPreflight:false` (safe) and `finalized` commitment by default. Verified slippage defaults (500 bps). Minimal surface — low complexity, no heavyweight framework. Anchor/IDL dependency is the main coupling; `DEFAULT_COMMITMENT/finality = finalized` is the safe but slow choice. Note the README itself warns not to trust unsolicited code/links (good hygiene)."
+  },
+  {
+    "id": "SRC-188",
+    "url": "https://github.com/redactedmeme/swarm",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Skip wholesale"
+  },
+  {
+    "id": "SRC-189",
+    "url": "https://github.com/ricoboost/meme-coin-trading-bot",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ricoboost/meme-coin-trading-bot (Python, ~120 files — src pkg + docs + collectors + dashboard). Verdict: Adapt (state-free rug-check helper, deterministic RiskManager with daily-loss halt/cooldowns/burned-token blacklist, fail-closed rule-matcher schema, staged TP/SL exit engine, paper round-trip liquidity guard) + Skip (whole Solana Yellowstone/Helius/Jupiter stack, ML qualifier, Playwright wallet collectors, FastAPI dashboard). | flags: No hardcoded secrets (all in `.env.example`; `BOT_PRIVATE_KEY_B58` from env, signer never logs it; keypad placeholder values like Jito tip accounts in env example are standard). Paper default + opt-in live is a good safety default. Major complexity: ~120 files, Yellowstone gRPC protos, Playwright wallet scrapers, sklearn ML, FastAPI dashboard, dozens of tunables — far beyond green-label \"simple\". Solana-locked (Helius/Jupiter/solders/ATA). ML in `gate` mode can block trades; in `shadow` it's data-collection. The honest \"didn't work live\" note undercuts the premise."
+  },
+  {
+    "id": "SRC-190",
+    "url": "https://github.com/rimtoln/COPUMP",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "rimtoln/COPUMP (JavaScript ESM, ~14 files incl. tests, zero runtime deps). Verdict: Adopt (the layered risk-gate + `sizeCopy` multi-constraint sizing + declarative incident-classification architecture — pure, zero-dep, test-covered, chain-agnostic, exactly Memeland's fail-closed decision layer; rework SOL rules to RH 4663 notional caps); Skip as an app/data source (paper sim only, no chain reads, no execution, pump.fun framing, no RH 4663). | flags: None found — that's the point: no keys committed, `.env.example` is a stub with an explicit \"do not put private keys in this file / never commit a real key\" warning, and live sending is disabled by design. Elegantly low complexity (zero deps). Two weaknesses for real use: `scoreNews` is a naive keyword subtract/add counter (not grounded in sources), and there is no real chain integration — the tape is `sim.js` only, so the chain-agnostic logic is sound but execution/`RPC_URL` wiring is untouched. Zero RH 4663 (pump.fun Solana framing)."
+  },
+  {
+    "id": "SRC-191",
+    "url": "https://github.com/rimtoln/fletch",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "rimtoln/fletch (vanilla JS) - pump.fun hunt tape with 8-factor token scoring. Verdict: Study - borrow the factor-normalization and freshness scoring; the pump.fun screener itself is out of scope. | flags: No API keys required; marketing-heavy README (ATH claim is not evidence). Low complexity, single-file scoring, low validation."
+  },
+  {
+    "id": "SRC-192",
+    "url": "https://github.com/RKiding/Awesome-finance-skills",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "RKiding/Awesome-finance-skills (Python + Markdown skill packs, ~163 files). Verdict: Adapt (the signal-evolution lifecycle + baseline-then-adjust forecast pattern — portable, light, non-GMGN; adoptable as TS types/state machine for Memeland meme theses); Skip the ML/news stack as a dependency (heavy, stock-focused, no RH 4663 coverage). | flags: API keys read from env (`JINA_API_KEY`), no hardcoded secrets found; key-less rate-limit defaults are sane. Torch/transformers/Kronos = heavy ML deps. The suite has noticeable duplicated/evolving code (predictor logic repeated across predictor/reporter/tracker dirs) and stitched-together agent frameworks — mid complexity, more demo-style than production."
+  },
+  {
+    "id": "SRC-193",
+    "url": "https://github.com/ryan-yuuu/crypto-trading-arena",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ryan-yuuu/crypto-trading-arena (Python) - LLM agent trading arena on calfkit + Kafka. Verdict: Study - the single-connector fan-out and per-voter tool identity are useful for GMGN decoupling, but the harness/infra is too heavy to adopt. | flags: Needs an LLM provider API key; Docker/Kafka footprint. No committed secrets. Medium complexity; verdict-ready for the two design patterns only."
+  },
+  {
+    "id": "SRC-194",
+    "url": "https://github.com/semkazz1/FlySwarm",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "semkazz1/FlySwarm (JavaScript/Node ESM) - Robinhood-chain wallet-cohort intelligence engine. Verdict: Adopt - same Node/ESM ecosystem, RH-4663 native, GMGN-independent, and a concrete weighted cohort-voter with explainable thresholds and a working RPC adapter. | flags: Read-only adapter, no secrets in code; dex fallback only enriches, and live mode stays on RPC. Complexity is low (one engine, one adapter, ~500 lines); main risk is RPC rate limits, so cap pool size and cache aggressively."
+  },
+  {
+    "id": "SRC-195",
+    "url": "https://github.com/sergafon/solana-copy-trading",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "sergafon/solana-copy-trading (Rust, ~50 files). Verdict: Adapt (copy-trading determinism, predicted-close, confirm/fill-slippage telemetry, sim-first); Skip as runnable dependency (Rust, Solana-locked instruction crafting). | flags: No hardcoded secrets — `HELIUS_API_KEY`, `WALLET_PRIVATE_KEY`, `ZEROSLOT_API_KEY` all env-read with `.expect()` (fails fast at startup). No GMGN; own Geyser stream + Helius RPC + 0slot landing. No rug/bundle detection; it is pure execution speed and determinism."
+  },
+  {
+    "id": "SRC-196",
+    "url": "https://github.com/sevenlabs-hq/carbon",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "sevenlabs-hq/carbon (Rust) - Solana indexer framework: datasource -> decoder -> processor pipeline. Verdict: Skip Rust Solana-indexer infrastructure with no portable edge for a TS multi-chain bot; architecture concept only. | flags: No secrets; but a large infra monolith (Rust workspace + Postgres + GraphQL + gRPC stream deps) that is far too heavy and chain-specific to adopt."
+  },
+  {
+    "id": "SRC-197",
+    "url": "https://github.com/shmidtqq65/loxley",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "shmidtqq65/loxley (JavaScript/Node, viem) - Robinhood-chain exit desk: pons v2 launchpad screening and execution to the wei. Verdict: Adopt The pons launchpad scoring + named refusals + farm fingerprint and the pure-engine module are concrete, RH-4663-native, low-coupling algorithms that map straight to a real edge. | flags: Key handling is conservative (redacted, query-param key never printed, mover-signing isolated in one file gated behind arming); signing is deliberately separated from reads. Moderate complexity mostly in trade/sniper; the engine itself is simple and testable."
+  },
+  {
+    "id": "SRC-198",
+    "url": "https://github.com/Shradhesh71/YellowStone-gRPC",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Shradhesh71/YellowStone-gRPC (TypeScript) - Solana Yellowstone gRPC indexer with health monitoring and multi-channel alerts. Verdict: Study Stream-health and multi-channel alert patterns are worth noting for Memeland's sentinel/data-layer observability, but the indexer core is Solana-only and portable to RH-4663. | flags: Requires a Yellowstone gRPC token and Postgres URL via env (.env), plus Discord/Telegram secrets; secrets are plaintext-env style. Moderate complexity and no real edge to justify adopting wholesale."
+  },
+  {
+    "id": "SRC-199",
+    "url": "https://github.com/sirenconemd/robinhood-trading-toolkit",
+    "kind": "github-repository",
+    "category": "robinhood",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "RobinBundler closed Windows app, no code. Skip."
+  },
+  {
+    "id": "SRC-200",
+    "url": "https://github.com/slightlyuseless/pons-sniper",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "slightlyuseless/pons-sniper (TypeScript/viem ESM, ~27 source files, tsx + zod + pino + ws). Verdict: Adopt (curve `quote.ts` + `snipeTax.ts` + `strategy.ts` timing optimiser + verify-before-fire + event-read fill executor + nonce manager + gas caching — directly on Memeland's chain, deterministic, zero GMGN, green-label execution core) + Adapt (Multi-wallet worst-order batching, batched/fast dual client, position manager exit engine, cheapest-first filters) + Skip (pons v1 restricted-block path, target-deployer single-launch focus, no real opportunity edge). | flags: Private keys live in a plaintext `credentials.json` (chmod 0600 on write, validated & matched against publicKey) — file-permission-dependent, standard for such bots but flag it. `.env.example` holds a placeholder Alchemy key only; no real secrets committed. Public RPC fallbacks hard-coded (public endpoints, benign). No tests at all (devDeps are only tsx/types; the tool scripts are manual verification). Code is dense but clean; the v1 exactOutput restricted-window path (`v1.ts`) is pons-specific and the most complex/least portable module. Strategy model constants (window 3s vs 5s, K=6.17) are calibrated to pons and would need re-fitting per venue."
+  },
+  {
+    "id": "SRC-201",
+    "url": "https://github.com/soladdev/solana-meme-tool",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "soladdev/solana-meme-tool (TypeScript/Next.js 14, ~170 files — heavy dashboard + base/ services). Verdict: Skip — broken/redacted shell, Solana-only, heavy, unsafe env handling, wash-trading focus; nothing Memeland should adopt. (Reference only for the bucketed wallet-risk-scoring *idea*, better implemented by SRC-081/SRC-162.) | flags: SECURITY — all secrets (MongoDB URL, BirdEye key, Jito UUID, AES `ENCRYPT_KEY`, Astralane key) are declared as `NEXT_PUBLIC_*`, which Next.js bundles into the browser client: keys are effectively public, and the AES key used to \"encrypt\" wallet private keys in the UI is itself client-exposed (CryptoJS AES in `lib/decrypt.ts`) — obfuscation, not security. Private keys are pasted into the UI and sent to API routes. COMPLEXITY — enormous dep tree (anchor 0.30 + 0.25, two Raydium SDKs, metaplex, jito-ts, mongodb, redis). REDACTION — 14 files (including `sniper.ts`, `openbook.ts`, `order-monitor.ts`, `wallet-check/index.ts`, `bundle-buy.ts`, `distribute.ts`, `gather.ts`) contain `// Private code` stubs; `base/sniper.ts` imports a non-existent `./transaction/transaction` module, so it is not runnable as shipped. Includes volume-boost wash-trading (integrity problem for Memeland)."
+  },
+  {
+    "id": "SRC-202",
+    "url": "https://github.com/solo-agent/solo",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "solo-agent/solo (Go + Next.js) - local-first workspace for coordinating multiple AI coding agents. Verdict: Skip Heavy general-purpose AI-agent workspace with no trading algorithm or edge that maps to Memeland's goals. | flags: Large multi-service deployment with many secrets (.env, Postgres, auth/JWT, agent tokens); code-gate and budget controls show care, but it is far too heavy and off-topic to adopt."
+  },
+  {
+    "id": "SRC-203",
+    "url": "https://github.com/sopersone/CROWBRAIN",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "sopersone/CROWBRAIN (Python stdlib) - read-only SMA market observation terminal. Verdict: Skip A toy SMA observation loop with no edge; its only hygiene patterns are already covered by Memeland's data layer. | flags: Local-only, no secrets, no execution capability (safe); minimal complexity. Its own docs call out that it is a transparent baseline rather than a real model."
+  },
+  {
+    "id": "SRC-204",
+    "url": "https://github.com/stefanoviana/crypto-pump-scanner",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "stefanoviana/crypto-pump-scanner (Python 3.9+ single file, ~1362 lines + Docker/ccxt). Verdict: Study (borrow the multi-layer confirmation + weighted-confidence detection and the cascade-TP/trailing/time-exit + circuit-breaker framework as generic momentum patterns) + Skip (direct adoption — CEX futures-only, monolithic, not an on-chain edge). | flags: Single 1362-line monolithic script (hard to test; no tests). CEX-futures specific: leverage, margin, positions, ccxt exchange model — none of it maps to on-chain swaps. New-listing logic is CEX announcement scraping (Bybit/Binance), not on-chain. Conservative defaults though (5% risk budget, max 2 positions, -$50/day halt). No hardcoded API keys (read from env)."
+  },
+  {
+    "id": "SRC-205",
+    "url": "https://github.com/Stormeye85/robinhood-token-sniper",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study RH-chain network config reference; Skip token-deployer"
+  },
+  {
+    "id": "SRC-206",
+    "url": "https://github.com/subsquid/squid-sdk",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "subsquid/squid-sdk (TypeScript, ~2200 files). Verdict: Skip as a framework; Study the `RpcEndpointSettings` surface (rateLimit, maxBatchCallSize, retry, head poll) as a checklist for Memeland's RPC adapter if batch sizing/retry are currently ad hoc. | flags: Full ETL framework with Postgres/TypeORM sinks, archive-client, Prometheus metrics, mapping runners; heavy to self-operate. `evm-processor` is GPL-3.0-or-later - copying code is license-coupled (personal-use tolerance aside, still a GPL trap if Memeland ever distributes). No hardcoded secrets seen; endpoints configured via env. Tightly coupled to SQD network/archive for best value, which is a provider dependency Memeland doesn't need."
+  },
+  {
+    "id": "SRC-207",
+    "url": "https://github.com/TauricResearch/TradingAgents",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study debate/validation pattern; Skip wholesale"
+  },
+  {
+    "id": "SRC-208",
+    "url": "https://github.com/The-Swarm-Corporation/AutoHedge",
+    "kind": "github-repository",
+    "category": "agents",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Study agent-division + risk-first sizing; Skip autonomous-execution framework"
+  },
+  {
+    "id": "SRC-209",
+    "url": "https://github.com/TheGigaQuant/frostybot-js",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "TheGigaQuant/frostybot-js (JavaScript/Node, ~80 js files + jqwidgets web GUI) — fork of CryptoMF/frostybot-js, default branch is \"stable\". Verdict: Adapt (port the position-target + maxsize-cap order sizing and precision/floor dust-avoidance + relative-limit-price helpers into Memeland's execution/order-builder as TS utilities) / Skip (the webhook/ccxt/GUI platform, secrets-at-rest scheme, old JS style). Note: only one frostybot-js source assigned; README/wiki actually point to the original CryptoMF/frostybot-js (this is its fork)."
+  },
+  {
+    "id": "SRC-210",
+    "url": "https://github.com/thegreatola/memecoins-trading-agent",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "thegreatola/memecoins-trading-agent (TypeScript, 2 files only — orchestrator.ts + walletTracker.ts, no package.json). Verdict: Study (WS balance-delta buy-detection + timed N-wallet convergence-signal framing + stage pipeline pattern are worth borrowing, conceptually chain-portable) + Skip (adoption — incomplete skeleton, no package.json, Helius/Jupiter/DexScreener/X-locked follower edge). | flags: Repo is an incomplete skeleton (README overpromises; code won't run) — a maintenance/trust red flag. Dependencies are heavy and data-provider-coupled by design (Helius RPC + WebSocket, DexScreener, X/Grok CT API). Private key is base58 via env only (good). The buy-detection via balance-delta parse is Helius/jsonParsed-specific. No hardcoded secrets found. Heavily relies on trusting \"smart wallet\" lists (a follower/copy-cat edge, not independent — plus a CT/Grok narrative amplifier that is not deterministic)."
+  },
+  {
+    "id": "SRC-211",
+    "url": "https://github.com/thetateman/Trading-API",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "thetateman/Trading-API (Markdown readme) - README-only rundown of the hosted PumpPortal API. Verdict: Skip README-only repo for a hosted single-chain paid API with no code to audit and no portable edge. | flags: No secrets in the repo; the described service requires API keys and takes a fee - nothing to evaluate technically since there is no code."
+  },
+  {
+    "id": "SRC-212",
+    "url": "https://github.com/Thorsten02041973/robinhood-cli",
+    "kind": "github-repository",
+    "category": "robinhood",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "RH CLI sniper. Confirms RH constants (Router 0x89e5DB8B5aA49aA85AC63f691524311AEB649eba, WETH 0x0Bd7..., USDG 0x5fc5..., chain 4663). router-guard + RPC health/fallback. Skip wholesale (plaintext key)."
+  },
+  {
+    "id": "SRC-213",
+    "url": "https://github.com/tiagosiebler/OrderBooks",
+    "kind": "github-repository",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "tiagosiebler/OrderBooks (TypeScript, ~6 source files + samples). Verdict: Adopt (the slippage-impact fill-simulation pattern — port to pool-depth impact calc in TS); Adapt (use the LOB class directly only for CLOB perp legs). | flags: No secrets, no network, no I/O beyond `console.table` printing; pure in-memory data structure. Minor: `structuredClone` on every `getBookState` call is a perf/GC cost on high-frequency feeds; `handleDelta` inserts without dedup in one path (minor correctness smell). Overall low risk, well-maintained by a known crypto-SDK author."
+  },
+  {
+    "id": "SRC-214",
+    "url": "https://github.com/Tomortec/CryptoTradingAgents",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Tomortec/CryptoTradingAgents (Python, ~40 files) - P0. Verdict: Adapt (round-capped debate->judge fusion, reflection-memory loop, entry/SL/TP refinement contract; port orchestration to TS). Study the LangGraph plumbing. Skip the framework + CEX data layer."
+  },
+  {
+    "id": "SRC-215",
+    "url": "https://github.com/tony-42069/solana-mcp",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "tony-42069/solana-mcp (JavaScript CJS, ~22 files, no tests despite jest dep). Verdict: Study the weighted opportunity-score + safety-rubric template and dynamic function-loader; Skip the code itself (unfinished scaffold, DB/LLM/scraper-coupled, Solana-only, permissive CORS). | flags: No hardcoded secrets found (keys via env; `accessToken`/`apiKey` hits were false positives from config getters). But `allowedOrigins: ['*']` + bare `cors()` on an HTTP server exposing wallet/strategy endpoints is a permissive default. Several functions require a pre-populated SQLite DB (`SELECT * FROM tokens WHERE address = ?`) and throw \"Token not found\" otherwise — i.e. it's a scaffold that needs `init-sample-data` seeding; REPO_STATUS.md itself reports 0% code-quality/documentation/testing. `getPortfolioStrategy.js` uses Anthropic SDK (LLM-dependent advice). Social layer leans on fragile scrapers (Twikit-style/puppeteer) and Twitter API that no longer matches modern reality."
+  },
+  {
+    "id": "SRC-216",
+    "url": "https://github.com/tow3web3/agentinu",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "tow3web3/agentinu (Python demo only) - landing page for a claimed autonomous Solana memecoin agent. Verdict: Skip No auditable code (README + animation demo only); asserted edge is opaque and external to Memeland's coupling and portability goals. | flags: No secrets in the repo; pages advertise a live wallet and dashboards off-chain. No code path to review, so nothing to assess technically."
+  },
+  {
+    "id": "SRC-217",
+    "url": "https://github.com/tradermonty/claude-trading-skills",
+    "kind": "github-repository",
+    "category": "mcp-data-tools",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "tradermonty/claude-trading-skills (Python + Markdown skills + YAML workflows, ~1988 files / 74 skills). Verdict: Adapt (risk-gate fail-closed semantics, snapshot-replay regime scoring, Decimal sizing, endpoint-key-masking — all portable/light/non-GMGN, adoptable in TS); Skip the repo as a dependency (equity-focused, ~2000 files, heavy Python ML/quant stack, no RH 4663). | flags: Strongly committed to secrets hygiene (baseline, bandit, key-masking). Some skills require paid FMP API / FINVIZ Elite keys (env-var only, no hardcoded secrets found). Complexity is high — 74 skills, ~2000 files, Python + yfinance/scipy/statsmodels/pandas-market-calendars — far too heavy to adopt wholesale. It is equity-anchored (FMP stock endpoints); crypto coverage is just the one CoinGecko/Binance regime skill with no RH 4663."
+  },
+  {
+    "id": "SRC-218",
+    "url": "https://github.com/trustwallet/blockatlas",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "trustwallet/blockatlas (Go, ~1500+ files, 29 chain adapters — SCOPED to adapter/observer slice). Verdict: Skip as a dependency/infra (unmaintained, heavy Go + RabbitMQ/Postgres, no RH 4663, EVM adapter depends on third-party explorer API, no raw on-chain indexing, dead project); Study only the capability-interface adapter/registry pattern and the block→subscription→notify decoupling as a design reference (superseded by SRC-088/206 for Memeland's use). | flags: No hardcoded secrets found (config is env/placeholder; keys blank). Complexity is the dominant flag: a heavy unmaintained Go monorepo (go 1.15, gin/gorm/RabbitMQ/Postgres/redis-like caches, ~29 chain packages) — entirely out of scope as a dependency. It is a wallet/explorer aggregate, not a memecoin-trading or RH tool. No RH 4663 and no Arbitrum Nitro rollup support (predates it); the EVM adapter leans on a third-party explorer API (trezor.io), not raw EVM log indexing, so even the EVM slice can't be reused directly for RH chain 4663 on-chain reads."
+  },
+  {
+    "id": "SRC-219",
+    "url": "https://github.com/uerax/all-in-one-bot",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "uerax/all-in-one-bot (Go) - Telegram bot with kline win-rate + multi-source meme screening. Verdict: Study the two-candle-above-entry win-rate rule and the concurrent multi-source screening fan-out as portable TS patterns. | flags: Config holds plaintext Telegram tokens and Etherscan API keys in YAML (local-only demo); Etherscan HTML scraping and multiple paid API keys add operational fragility. Verdict-ready (Study)."
+  },
+  {
+    "id": "SRC-220",
+    "url": "https://github.com/uxuycom/indexer",
+    "kind": "github-repository",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "uxuycom/indexer (Go, ~92 files). Verdict: Skip as a codebase (Go/MySQL, plaintext DB creds, non-RH token standard); Study the block/tx batch-worker + finality-delay + event-topic-filter config pattern for Memeland's RH scanner. | flags: Root `config.json` ships a plaintext MySQL DSN with creds `root:1234qwer@...` and a hardcoded public RPC (`https://1rpc.io/avax/c`); DB username/password live in JSON config by design - exactly the secret-at-rest pattern Memeland must avoid. MySQL dependency; JSON-RPC server `rpcmaxclients: 10000` is open-ended. Go/MySQL stack is foreign to Memeland's Node/TS."
+  },
+  {
+    "id": "SRC-221",
+    "url": "https://github.com/ValueCell-ai/valuecell",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ValueCell-ai/valuecell (Python + Tauri) - LLM-driven multi-agent stock/crypto platform. Verdict: Skip heavy LLM-driven monolith with ccxt dependency; no concrete portable algorithm beyond guardrails already in Memeland. | flags: Keeps secrets local by design but adds ccxt and many LLM provider configs; no RH-4663 or on-chain coverage. Verdict-ready (Skip)."
+  },
+  {
+    "id": "SRC-222",
+    "url": "https://github.com/vincentkoc/dexscraper",
+    "kind": "github-repository",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "vincentkoc/dexscraper (Python, ~12 files + 8 test modules). Verdict: Adapt (keyless multi-chain DexScreener feed via WS/REST + filter/rank param encoding + discovery presets — port to TS, drop the binary-parse heuristic and the cloudscraper bypass); Skip (the fragile protocol reverse-engineering & GPU-adjacent Python deps). | flags: Hardcoded transparency risk: none hardcoded except `Maxsize`/UA rotation arrays. Flag: the \"enhanced\" binary-protocol extraction (`pairs_pos + 20` offset, magic-tolerance ranges, whitelist/blacklist token-name heuristics, IEEE-754 value classification) is reverse-engineered and extremely fragile — it WILL break when DexScreener changes their stream; high maintenance. `cloudscraper` Cloudflare bypass (optional `--cloudflare-bypass`) is a ToS-gray-area practice and a heavy dependency. `requests`/`cloudscraper`/`websockets` deps are heavyweight for a data feed. Proxy via `DEXSCRAPER_PROXY` env (no hardcoded credentials)."
+  },
+  {
+    "id": "SRC-223",
+    "url": "https://github.com/vybenetwork/solana-top-holders-api",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "vybenetwork/solana-top-holders-api (TypeScript/Express, ~18 files + frontend). Verdict: Adapt (concentration/entity-label risk calculus + axios-retry + disk-cache patterns — reimplement on top of cross-chain RPC; do not call Vybe per-token); Skip (the proprietary keyed Solana-only data source & demo dashboard as-is). | flags: Environment-key-only (throws if `VYBE_API_KEY` missing); key never logged. No hardcoded secrets — `.env` only, key server-side. Reasonable: 60s timeout, retries. Flags: Solana/SPL/Token-2022 only (no RH chain 4663/BSC); proprietary VYBE_API_KEY dependency (costs, IP-restricted; a vendor gate vs Memeland's \"low-vendor\" goal); `data/` disk caches unbounded (no eviction/TTL); the \"whale/concentration\" output is frontend-only logic, not a library."
+  },
+  {
+    "id": "SRC-224",
+    "url": "https://github.com/vybenetwork/solana-top-traders-api",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "vybenetwork/solana-top-traders-api (TypeScript/Express, ~18 files). Verdict: Adapt (realized-PnL-ranked trader-following concept + axios-retry/cache). | flags: Same as SRC-223: `.env`-keyed only (throws if missing), key never logged, 60s timeout + retries; Solana-only and VYBE_API_KEY vendor-gated (paid/IP-restricted). `top-traders` default `limit=1000` per page is heavy; no rate-limit handling for the free tier. No hardcoded secrets found. Data-source coupling is the main weakness for Memeland."
+  },
+  {
+    "id": "SRC-225",
+    "url": "https://github.com/vybenetwork/solana-trader-pnl-api",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "vybenetwork/solana-trader-pnl-api (TypeScript/Express, ~18 files). Verdict: Adapt (per-wallet realized-PnL track-record + related-wallet/bundle discovery concepts — implement against public RPC across chains); Skip (the proprietary keyed Solana-only API & demo UI). | flags: Same strengths/flags as SRC-223/224: `.env`-keyed only, key never logged, 60s timeout + retries, no hardcoded secrets. Solana-only, VYBE_API_KEY vendor-gated (paid/IP-restricted free tier), unbounded disk caches, heavy default `limit`. For Memeland the blocker is data-source and chain coverage, not code quality (this is clean starter-kit TS)."
+  },
+  {
+    "id": "SRC-226",
+    "url": "https://github.com/w3laba/DexScreener-Trending",
+    "kind": "github-repository",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "w3laba/DexScreener-Trending (JavaScript/Node, 1 script + README). Verdict: Skip (traffic-bot for trending manipulation; no usable data/signal, ToS risk, credential-from-file). Note the manipulation risk in Memeland research: do not weight DexScreener/Dextools trending heavily. | flags: Loads of risk with little code touch: loads proxy credentials from `proxy.txt` and reads a fingerprint API key — it would launch `headless:false` visible windows, depends on a paid fingerprint-API service, and violates DexScreener ToS (traffic manipulation). No tests, no docs beyond a pricing menu, huge maintenance surface against bot-detection changes."
+  },
+  {
+    "id": "SRC-227",
+    "url": "https://github.com/warp-id/solana-trading-bot",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "warp-id/solana-trading-bot (TypeScript, ~38 files). Verdict: Adapt — port the TransactionExecutor-interface DI, veto-with-reason pool filters, and fail-closed TP/SL+timeout loop; Study its Slim-jito/warp tip-bundling fee flow for execution cost. | flags: Clean and simple, no hardcoded secrets found (`PRIVATE_KEY` from `.env.copy` placeholder; wallet Keypair from env). Some fragility: bare `catch (e: any)` with reliance on `e.code == -32602`, hardcoded Jito tip-account list (mainnet addresses, expected), public-RPC warnings (caching/market preload explicitly discouraged on public RPC), defaults like `BUY_SLIPPAGE=20` are risky but user-set. Overall very lightweight — few deps, no build framework beyond ts-node."
+  },
+  {
+    "id": "SRC-228",
+    "url": "https://github.com/wealthfolio/wealthfolio",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "wealthfolio/wealthfolio (Rust + Tauri + Svelte) - Local-first portfolio & net-worth tracker. Verdict: Skip a portfolio/net-worth tracker with no strategy, scoring, or execution code relevant to Memeland. | flags: No secrets misuse; local-first design is sound, but the app targets brokerage, not on-chain trading, so it is not applicable. Verdict-ready (Skip)."
+  },
+  {
+    "id": "SRC-229",
+    "url": "https://github.com/WebRaizo30/AnoMeme",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "WebRaizo30/AnoMeme (TypeScript Next.js 15 frontend + Elixir Phoenix backend, ~90 files). Verdict: Skip as a dependency/app (mock/hollow full-stack demo — Elixir backend, no real trading/chain/social/risk logic, hardcoded mock responses, no RH 4663, not portable to Memeland's TS bot); Study only the declarative `TriggerCondition/TradingAction/RiskParameters` intent shape and the `risk_score+factors+recommendations+expires_at` scoring record as minor data-model references (superseded by richer patterns from SRC-190/102/166). | flags: No hardcoded secrets found (stock Phoenix config; DB creds via env in `runtime.exs`). Complexity is moderate (full-stack auth/wallet/DB), but it's hollow: the core claims (Anoma intents, MEV protection, social monitoring, multi-chain, risk) are placeholders/mocks — nothing executes on-chain, and `list_user_intents` ships hardcoded sample addresses/hashes. Chain enum is `ethereum/polygon/bsc/arbitrum/optimism` — no RH 4663. Not a trading bot with real logic."
+  },
+  {
+    "id": "SRC-230",
+    "url": "https://github.com/wwwwwwworld/solana-trading-bot-v3",
+    "kind": "github-repository",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "wwwwwworld/solana-trading-bot-v3 (TypeScript, ~40 files). Verdict: Adapt — treat as the maintained successor of SRC-227; port the executor-interface DI, veto filters, consecutive-match gate, fail-closed TP/SL timeout loop, and one-token serialization to Memeland's Solana leg. Note: near-duplicate of SRC-227 — do not double-count. | flags: Clean; `.env.example` PRIVATE_KEY is an empty placeholder, no hardcoded secrets. Same fragility as v2: bare `catch (e: any)`, hardcoded Jito tip-account list, `BUY_SLIPPAGE=20` default, public-RPC caveats on caching. Slightly heavier than v2 only from added deps; still a tiny single-purpose script."
+  },
+  {
+    "id": "SRC-231",
+    "url": "https://github.com/ygwyg/MAHORAGA",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ygwyg/MAHORAGA (TypeScript) - LLM trading agent on Cloudflare Workers with a policy engine. Verdict: Study the approval-token TTL binding and pluggable entry/exit strategy harness to harden execution governance. | flags: API keys via Workers secrets (not plaintext in repo); no chain/defi coverage; Alpaca-only means code is not portable to RH-4663. Verdict-ready (Study)."
+  },
+  {
+    "id": "SRC-232",
+    "url": "https://github.com/yllvar/gmgn-TrendingAnalyzer",
+    "kind": "github-repository",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "yllvar/gmgn-TrendingAnalyzer (Python, ~5 files — gmgn/client.py + analyzer.py). Verdict: Skip (GMGN-scraping client — Solana-only, TLS-spoofing fragility, anti-goal) + Study (the cross-timeframe \"consistency count + median market cap\" aggregation as a conceptual quality-filter idea to rebuild over Memeland's own data). | flags: The client defeats GMGN bot-detection by rotating randomized `tls_client` TLS fingerprints and `fake_useragent` strings on every call (`randomiseRequest`) — fragile and ToS-questionable; any GMGN backend change silently breaks it, and there is no auth/key (it scrapes instead). All URLs hardcode `chain=sol`, so it is Solana-only and not chain-portable. No tests. `analyzer.py` assumes the response has a `\"rank\"` key after the client already unwraps `['data']`, which is brittle against API shape drift. No secrets committed."
+  },
+  {
+    "id": "SRC-233",
+    "url": "https://github.com/zetryn-ai/ai-agent",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "zetryn-ai/ai-agent (Python) - Solana memecoin decision engine with downgrade-only guardrails and calibrated confidence. Verdict: Adopt the downgrade-only guardrail pipeline and the rug-avoidance/entry backtest metrics as portable TS patterns for the consensus gate. | flags: No keys handled (framework never holds the private key); declarative graph-spec + eight reference agents add moderate complexity; source agnostic on data feeds but tuned to Solana/PumpFun, requiring re-derivation for RH-4663. Verdict-ready (Adopt)."
+  },
+  {
+    "id": "SRC-234",
+    "url": "https://github.com/ZhuLinsen/daily_stock_analysis",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "ZhuLinsen/daily_stock_analysis (Python) - AI-driven multi-market stock analysis & decision-report system. Verdict: Skip heavy LLM-driven stock-analysis report platform; multi-source fallback is a generic pattern already pursued by Memeland, and the TA rules are equity-only. | flags: Large .env.example with many third-party keys (local-only); no secrets in code but many paid API dependencies; A-shares/equities focus means no on-chain relevance. Verdict-ready (Skip)."
+  },
+  {
+    "id": "SRC-235",
+    "url": "https://github.com/zostaff/agent-arena",
+    "kind": "github-repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "zostaff/agent-arena (TypeScript, \"DEGEN VILLAGE\") - Robinhood-Chain trading sim with pure detectors and deterministic net backtest. Verdict: Adopt the pure radar detectors, verdict-hardening/fail-safe SKIP, and the gross-net deterministic backtest split as portable TS patterns for the RH-4663 entry layer and evaluation ledger. | flags: No secrets (public free RPC, no API key); raw JSON-RPC chain reader is a clean no-key design. Moderate complexity from the sim/game shell; the LLM heuristic brain itself is not an edge. Verdict-ready (Adopt)."
+  },
+  {
+    "id": "SRC-236",
+    "url": "https://github.com/zostaff/ai-quant-researcher",
+    "kind": "github-repository",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "zostaff/ai-quant-researcher (Python, ~60 files / ~5000 LOC, MIT, 111 tests). Verdict: Adopt (as TS ports for Memeland's learn/validate layer: deflated Sharpe w/ honest trial count, purged CV + embargo, structural & correlation leakage detection, latched kill-switch, round-turn cost + sqrt-impact, arrival/implementation-shortfall TCA, and consensus meta-labeling act/skip) / Study (the gate-composition pipeline and per-regime risk attribution) / Skip (the LLM code-generation loop + `exec` runtime + anthropic/backtrader-free bar VM as a system)."
+  },
+  {
+    "id": "SRC-237",
+    "url": "https://gmgn.ai/blog/robinhood-chain-meme-coins-with-gmgn",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Robinhood Chain Meme Coins with GMGN (GMGN blog guide) - P2. Verdict: Adapt | flags: A wallet address only accepts ETH on the Robinhood network; wrong-network deposits may be unrecoverable. The guide is marketing/educational and contains volatile case-study statistics; do not treat them as predictive edge. 1% is a blog-level fee statement and must be revalidated against official fee docs. No hardcoded secrets were found. RH infrastructure is young and the article itself notes sequencer/decentralization limitations."
+  },
+  {
+    "id": "SRC-238",
+    "url": "https://goldsky.com",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Goldsky real-time indexing and streaming (stablecoin focus)`. "
+  },
+  {
+    "id": "SRC-239",
+    "url": "https://graphs.santiment.net/dex_trades",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data - Santiment GraphQL DEX Trades metric surface. Verdict: Study <reconfirms Santiment SanAPI DEX-trades GraphQL shape; paywalled and no RH, redundant with GMGN on covered chains> | flags: key-gated GraphQL, Dash SPA shell, no keyless feed; verdict-ready study-as-pattern only."
+  },
+  {
+    "id": "SRC-240",
+    "url": "https://helius.dev",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Helius Solana RPCs, gRPC, webhooks (Solana-only)`n- **What it is:** Helius is a Solana-focused RPC/API platform: RPC endpoints, enhanced APIs, gRPC streaming, webhooks, DAS/NFT and compressed-NFT APIs, and dedicated infrastructure. Landing/meta confirm it is positioned as the leading Solana RPC and API platform with a 1-click free start.`n- **Key pattern:** Solana gRPC streaming plus webhook push model for real-time on-chain events; richer Solana-specific data (token metadata, account indexing) than generic RPC.`n- **For Memeland:** Good Solana-side data tooling, but Memeland already covers Solana via GMGN and the established sniper/execution stack; paid keyed and Solana-only - it does not cover RH-4663 or other chains and adds an extra Solana vendor instead of reducing coupling.`n- **Costs:** Paid API key (rate-limited free tier); single-chain scope; another external dependency.`n- **Verdict:** Skip <paid Solana-only infra redundant with incumbent Solana/GMGN path and no RH or cross-chain value>`n- **Security/complexity flags:** keyed access, third-party Solana trust; verdict-ready skip.`n. "
+  },
+  {
+    "id": "SRC-241",
+    "url": "https://ide.bitquery.io",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data - Bitquery GraphQL blockchain API + IDE explorer`. "
+  },
+  {
+    "id": "SRC-242",
+    "url": "https://jup.ag",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "trading-execution - Jupiter DEX aggregator + swap/RFQ API (Solana)`. "
+  },
+  {
+    "id": "SRC-243",
+    "url": "https://liquidity.vision",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data - liquidity.vision (Uniswap v3 LP tool, unreachable). Verdict: Skip <dead/unreachable Uniswap-v3 LP management UI, no API, no relevance to memecoin trading edge> | flags: HTTP 000 / no route, no API surface, closed-source UI; verdict-ready skip on dead tool."
+  },
+  {
+    "id": "SRC-244",
+    "url": "https://madeonsol.com/developer",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - MadeOnSol developer/docs (Solana launchpad, blocked)`. "
+  },
+  {
+    "id": "SRC-245",
+    "url": "https://maverick-backend.onrender.com/api",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - maverick-backend.onrender.com (opaque Render backend, dead)`. "
+  },
+  {
+    "id": "SRC-246",
+    "url": "https://mcp.bitquery.io",
+    "kind": "external-source",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Bitquery MCP (multi-chain market intelligence and investigations) - P1. Verdict: Adapt | flags: OAuth is safer than hardcoded keys but introduces hosted-account and token lifecycle dependency. `execute_sql` is paid and can create unbounded scan/cost risk; enforce query time, rows, and credits. The tool catalog and schemas can change server-side. Chain coverage omits RH 4663, so blindly treating EVM output as portable is unsafe. AML labels are evidence inputs, not an autonomous trade verdict."
+  },
+  {
+    "id": "SRC-247",
+    "url": "https://mcp.crypto.com",
+    "kind": "external-source",
+    "category": "mcp-data-tools",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Crypto.com Market Data MCP (free read-only market-data MCP) - P1. Verdict: Study | flags: No customer key means weaker per-client attribution/control and dependence on a public vendor endpoint. “Free” has no stated SLA or numeric quota; it is unsuitable as a hard dependency for a bot. The absence of contract-address and chain metadata makes symbol collisions and stale/centralized listings a material risk. It is read-only, so it cannot bypass Memeland approval queue or kill-switch, but it also cannot validate execution venue prices."
+  },
+  {
+    "id": "SRC-248",
+    "url": "https://mcpmarket.com/server/openpump",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "OpenPump (MCP Market server listing) - P3. Verdict: Skip | flags: A directory listing without a readable first-party contract is insufficient for a trading dependency. Chain support, custody model, key scope, operational SLA, and ToS are unknown; RH 4663 support is unverified. Integrating from an index listing would create opaque vendor and supply-chain risk."
+  },
+  {
+    "id": "SRC-249",
+    "url": "https://orderflow.art",
+    "kind": "external-source",
+    "category": "trading-risk-research",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Orderflow.art (Ethereum order-flow/MEV visualization) - P2. Verdict: Study | flags: Historical/stale coverage is a major risk for live edge. Lack of documented API/SLA/rate limits makes automation brittle and scraping potentially ToS-sensitive. Ethereum-specific router/frontend labels do not transfer to RH 4663 without a chain-local index. Treat labels as analytics, not proof of profitable or safe execution."
+  },
+  {
+    "id": "SRC-250",
+    "url": "https://p.nomics.com/cryptocurrency-bitcoin-api",
+    "kind": "external-source",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - Nomics market-data API (deprecated/dead)`. "
+  },
+  {
+    "id": "SRC-251",
+    "url": "https://quicknode.com",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - QuickNode blockchain development platform (RH-4663 mainnet+archive+debug)`n- **What it is:** QuickNode is a multi-chain RPC/data infrastructure platform (nodes, real-time Streams, webhooks, enhanced/indexed data, with a trading-execution angle in newer positioning). Its Robinhood Chain product page explicitly confirms mainnet chain ID 4663 (plus testnet), full archive nodes with no pruning, the Debug API for debug_traceTransaction / debug_traceBlockByNumber, Streams & Webhooks, and an Orbit/L2 profile settling to Ethereum with ETH gas - plus a 500B+ requests SLA and private endpoints.`n- **Key pattern:** The Debug-API + archive pattern is directly relevant: trace-level RPC endpoints expose internal transaction/execution structure for fill simulation, slippage modeling, and MEV-style analysis - the exact primitives Memeland already leans on for RH fast-submit/Nitro/Quoter/txlock. Streams/Webhooks offer a push pattern for monitoring.`n- **For Memeland:** Most complete RH-4663 RPC story among the surveyed providers (mainnet archive + debug_traceTransaction). Useful as a backup execution-observability provider and a reference design for how to structure chain-specific RPC config for RH. No token analytics/launchpad - it is infra, not a data feed.`n- **Costs:** Paid keyed private endpoints (pay-as-you-go tiers); adds an external key dependency that competes with the already-adopted RH execution stack rather than extending it.`n- **Verdict:** Study <provider option with the most explicit RH-4663 mainnet + debug/archive coverage; good backup + reference, not raw data edge>`n- **Security/complexity flags:** keyed auth, cost-metered usage; verdict-ready study-as-provider-option.`n. "
+  },
+  {
+    "id": "SRC-252",
+    "url": "https://shyft.to",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Shyft Solana gRPC and staked RPCs (Solana-only)`. "
+  },
+  {
+    "id": "SRC-253",
+    "url": "https://solana.com",
+    "kind": "external-source",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Solana (network/ecosystem and developer portal) - P3. Verdict: Study | flags: Homepage performance and ecosystem claims are not a substitute for RPC/indexer SLAs or token-risk data. Adopting the ecosystem stack would add Solana RPC, transaction, wallet, and account-model dependencies. The fetched page exposes Sentry metadata in HTML, but no secret key was identified; do not copy telemetry identifiers into runtime. No paid API terms are stated here."
+  },
+  {
+    "id": "SRC-254",
+    "url": "https://solanatracker.io",
+    "kind": "external-source",
+    "category": "chain-execution",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "Solana Tracker (Solana data API, streams, RPC, and risk tooling) - P2. Verdict: Adapt | flags: Solana-only account/authority semantics and Raptor swap/RPC transaction features are not portable to RH 4663. `sendTransaction` is a write surface and must never be connected directly to Memeland execution; use only through the existing approval queue, risk veto, kill-switch, and verified-key path if ever needed. API-key handling, quota exhaustion, stream reconnects, and vendor-specific risk scores require isolation. No hardcoded secret was found; the free tier and 70+ endpoint claims are vendor-stated and pricing beyond the free tier was not verified."
+  },
+  {
+    "id": "SRC-255",
+    "url": "https://thegraph.com",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - The Graph indexing protocol (GraphQL subgraphs)`. "
+  },
+  {
+    "id": "SRC-256",
+    "url": "https://triton.one",
+    "kind": "external-source",
+    "category": "chain-data-infra",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "chain-data-infra - Triton Solana RPC and validator infra (Solana-only)`. "
+  },
+  {
+    "id": "SRC-257",
+    "url": "https://www.coingecko.com/en/categories/meme-token",
+    "kind": "external-source",
+    "category": "meme-smart-money",
+    "priority": "P0",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "CoinGecko Meme Category (market/category index) - P3. Verdict: Study | flags: Category labels and token listings are centralized and can lag new launches or omit unverified contracts. Symbol/name matching is unsafe for trading. The page does not prove chain ID 4663 support or token-level RH freshness. No hardcoded key was found; pricing/quotas are undocumented on this page."
+  },
+  {
+    "id": "SRC-258",
+    "url": "https://www.coingecko.com/learn/best-free-crypto-api",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - CoinGecko \"Best Free Crypto APIs\" comparison (editorial). Verdict: Study <useful comparative selection framework for keyless feed redundancy, not a data feed; no RH-4663 detail> | flags: vendor editorial (biased to CoinGecko), no API surface; verdict-ready study-as-reference only."
+  },
+  {
+    "id": "SRC-259",
+    "url": "https://www.geckoterminal.com",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - GeckoTerminal web product (token discovery + new pools). Verdict: Study <product pattern for new-pool/early-token discovery and deep multi-chain coverage; geo-blocked here, RH-4663 unconfirmed, overlaps SRC-034> | flags: free keyless product, geo-block observed, no RH confirmation; verdict-ready study-as-discovery-pattern/secondary feed."
+  },
+  {
+    "id": "SRC-260",
+    "url": "https://www.theblockcrypto.com/data/open-finance/dex-non-custodial",
+    "kind": "external-source",
+    "category": "market-data",
+    "priority": "P1",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "market-data - The Block DEX volume dashboard (paywalled). Verdict: Skip <aggregate monthly macro charting, paywalled, no API feed, no memecoin/RH-4663 edge, redundant with DefiLlama/CoinGecko volume>"
+  },
+  {
+    "id": "SRC-261",
+    "url": "https://github.com/tsukiema1/FLYWHEEL",
+    "kind": "repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "tsukiema1/FLYWHEEL (JavaScript + optional Python) - connectome-gated RH-4663 paper sim: signals propose, pure-code risk decides. Verdict: Adopt the propose-vs-decide risk architecture, structured observed/limit risk checks, resulting-weight sizing, two-sided liquidity band, and append-only decision ledger; Skip the biological/connectome signal layer. | flags: No signer/key handling at all (good for a paper lab); fixture addresses are truncated/hardcoded; clear trust-boundary documentation. Verdict-ready."
+  },
+  {
+    "id": "SRC-262",
+    "url": "https://github.com/zostaff/grok-trading-desk",
+    "kind": "repository",
+    "category": "general",
+    "priority": "P2",
+    "status": "reviewed",
+    "clonePath": null,
+    "notes": "zostaff/grok-trading-desk (Python) - fail-closed 13-bot LLM desk: code vetoes, pessimistic fallbacks, cross-market risk sizing, outcome memory. Verdict: Adopt Fail-closed vetoes, pessimistic fallbacks, cross-market sizing, and cost-gated two-stage filtering map to real operational edges and port to every chain Memeland trades; also a concrete GMGN-decoupling pattern. | flags: Secrets are gitignored (config.example only) and paper-first with a live-mode CLI flag; crypto signing intentionally not shipped (user writes the executor). Moderate complexity overall (13 bots) but the transferable parts are small pure-code modules. No rank-manipulation; adversarial checkers add cost. Verdict-ready."
+  }
+]
