@@ -116,7 +116,18 @@ export function securityVote(auditPassed: boolean, penalties: string[] = [], bot
  * bot-driven flow is untrustworthy, so a high bot risk floors the whale score
  * even if the trade feed shows heavy buying.
  */
-export function whaleVote(trades: VoterContext['trackTrades'] = [], botRisk = 0): VoterOpinion {
+export interface WhaleEnrichment {
+  /** 0-100 per-token wallet-score (Q03) — blend, neutral when absent. */
+  walletScore?: number;
+  /** 0-100 accumulation convergence (Q05) — blend, neutral when absent. */
+  convergence?: number;
+}
+
+export function whaleVote(
+  trades: VoterContext['trackTrades'] = [],
+  botRisk = 0,
+  enrichment: WhaleEnrichment = {}
+): VoterOpinion {
   if (!trades || trades.length === 0) {
     const reasons = botRisk >= 60 ? [`bot risk ${Math.round(botRisk)} — flow not trusted`] : ['no smart-money flow data — neutral'];
     return {
@@ -141,7 +152,25 @@ export function whaleVote(trades: VoterContext['trackTrades'] = [], botRisk = 0)
     `smart-money buys $${(buys / 1000).toFixed(1)}k / sells $${(sells / 1000).toFixed(1)}k`,
     exitFlags > 0 ? `${exitFlags} full close(s) detected` : 'no full closes',
   ];
+  // Q03/Q05 enrichment: blend towards the wallet-score / convergence read when
+  // supplied. Missing/NaN inputs never shift the vote (fail-closed).
+  const supp: number[] = [];
+  if (typeof enrichment.walletScore === 'number' && Number.isFinite(enrichment.walletScore)) {
+    supp.push(Math.max(0, Math.min(100, enrichment.walletScore)));
+    reasons.push(`wallet score ${Math.round(enrichment.walletScore)}`);
+  }
+  if (typeof enrichment.convergence === 'number' && Number.isFinite(enrichment.convergence)) {
+    supp.push(Math.max(0, Math.min(100, enrichment.convergence)));
+    reasons.push(`flow convergence ${Math.round(enrichment.convergence)}`);
+  }
+  let blended = finalScore;
+  if (supp.length > 0) {
+    const suppAvg = supp.reduce((a, b) => a + b, 0) / supp.length;
+    blended = Math.round(finalScore * 0.5 + suppAvg * 0.5);
+  }
+  blended = Math.max(0, Math.min(100, blended));
   let capped = finalScore;
+  if (supp.length > 0) capped = blended;
   if (botRisk >= 60) {
     capped = Math.min(capped, 40);
     reasons.push(`bot risk ${Math.round(botRisk)} caps accumulation read`);
