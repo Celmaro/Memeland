@@ -26,13 +26,21 @@ export interface RiskEvaluationResult {
   recommendedPositionSizeUsd?: number;
 }
 
+export interface RiskEngineV2Options extends Partial<RiskEngineConfig> {
+  loadKillSwitch?: () => boolean;
+  saveKillSwitch?: (v: boolean) => void;
+}
+
 export class RiskEngineV2 {
   private config: RiskEngineConfig;
   private isKillSwitchActive = false;
   private killSwitchActivatedAt: number | null = null;
   private consecutiveLossesCount = 0;
+  private loadKillSwitch: () => boolean;
+  private saveKillSwitch: (v: boolean) => void;
 
-  constructor(config?: Partial<RiskEngineConfig>) {
+  constructor(options: RiskEngineV2Options = {}) {
+    const { loadKillSwitch, saveKillSwitch, ...config } = options;
     this.config = {
       maxPortfolioDrawdownPercent: 50, // Updated to 50% max daily drawdown
       maxSingleAssetExposurePercent: 10,
@@ -42,6 +50,11 @@ export class RiskEngineV2 {
       killSwitchCooldownMinutes: 60,
       ...config,
     };
+    this.loadKillSwitch = loadKillSwitch ?? (() => false);
+    this.saveKillSwitch = saveKillSwitch ?? (() => {});
+    if (this.loadKillSwitch()) {
+      this.isKillSwitchActive = true;
+    }
   }
 
   /**
@@ -148,6 +161,7 @@ export class RiskEngineV2 {
   public activateKillSwitch(reason: string): void {
     this.isKillSwitchActive = true;
     this.killSwitchActivatedAt = Date.now();
+    this.saveKillSwitch(true);
     console.error(`🚨 OPENCATZ 9-LIVES RISK ENGINE: Emergency Kill Switch Activated! Reason: ${reason}`);
   }
 
@@ -158,6 +172,7 @@ export class RiskEngineV2 {
     this.isKillSwitchActive = false;
     this.killSwitchActivatedAt = null;
     this.consecutiveLossesCount = 0;
+    this.saveKillSwitch(false);
     console.log(`✅ OPENCATZ 9-LIVES RISK ENGINE: Kill Switch manually reset.`);
   }
 
