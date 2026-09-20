@@ -268,3 +268,259 @@ export class WalletTracker {
     return alerts;
   }
 }
+
+/**
+ * PR10 - Adapt-Only #2: whale/whale-tracker extensions.
+ *
+ * Pure, zero-dependency helpers for trader-following, concentration, bundle
+ * discovery, batched/deduped balance reads, retry/backoff, and idempotent
+ * dedup-merge. These extend the tracker without touching the existing scan or
+ * exit-alert paths.
+ */
+
+export interface WalletTradeRecord {
+  wallet: string;
+  token: string;
+  side: 'buy' | 'sell';
+  usd: number;
+  /** Realized PnL for the trade, when known. */
+  pnlUsd?: number;
+  blockTime?: number;
+  txHash?: string;
+}
+
+export interface TraderFollowRank {
+  wallet: string;
+  realizedPnlUsd: number;
+  trades: number;
+  winRatePct: number;
+}
+
+/**
+ * Rank wallets by realized PnL (Vybe-style trader-following signal). Fail-open:
+ * wallets with no realized-PnL records are omitted rather than ranked 0.
+ */
+export function rankTradersByRealizedPnl(
+  trades: WalletTradeRecord[]
+): TraderFollowRank[] {
+  const list = Array.isArray(trades) ? trades : [];
+  const byWallet = new Map<string, { pnl: number; trades: number; wins: number }>();
+  for (const t of list) {
+    if (t.pnlUsd === undefined || !Number.isFinite(t.pnlUsd)) continue;
+    const w = String(t.wallet || '');
+    if (!w) continue;
+    const rec = byWallet.get(w) ?? { pnl: 0, trades: 0, wins: 0 };
+    rec.pnl += t.pnlUsd;
+    rec.trades += 1;
+    if (t.pnlUsd > 0) rec.wins += 1;
+    byWallet.set(w, rec);
+  }
+  return [...byWallet.entries()]
+    .map(([wallet, rec]) => ({
+      wallet,
+      realizedPnlUsd: rec.pnl,
+      trades: rec.trades,
+      winRatePct: rec.trades > 0 ? (rec.wins / rec.trades) * 100 : 0,
+    }))
+    .sort((a, b) => b.realizedPnlUsd - a.realizedPnlUsd);
+}
+
+export interface ConcentrationResult {
+  topNUsd: number;
+  totalUsd: number;
+  concentrationPct: number | null;
+  topWallets: Array<{ wallet: string; usd: number }>;
+}
+
+/**
+ * Share of traded USD concentrated in the top-N wallets. Fail-closed: null
+ * concentration (not 0) when there is no volume.
+ */
+export function traderConcentration(
+  trades: WalletTradeRecord[],
+  topN: number
+): ConcentrationResult {
+  const list = Array.isArray(trades) ? trades : [];
+  const n = Math.max(1, Math.floor(topN));
+  const byWallet = new Map<string, number>();
+  let totalUsd = 0;
+  for (const t of list) {
+    const w = String(t.wallet || '');
+    if (!w) continue;
+    const usd = Number.isFinite(t.usd) ? t.usd : 0;
+    byWallet.set(w, (byWallet.get(w) ?? 0) + usd);
+    totalUsd += usd;
+  }
+  const sorted = [...byWallet.entries()].sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, n);
+  const topNUsd = top.reduce((a, [, usd]) => a + usd, 0);
+  return {
+    topNUsd,
+    totalUsd,
+    concentrationPct: totalUsd > 0 ? (topNUsd / totalUsd) * 100 : null,
+    topWallets: top.map(([wallet, usd]) => ({ wallet, usd })),
+  };
+}
+
+export interface BundleDetectionOptions {
+  windowSec?: number;
+  minWallets?: number;
+}
+
+export interface Bundle {
+  token: string;
+  wallets: string[];
+  totalUsd: number;
+  lastBlockTime?: number;
+}
+
+/**
+ * Detect "bundle" buys: >= minWallets distinct wallets buying the same token
+ * within a time window. Only buy-side trades count; fail-open [].
+ */
+export function detectBundles(
+  trades: WalletTradeRecord[],
+  options: BundleDetectionOptions = {}
+): Bundle[] {
+  const list = Array.isArray(trades) ? trades : [];
+  const windowSec = options.windowSec ?? 60;
+  const minWallets = options.minWallets ?? 2;
+  const byToken = new Map<string, WalletTradeRecord[]>();
+  for (const t of list) {
+    if (t.side !== 'buy') continue;
+    if (t.blockTime === undefined) continue;
+    const tok = String(t.token || '');
+    if (!tok) continue;
+    const bucket = byToken.get(tok) ?? [];
+    bucket.push(t);
+    byToken.set(tok, bucket);
+  }
+
+  const bundles: Bundle[] = [];
+  for (const [token, bucket] of byToken) {
+    const sorted = [...bucket].sort((a, b) => (a.blockTime ?? 0) - (b.blockTime ?? 0));
+    let start = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      while (
+        (sorted[i]!.blockTime ?? 0) - (sorted[start]!.blockTime ?? 0) > windowSec
+      ) {
+        start++;
+      }
+      const windowWallets = new Set(
+        sorted.slice(start, i + 1).map((t) => String(t.wallet || ''))
+      );
+      if (windowWallets.size >= minWallets) {
+        const group = sorted.slice(start, i + 1);
+        bundles.push({
+          token,
+          wallets: [...windowWallets],
+          totalUsd: group.reduce((a, t) => a + (Number.isFinite(t.usd) ? t.usd : 0), 0),
+          lastBlockTime: group[group.length - 1]!.blockTime,
+        });
+        start = i + 1;
+      }
+    }
+  }
+  return bundles;
+}
+
+export interface BatchBalanceRequest {
+  chain: string;
+  token: string;
+  owner: string;
+}
+
+/**
+ * GMGN-style batch balance reader with in-flight dedupe: concurrent reads of
+ * the same chain:token:owner collapse to a single underlying call, and
+ * `readMany` maps a batch of requests (fail-closed null per failed read).
+ */
+export class BalanceBatchReader {
+  private inFlight = new Map<string, Promise<bigint | null>>();
+
+  constructor(private readonly readOne: EvmBalanceReader) {}
+
+  private key(req: BatchBalanceRequest): string {
+    return `${req.chain}:${req.token.toLowerCase()}:${req.owner.toLowerCase()}`;
+  }
+
+  async read(chain: string, token: string, owner: string): Promise<bigint | null> {
+    const key = `${chain}:${token.toLowerCase()}:${owner.toLowerCase()}`;
+    const existing = this.inFlight.get(key);
+    if (existing) return existing;
+    const p = Promise.resolve(this.readOne(chain, token, owner)).catch(() => null);
+    this.inFlight.set(key, p);
+    try {
+      return await p;
+    } finally {
+      this.inFlight.delete(key);
+    }
+  }
+
+  async readMany(requests: BatchBalanceRequest[]): Promise<Map<string, bigint | null>> {
+    const list = Array.isArray(requests) ? requests : [];
+    const results = new Map<string, bigint | null>();
+    await Promise.all(
+      list.map(async (req) => {
+        results.set(this.key(req), await this.read(req.chain, req.token, req.owner));
+      })
+    );
+    return results;
+  }
+}
+
+export interface RetryBackoffOptions {
+  maxRetries?: number;
+  baseMs?: number;
+  maxMs?: number;
+  /** Whether the error is retryable. Default: true for HTTP 429/5xx, else false. */
+  isRetryable?: (err: Error & { status?: number }) => boolean;
+}
+
+/**
+ * kol-quest retry/429-backoff. Retries `fn` up to `maxRetries` with capped
+ * exponential backoff when the error is retryable. Rethrows the last error
+ * once the retry budget is exhausted.
+ */
+export async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  options: RetryBackoffOptions = {}
+): Promise<T> {
+  const maxRetries = Math.max(1, Math.floor(options.maxRetries ?? 3));
+  const baseMs = Math.max(1, options.baseMs ?? 100);
+  const maxMs = Math.max(baseMs, options.maxMs ?? 2000);
+  const isRetryable =
+    options.isRetryable ??
+    ((err: Error & { status?: number }) =>
+      err?.status === 429 || (err?.status ?? 0) >= 500);
+
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      const e = err as Error & { status?: number };
+      if (attempt >= maxRetries || !isRetryable(e)) throw err;
+      const delay = Math.min(maxMs, baseMs * 2 ** (attempt - 1));
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+/**
+ * Idempotent poll+ingest merge: merges incoming records into an existing map
+ * keyed by `keyOf`, with later records replacing earlier ones for the same key.
+ */
+export function dedupMerge<T>(
+  existing: Map<string, T>,
+  incoming: T[],
+  keyOf: (record: T) => string
+): Map<string, T> {
+  const list = Array.isArray(incoming) ? incoming : [];
+  const merged = new Map(existing);
+  for (const record of list) {
+    merged.set(keyOf(record), record);
+  }
+  return merged;
+}
