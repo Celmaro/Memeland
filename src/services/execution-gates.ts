@@ -20,6 +20,16 @@ import path from 'path';
 import { SafeConfigRegistry, type SafeConfigIO } from './safety-registry.js';
 import { CapabilityRBAC } from './exec-governance.js';
 import { TxLock } from './rh-execution-core.js';
+import { sizePosition } from '../orchestrator/position-sizing.js';
+import { CostGate } from './cost-gating.js';
+import { simulateFill } from './fill-simulation.js';
+import { ApprovalGovernance } from './exec-governance.js';
+
+/** Read a positive env number with a default (invalid/absent → default). */
+function envNum(key: string, def: number): number {
+  const v = Number(process.env[key]);
+  return Number.isFinite(v) && v > 0 ? v : def;
+}
 
 function safeConfigFilePath(): string {
   return path.join(process.cwd(), 'database', 'safe-config.json');
@@ -83,5 +93,70 @@ export function gateSellability() {
       sellable: true,
       reason: `sellability check not configured — not enforced (token ${tokenAddress})`,
     }),
+  };
+}
+
+// ── Q07/Q08/Q13/Q11 providers (wired into executeMemeBuy via the live call sites) ──
+
+/** Q07 multi-constraint sizer — clamps to the binding constraint, refuses below floor. */
+export function gateSizer() {
+  const maxNotionalUsd = envNum('MAX_NOTIONAL_USD', 2000);
+  const minUsd = envNum('MIN_TRADE_USD', 0);
+  return {
+    clamp(desiredUsd: number): { allowed: boolean; amountUsd: number; reason?: string } {
+      const r = sizePosition(desiredUsd, { maxNotionalUsd, minUsd });
+      if (r.refused) return { allowed: false, amountUsd: 0, reason: r.reason || `constraint ${r.constraint}` };
+      return { allowed: true, amountUsd: r.sizeUsd };
+    },
+  };
+}
+
+/** Q08 fill simulation — refuses zero/illiquid depth and impact over cap. */
+export function gateFillSim() {
+  const maxImpact = envNum('MAX_FILL_IMPACT_PCT', 5);
+  return {
+    check(input: { amountUsd: number; midPriceUsd: number; liquidityUsd?: number }): { allowed: boolean; impactPct: number; reason?: string } {
+      const r = simulateFill({ notionalUsd: input.amountUsd, midPriceUsd: input.midPriceUsd, depth: { liquidityUsd: input.liquidityUsd } });
+      if (r.refused) return { allowed: false, impactPct: 0, reason: r.reason || 'zero/illiquid depth' };
+      if (r.impactPct > maxImpact) return { allowed: false, impactPct: r.impactPct, reason: `impact ${r.impactPct.toFixed(1)}% > cap ${maxImpact}%` };
+      return { allowed: true, impactPct: r.impactPct };
+    },
+  };
+}
+
+/** Q13 cumulative cost gate — a fill must stay within the config cost budget. Opt-in:
+ *  only enforced when COST_CAP_USD is set (so wiring never silently bricks a running bot). */
+let costGateSingleton: CostGate | null = null;
+let costGateEnabled = false;
+export function gateCostGate() {
+  if (!costGateSingleton) {
+    const raw = process.env.COST_CAP_USD;
+    costGateEnabled = raw !== undefined && raw !== '';
+    costGateSingleton = new CostGate(costGateEnabled ? envNum('COST_CAP_USD', 50) : Number.MAX_SAFE_INTEGER);
+    if (!costGateEnabled) console.warn('[EXEC] COST_CAP_USD not set — cost gate not enforced');
+  }
+  return {
+    trySpend(costUsd: number): { allowed: boolean; reason?: string } {
+      if (!costGateEnabled) return { allowed: true };
+      if (!costGateSingleton!.canSubmit(costUsd)) {
+        return { allowed: false, reason: `cumulative cost budget exhausted (spent $${costGateSingleton!.spentUsd.toFixed(2)})` };
+      }
+      costGateSingleton!.recordFill(costUsd);
+      return { allowed: true };
+    },
+  };
+}
+
+/** Q11 execution governance — idempotent reservation + hash-locked receipt. */
+let governanceSingleton: ApprovalGovernance | null = null;
+export function gateGovernance() {
+  if (!governanceSingleton) governanceSingleton = new ApprovalGovernance();
+  return {
+    reserve(order: { nonce: string; payload: string }) {
+      return governanceSingleton!.reserve(order);
+    },
+    issue(order: { nonce: string; payload: string }) {
+      return governanceSingleton!.issueReceipt(order);
+    },
   };
 }

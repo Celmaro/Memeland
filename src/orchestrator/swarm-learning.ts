@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import type { VoterId } from './voters.js';
+import { deflationFactor, deflatedSharpe } from './learning-harness.js';
+import { icWeightDeltas, applyDeltas } from './scoring-calibration.js';
 
 export interface SignalOutcome {
   id: string;
@@ -31,6 +33,9 @@ const BASE_VOTER_WEIGHTS: Record<VoterId, number> = {
   whale: 0.1,
   regime: 0.05,
   critic: 0.1,
+  wallet: 0.08,
+  convergence: 0.06,
+  rubric: 0.09,
 };
 
 const LEARNING_DEFAULTS = {
@@ -39,6 +44,14 @@ const LEARNING_DEFAULTS = {
   devHolding: 0.20,
   twitter: 0.20,
 };
+
+/** Learning-weight keys calibrated by IC-weighted deltas. */
+const VOTER_KEYS: Array<keyof SwarmWeights> = [
+  'smartMoneyWeight',
+  'liquidityWeight',
+  'devHoldingWeight',
+  'twitterWeight',
+];
 
 export class SwarmLearningEngine {
   private dbPath: string;
@@ -50,6 +63,9 @@ export class SwarmLearningEngine {
     devHoldingWeight: 0.20,
     twitterWeight: 0.20,
   };
+  private lastCalibrationReason: string | null = null;
+  private calibratedIds = new Set<string>();
+  private static readonly MIN_TRIALS = 25;
 
   constructor(dbPath?: string) {
     this.dbPath = dbPath || path.join(process.cwd(), 'database', 'swarm_learning.json');
@@ -232,6 +248,83 @@ export class SwarmLearningEngine {
     }
     for (const id of Object.keys(out) as VoterId[]) out[id] = out[id] / sum;
     return out;
+  }
+
+  /**
+   * Anti-overfit honesty-gated scoring calibration. Runs the terminal outcome
+   * stream through the Q01 harness (deflationFactor/deflatedSharpe) and the
+   * Q10 scoring-calibration module (icWeightDeltas/applyDeltas). A high trial
+   * count PLUS a positive deflated signal applies IC-weighted deltas to the
+   * learning weights; a low trial count or a suspicious (non-positive) stream
+   * applies NOTHING and records a reason. Idempotent: already-calibrated
+   * outcomes are never re-applied, so re-calling on the same stream is a no-op.
+   *
+   * @param freshOutcomes optional terminal-outcome stream; defaults to the
+   *   in-memory outcome history.
+   */
+  public calibrate(freshOutcomes?: SignalOutcome[]): void {
+    const src = freshOutcomes ?? this.outcomes;
+    const closed = src.filter(
+      (o) => o.result !== 'OPEN' && !this.calibratedIds.has(o.id)
+    );
+
+    if (closed.length === 0) {
+      this.lastCalibrationReason = 'calibration skipped: no new terminal outcomes to calibrate';
+      return;
+    }
+
+    // Idempotency: any outcome we evaluate is consumed exactly once, whether or
+    // not the honesty gate passes, so a re-run of the same stream never double-applies.
+    for (const o of closed) this.calibratedIds.add(o.id);
+
+    const wins = closed.filter((o) => o.result.startsWith('TAKE_PROFIT')).length;
+    const numTrials = closed.length;
+    const winRate = wins / numTrials;
+    // Positive raw stream signal iff the win rate beats break-even.
+    const rawSignal = (winRate - 0.5) * 2;
+    const deflated = deflatedSharpe(rawSignal, numTrials, 1);
+    const factor = deflationFactor(numTrials, 1);
+
+    if (numTrials < SwarmLearningEngine.MIN_TRIALS) {
+      this.lastCalibrationReason =
+        `calibration skipped: low trial count (${numTrials} < ${SwarmLearningEngine.MIN_TRIALS}) — overfit risk`;
+      return;
+    }
+    if (deflated <= 0) {
+      this.lastCalibrationReason =
+        `calibration skipped: suspicious stream — deflated signature ${deflated.toFixed(3)} <= 0 ` +
+        `(win-rate ${Math.round(winRate * 100)}%, deflation factor ${factor.toFixed(3)})`;
+      return;
+    }
+
+    // Honest positive stream → apply IC-weighted calibration deltas.
+    const rows = closed.map((o) => ({
+      voterScores: {
+        smartMoneyWeight: o.confidenceScore,
+        liquidityWeight: o.confidenceScore,
+        devHoldingWeight: o.confidenceScore,
+        twitterWeight: o.confidenceScore,
+      },
+      realized: o.result.startsWith('TAKE_PROFIT') ? 1 : 0,
+    }));
+    const base = this.weights as unknown as Record<string, number>;
+    const { deltas } = icWeightDeltas(rows, [...VOTER_KEYS], base);
+    const calibrated = applyDeltas(base, deltas);
+    this.weights = {
+      smartMoneyWeight: calibrated['smartMoneyWeight'],
+      liquidityWeight: calibrated['liquidityWeight'],
+      devHoldingWeight: calibrated['devHoldingWeight'],
+      twitterWeight: calibrated['twitterWeight'],
+    };
+    this.saveState();
+    this.lastCalibrationReason =
+      `calibration applied: ${numTrials} trials, deflated signature ${deflated.toFixed(3)}, ` +
+      `deltas ${JSON.stringify(deltas)}`;
+  }
+
+  /** Most recent calibrate() outcome reason, or null if none recorded yet. */
+  public getLastCalibrationReason(): string | null {
+    return this.lastCalibrationReason;
   }
 
   public getWinRatePercentage(): number {

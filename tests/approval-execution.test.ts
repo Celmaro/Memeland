@@ -242,4 +242,105 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         })).rejects.toThrow('rpc down');
         expect(released).toBe(1);
       });
+
+      // ── Batch 1/2 wiring: sizing, fill-sim, cost, governance, executor ──
+
+      it('Q07 sizer refused → fill blocked before EVM', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          sizer: { clamp: () => ({ allowed: false, amountUsd: 0, reason: 'below floor' }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/sizing gate refused/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q07 sizer clamps the effective amount passed to the EVM adapter', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          sizer: { clamp: () => ({ allowed: true, amountUsd: 0.25 }) }, // 0.25 USD → 0.5 ETH
+        });
+        expect(evm.executeBuyToken).toHaveBeenCalledWith(
+          expect.objectContaining({ amountEth: 0.5 }),
+          wallet
+        );
+      });
+
+      it('Q08 fill-sim refused → fill blocked (zero/illiquid depth, fail-closed)', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          fillSim: { check: () => ({ allowed: false, impactPct: 999, reason: 'zero/illiquid depth' }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/fill-sim gate refused/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q13 cost gate refused → fill blocked after budget exhausted', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          costGate: { trySpend: () => ({ allowed: false, reason: 'budget exhausted' }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/cost gate refused/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q11 governance reservation conflict → fill blocked', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          governance: { reserve: () => ({ reserved: false, reason: 'nonce already reserved' }), issue: () => ({ valid: true }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/governance reservation refused/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q11 governance receipt hash mismatch → fill blocked', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          governance: { reserve: () => ({ reserved: true }), issue: () => ({ valid: false, reason: 'payload hash mismatch' }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/governance receipt refused/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q09 executor-DI routes the fill through the executor (confirmed) and skips the EVM adapter', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const submit = vi.fn().mockResolvedValue({ outcome: 'confirmed', txHash: '0xhash', at: Date.now() });
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          executor: { submit },
+        });
+        expect(res.success).toBe(true);
+        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ token: '0xabc', side: 'buy', chainId: 4663 }));
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q09 executor returns failed/timed_out → the fill reports failure (no false success)', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const submit = vi.fn().mockResolvedValue({ outcome: 'timed_out', reason: 'no receipt in window', at: Date.now() });
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          executor: { submit },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/no receipt in window/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
     });

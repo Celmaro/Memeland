@@ -1,4 +1,6 @@
 import { GMGNAdapter, GMGNRawToken, type Chain, type KlineCandle } from '../../adapters/gmgn-adapter.js';
+import { RhFillTapeReader, type FillTapeWindow } from '../../adapters/rh-fill-tape.js';
+import { chainIdFor, type MarketDataProvider, type MarketToken } from '../../adapters/market-data-provider.js';
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { globalMarketRegimeFilter } from '../../services/market-regime.js';
 import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
@@ -12,7 +14,7 @@ import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
   type VoterOpinion, type VoterScores, type VoterContext, scoresFromOpinions,
-  whaleVote, regimeVote, securityVote,
+  whaleVote, regimeVote, securityVote, walletVote, convergenceVote, rubricVote,
 } from '../../orchestrator/voters.js';
 
 export interface RobinhoodSignal {
@@ -77,13 +79,20 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private criticVoter: CriticVoter | null;
   private sentimentVoter: SentimentVoter;
 
+  /** Q04 fill-tape transport (per-token corroboration). Empty until injected. */
+  private tape: RhFillTapeReader | null;
+  /** Q04 tape token addresses to probe (the transport's enumeration). */
+  private tapeTokenAddresses: string[];
+  /** Q06 keyless DexScreener feed. Empty until injected. */
+  private dexscreener: MarketDataProvider | null;
+
   /** Last pass funnel stats — consumed by index.ts for the Phase-1 [FUNNEL] counters. */
   private lastFunnel: { scanned: number; prefiltered: number; emitted: number } = { scanned: 0, prefiltered: 0, emitted: 0 };
 
   constructor(
     config?: Partial<RobinhoodScreeningConfig>,
     strategyParams?: () => Record<string, unknown>,
-    opts: { voterSwarm?: boolean; critic?: CriticVoter | null } = {}
+    opts: { voterSwarm?: boolean; critic?: CriticVoter | null; tape?: RhFillTapeReader; tapeTokenAddresses?: string[]; dexscreener?: MarketDataProvider } = {}
   ) {
     this.gmgn = new GMGNAdapter();
     this.strategyEngine = new StrategyEngine();
@@ -92,6 +101,9 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.voterSwarm = opts.voterSwarm ?? process.env.VOTER_SWARM_ENABLED === 'true';
     this.criticVoter = opts.critic ?? null;
     this.sentimentVoter = new SentimentVoter();
+    this.tape = opts.tape ?? null;
+    this.tapeTokenAddresses = opts.tapeTokenAddresses ?? [];
+    this.dexscreener = opts.dexscreener ?? null;
   }
 
   /**
@@ -145,6 +157,98 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       ...hotSearches,
     ];
     return this.dedupeTokens.dedupe(candidates);
+  }
+
+  /**
+   * Q04 fill-tape additional candidates (BOOSTER, not a replacement). Guarded by
+   * env RH_TAPE_ENABLED=true (default off). Active only when a tape transport
+   * (RhFillTapeReader + token addresses) is injected. Normalizes each probed
+   * token's tape window into a GMGNRawToken with source 'dexscreener' (the only
+   * non-gmgn member of the source union). Fail-open: empty on any error/unconfigured.
+   */
+  public async collectTapeCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    if (process.env.RH_TAPE_ENABLED !== 'true') return [];
+    if (!this.tape || this.tapeTokenAddresses.length === 0) return [];
+    try {
+      const out: GMGNRawToken[] = [];
+      for (const address of this.tapeTokenAddresses) {
+        const window = await this.tape.readFillTape(address);
+        if (!window || window.failOpen || !window.entries || window.entries.length === 0) continue;
+        out.push(this.normalizeTapeWindow(chain, window));
+      }
+      return out;
+    } catch (err: any) {
+      console.warn(`[ROBINHOOD AGENT] Fill-tape candidates failed (skipped): ${err.message}`);
+      return [];
+    }
+  }
+
+  private normalizeTapeWindow(chain: Chain, window: FillTapeWindow): GMGNRawToken {
+    const address = window.tokenAddress || '';
+    const symbol = (address.slice(0, 6) || 'TAPE').toUpperCase();
+    return {
+      chain,
+      address,
+      symbol,
+      name: `Tape ${symbol}`,
+      priceUsd: 0, marketCapUsd: 0, volume24hUsd: 0, volume1hUsd: 0, liquidityUsd: 0,
+      buys: 0, sells: 0, swaps: 0, holderCount: 0,
+      top10HolderRate: null, devTeamHoldRate: null, creatorClose: false, creatorTokenStatus: null,
+      smartDegenCount: 0, renownedCount: 0, bundlerRate: null, ratTraderAmountRate: null,
+      rugRatio: null, isWashTrading: false, isHoneypot: null, ctoFlag: false,
+      renouncedMint: false, renouncedFreeze: false, creationTimestamp: null, openTimestamp: null,
+      priceChange1m: null, priceChange5m: null, priceChange1h: null,
+      visitingCount: 0, squareMentions: 0,
+      twitterRenameCount: 0, twitterDelPostCount: 0, twitterCreateTokenCount: 0,
+      buyTax: null, sellTax: null, dexscrBoostFee: 0, dexscrAd: 0, totalFeeNative: null,
+      exchange: null, launchpadPlatform: null, launchpadStatus: null, progress: null,
+      source: 'dexscreener',
+    };
+  }
+
+  /**
+   * Q06 keyless DexScreener additional candidates (BOOSTER). Guarded by env
+   * DEXSCREENER_FEED_ENABLED=true (default off). Active only when a DexScreener
+   * feed is injected. Normalizes discovered MarketTokens (filtered to the current
+   * chain) into GMGNRawToken with source 'dexscreener'. Fail-open: empty.
+   */
+  public async collectDexscreenerCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    if (process.env.DEXSCREENER_FEED_ENABLED !== 'true') return [];
+    if (!this.dexscreener) return [];
+    try {
+      const chainId = chainIdFor(chain);
+      const tokens = await this.dexscreener.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
+      return tokens.map((t) => this.normalizeDexToken(chain, t));
+    } catch (err: any) {
+      console.warn(`[ROBINHOOD AGENT] DexScreener candidates failed (skipped): ${err.message}`);
+      return [];
+    }
+  }
+
+  private normalizeDexToken(chain: Chain, t: MarketToken): GMGNRawToken {
+    const symbol = t.symbol || 'TOKEN';
+    return {
+      chain,
+      address: t.address,
+      symbol,
+      name: t.name || symbol,
+      priceUsd: t.priceUsd || 0,
+      marketCapUsd: t.mcapUsd ?? t.fdvUsd ?? 0,
+      volume24hUsd: t.volume24hUsd || 0,
+      volume1hUsd: 0,
+      liquidityUsd: t.liquidityUsd || 0,
+      buys: 0, sells: 0, swaps: 0, holderCount: 0,
+      top10HolderRate: null, devTeamHoldRate: null, creatorClose: false, creatorTokenStatus: null,
+      smartDegenCount: 0, renownedCount: 0, bundlerRate: null, ratTraderAmountRate: null,
+      rugRatio: null, isWashTrading: false, isHoneypot: null, ctoFlag: false,
+      renouncedMint: false, renouncedFreeze: false, creationTimestamp: null, openTimestamp: null,
+      priceChange1m: null, priceChange5m: null, priceChange1h: null,
+      visitingCount: 0, squareMentions: 0,
+      twitterRenameCount: 0, twitterDelPostCount: 0, twitterCreateTokenCount: 0,
+      buyTax: null, sellTax: null, dexscrBoostFee: 0, dexscrAd: 0, totalFeeNative: null,
+      exchange: null, launchpadPlatform: null, launchpadStatus: null, progress: null,
+      source: 'dexscreener',
+    };
   }
 
   /**
@@ -329,12 +433,16 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           this.collectCandidates(chain),
           this.collectSignalBoostMap(chain),
           this.collectTrackAccumulation(chain),
-        ]);
-        const trackCandidates = await this.collectTrackCandidates(trackAcc, chain);
-        // Merge by address (candidates already deduped in collectCandidates; this
-        // merge must not hit the 60s dedupe cooldown — plain by-address dedupe only).
-        const merged = new Map<string, GMGNRawToken>();
-        for (const t of [...candidates, ...trackCandidates]) merged.set(t.address.toLowerCase(), t);
+                  ]);
+                  const trackCandidates = await this.collectTrackCandidates(trackAcc, chain);
+                  // Additional candidate sources (Q04 fill-tape + Q06 DexScreener), each
+                  // self-guarded by env flags and fail-open empty when off/unconfigured.
+                  const tapeCandidates = await this.collectTapeCandidates(chain);
+                  const dexscreenerCandidates = await this.collectDexscreenerCandidates(chain);
+                  // Merge by address (candidates already deduped in collectCandidates; this
+                  // merge must not hit the 60s dedupe cooldown — plain by-address dedupe only).
+                  const merged = new Map<string, GMGNRawToken>();
+                  for (const t of [...candidates, ...trackCandidates, ...tapeCandidates, ...dexscreenerCandidates]) merged.set(t.address.toLowerCase(), t);
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         if (signalBoostMap.size > 0) {
@@ -455,10 +563,25 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             }
             const rugFeature = globalRugScoring.assess(t);
             securityPenalties.push(...rugFeature.penalties);
+            const baseCtx: VoterContext = {
+              token: t,
+              chain,
+              nativePriceUsd: (t as any).nativePrice ?? 0,
+              securityAuditPassed: botReport.botRisk < 70 && securityPenalties.length === 0,
+              signalConfidence: confidence,
+            };
             const opinions: VoterOpinion[] = [
               securityVote(true, securityPenalties, botReport.botRisk),
               { voter: 'quant', score: confidence, reasons: [`detected ${det.type} (post-strategy ${confidence}%)`] },
             ];
+            // Q03 wallet-score voter — feeds the wallet/concentration/dev dimension.
+            // Fail-open neutral when the runtime can't compute the wallet score; the existing
+            // security vote still enforces hard penalties above.
+            opinions.push(walletVote({ ...baseCtx, walletMetrics: (t as any).walletMetrics }));
+            // Q05 flow-convergence voter — neutral when the agent didn't accumulate any buy flow.
+            opinions.push(convergenceVote({ ...baseCtx, convergence: (t as any).convergence }));
+            // Q12 risk-rubric voter (portable rubric) — neutral when no rubric metrics present.
+            opinions.push(rubricVote({ ...baseCtx, rubricMetrics: (t as any).rubricMetrics }));
             const sent = sentimentMap.get(t.address.toLowerCase());
             if (sent) opinions.push(sent);
             const trk = trackAcc.get(t.address.toLowerCase());

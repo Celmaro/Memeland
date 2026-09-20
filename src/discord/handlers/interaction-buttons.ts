@@ -17,7 +17,7 @@ import { createDashboardComponents } from '../embeds/dashboard-embed.js';
 import { globalRiskEngineV2 } from '../../orchestrator/risk-engine-v2.js';
 import { EVMTradeAdapter } from '../../adapters/evm-adapter.js';
 import { executeMemeBuy } from '../../services/approval-execution.js';
-import { gateSafety, gateTxLock } from '../../services/execution-gates.js';
+import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from '../../services/execution-gates.js';
 import { priceAlertService, walletService, tradeJournalService, approvalQueueService, buildDashboardOptions } from './command-handlers.js';
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
@@ -169,6 +169,10 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         thesis: approved.thesis,
         safety: { isSafe: gateSafety },
         txLock: gateTxLock(),
+        sizer: gateSizer(),
+        fillSim: gateFillSim(),
+        costGate: gateCostGate(),
+        governance: gateGovernance(),
       });
       await interaction.editReply(
         `✅ **APPROVED & EXECUTED** \`${approved.symbol}\` (\`${orderId}\`)\n` +

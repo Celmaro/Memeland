@@ -30,6 +30,16 @@ export interface ExecuteMemeBuyOptions {
   sellability?: { check(tokenAddress: string): Promise<{ sellable: boolean; reason: string }> };
   /** Per-token tx serializer (rh-execution-core TxLock). When provided, only one in-flight tx per token. */
   txLock?: { acquire(tokenAddress: string): Promise<() => void> };
+  /** Q07 multi-constraint sizer. When provided, clamps the notional to the binding constraint; refuses on refusal. */
+  sizer?: { clamp(desiredUsd: number): { allowed: boolean; amountUsd: number; reason?: string } };
+  /** Q08 fill simulation. When provided, refuses fills whose impact is refused / over a cap. */
+  fillSim?: { check(input: { amountUsd: number; midPriceUsd: number; liquidityUsd?: number }): { allowed: boolean; impactPct: number; reason?: string } };
+  /** Q13 cost gate. When provided, a fill must be within the cumulative cost budget. */
+  costGate?: { trySpend(costUsd: number): { allowed: boolean; reason?: string } };
+  /** Q11 execution governance. When provided, the order is reserved + receipt-locked before the fill. */
+  governance?: { reserve(order: { nonce: string; payload: string }): { reserved: boolean; reason?: string }; issue(order: { nonce: string; payload: string }): { valid: boolean; reason?: string } };
+  /** Q09 executor-DI. When provided, the buy is routed through this executor instead of the raw EVM adapter. */
+  executor?: { submit(req: { token: string; chainId: number; side: 'buy'; amountUsd: number; timeoutMs?: number }): Promise<{ outcome: 'confirmed' | 'failed' | 'timed_out'; txHash?: string; reason?: string; at: number }> };
 }
 
 export interface ExecuteMemeBuyResult {
@@ -90,18 +100,77 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     }
   }
 
+  // ── Q07 multi-constraint sizing (USD notional clamp) ────────────────────
+  const desiredUsd = opts.amountEth * (opts.entryPriceUsd || 0);
+  let effectiveAmountEth = opts.amountEth;
+  if (opts.sizer) {
+    const s = opts.sizer.clamp(desiredUsd);
+    if (!s.allowed) {
+      return { success: false, simulated: false, outputTokens: 0, error: `sizing gate refused: ${s.reason}` };
+    }
+    if (s.amountUsd > 0 && opts.entryPriceUsd > 0) effectiveAmountEth = s.amountUsd / opts.entryPriceUsd;
+  }
+
+  // ── Q08 fill simulation (impact / liquidity proof, fail-closed) ─────────
+  if (opts.fillSim) {
+    const s = opts.fillSim.check({ amountUsd: desiredUsd, midPriceUsd: opts.entryPriceUsd, liquidityUsd: opts.entryPriceUsd > 0 ? opts.entryPriceUsd * 1000 : undefined });
+    if (!s.allowed) {
+      return { success: false, simulated: false, outputTokens: 0, error: `fill-sim gate refused: ${s.reason} (impact ${s.impactPct.toFixed(1)}%)` };
+    }
+  }
+
+  // ── Q13 cost gate (cumulative fill-cost budget) ─────────────────────────
+  if (opts.costGate) {
+    const c = opts.costGate.trySpend(desiredUsd);
+    if (!c.allowed) {
+      return { success: false, simulated: false, outputTokens: 0, error: `cost gate refused: ${c.reason}` };
+    }
+  }
+
+  // ── Q11 execution governance (idempotent reservation + hash-locked receipt) ──
+  if (opts.governance) {
+    const nonce = `${opts.contractAddress}:${opts.symbol}:${Date.now()}`;
+    const payload = JSON.stringify({ chain, token: opts.contractAddress, amountUsd: desiredUsd });
+    const reserved = opts.governance.reserve({ nonce, payload });
+    if (!reserved.reserved) {
+      return { success: false, simulated: false, outputTokens: 0, error: `governance reservation refused: ${reserved.reason}` };
+    }
+    const receipt = opts.governance.issue({ nonce, payload });
+    if (!receipt.valid) {
+      return { success: false, simulated: false, outputTokens: 0, error: `governance receipt refused: ${receipt.reason}` };
+    }
+  }
+
   // ── Per-token tx serialization (TxLock) ─────────────────────────────────
   const release = opts.txLock ? await opts.txLock.acquire(opts.contractAddress) : null;
   try {
-    const execRes = await opts.evm.executeBuyToken(
-      {
-        chain,
-        tokenAddress: opts.contractAddress,
-        amountEth: opts.amountEth,
-        slippagePercentage: 1.5,
-      },
-      opts.wallet
-    );
+    // Q09 executor-DI: when an executor is provided, route the fill through it
+    // (serialized + veto-with-reason) instead of the raw EVM adapter.
+    const execRes = opts.executor
+      ? await (async () => {
+          const r = await opts.executor!.submit({
+            token: opts.contractAddress,
+            chainId: 4663,
+            side: 'buy',
+            amountUsd: desiredUsd,
+            timeoutMs: 15_000,
+          });
+          return {
+            success: r.outcome === 'confirmed',
+            simulated: false,
+            outputTokens: 0,
+            error: r.outcome === 'confirmed' ? undefined : (r.reason || r.outcome),
+          };
+        })()
+      : await opts.evm.executeBuyToken(
+          {
+            chain,
+            tokenAddress: opts.contractAddress,
+            amountEth: effectiveAmountEth,
+            slippagePercentage: 1.5,
+          },
+          opts.wallet
+        );
 
     opts.journal.recordTradeEntry({
       id: `TRADE_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -111,7 +180,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
       chain,
       entryTimestamp: new Date().toISOString(),
       entryPriceUsdOrEth: opts.entryPriceUsd,
-      positionSizeUsd: opts.amountEth * (opts.entryPriceUsd || 1),
+      positionSizeUsd: effectiveAmountEth * (opts.entryPriceUsd || 1),
       swarmScore: opts.confidence,
       strategyUsed: opts.strategyUsed || 'approval-approved',
       aiThesisSummary: (opts.thesis || '').slice(0, 200),

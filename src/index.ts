@@ -34,7 +34,7 @@ import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
-import { gateSafety, gateTxLock } from './services/execution-gates.js';
+import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from './services/execution-gates.js';
 
 dotenv.config();
 
@@ -537,6 +537,10 @@ if (discordToken && clientId) {
                       strategyUsed: 'auto-execute',
                       safety: { isSafe: gateSafety },
                       txLock: gateTxLock(),
+                      sizer: gateSizer(),
+                      fillSim: gateFillSim(),
+                      costGate: gateCostGate(),
+                      governance: gateGovernance(),
                     });
                     console.log(`[AUTO-EXECUTE] meme-robinhood ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
                   }

@@ -16,8 +16,8 @@ import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
 describe('7-voter swarm aggregation', () => {
   it('weights average only the voters that rendered a score (missing voters ignored, never 0)', () => {
     const { score, breakdown } = aggregateVoterScores({ quant: 100, security: 100, ml: 50 });
-    // weights: quant .2 + security .25 + ml .15 = .6 → (100*.2 + 100*.25 + 50*.15)/.6 = 87.5 → 88
-    expect(score).toBe(88);
+    // weights: quant .1626 + security .2033 + ml .1220 = .4879 → (16.26 + 20.33 + 6.10)/.4879 = 87.49 → 87
+    expect(score).toBe(87);
     expect(breakdown['sentiment']).toBeUndefined();
   });
 

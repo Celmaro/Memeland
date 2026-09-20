@@ -15,10 +15,13 @@
  */
 
 import type { GMGNRawToken } from '../adapters/gmgn-adapter.js';
+import { walletScore, type WalletScoreInput } from '../services/wallet-scoring.js';
+import { flowConvergenceScore, type BuyEvent, type FlowConvergenceConfig } from '../services/flow-convergence.js';
+import { securityMetricFactors, computeRubric } from '../services/risk-rubric.js';
 
-export type VoterId = 'quant' | 'ml' | 'security' | 'sentiment' | 'whale' | 'regime' | 'critic';
+export type VoterId = 'quant' | 'ml' | 'security' | 'sentiment' | 'whale' | 'regime' | 'critic' | 'wallet' | 'convergence' | 'rubric';
 
-export const VOTER_IDS: VoterId[] = ['quant', 'ml', 'security', 'sentiment', 'whale', 'regime', 'critic'];
+export const VOTER_IDS: VoterId[] = ['quant', 'ml', 'security', 'sentiment', 'whale', 'regime', 'critic', 'wallet', 'convergence', 'rubric'];
 
 /**
  * Default relative weights (sum ≈ 1.0). Security carries the most weight —
@@ -26,13 +29,16 @@ export const VOTER_IDS: VoterId[] = ['quant', 'ml', 'security', 'sentiment', 'wh
  * chain-wide context must never override a strong token-level signal.
  */
 export const DEFAULT_VOTER_WEIGHTS: Record<VoterId, number> = {
-  quant: 0.2,
-  ml: 0.15,
-  security: 0.25,
-  sentiment: 0.15,
-  whale: 0.1,
-  regime: 0.05,
-  critic: 0.1,
+  quant: 0.1626,
+  ml: 0.1220,
+  security: 0.2033,
+  sentiment: 0.1220,
+  whale: 0.0813,
+  regime: 0.0407,
+  critic: 0.0813,
+  wallet: 0.0650,
+  convergence: 0.0488,
+  rubric: 0.0732,
 };
 
 export interface VoterOpinion {
@@ -57,6 +63,12 @@ export interface VoterContext {
   regime?: { volatilityIndex: number; riskOff: boolean } | null;
   /** 15m klines for the ML predictor, if fetched. */
   klines?: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> | null;
+  /** Wallet-scoring metrics (Q03). Missing => neutral, never a false win. */
+  walletMetrics?: WalletScoreInput;
+  /** Accumulation-convergence buy flow (Q05). Missing/stale/sparse => neutral. */
+  convergence?: { buys: BuyEvent[]; config?: FlowConvergenceConfig; now?: number };
+  /** Security metric inputs for the risk rubric (Q12). */
+  rubricMetrics?: { concentration?: number; spikePct?: number; volatility?: number; liquidityUsd?: number };
 }
 
 export type VoterScores = Partial<Record<VoterId, number>>;
@@ -205,4 +217,77 @@ export function scoresFromOpinions(opinions: VoterOpinion[]): VoterScores {
   const out: VoterScores = {};
   for (const o of opinions) out[o.voter] = o.score;
   return out;
+}
+
+/**
+ * Q03 wallet vote: HIGHER wallet-score => HIGHER 0-100 vote (monotonic).
+ * Missing/NaN inputs degrade to neutral 50 — never a false win (fail-closed).
+ */
+export function walletVote(ctx: VoterContext): VoterOpinion {
+  if (!ctx.walletMetrics) {
+    return { voter: 'wallet', score: 50, reasons: ['wallet metrics missing — neutral'] };
+  }
+  const res = walletScore(ctx.walletMetrics);
+  const finite = Number.isFinite(res.score);
+  if (!finite || res.degraded) {
+    return {
+      voter: 'wallet',
+      score: 50,
+      reasons: [...res.reasons, 'wallet score degraded/missing — neutral (fail-closed)'],
+    };
+  }
+  return {
+    voter: 'wallet',
+    score: Math.max(0, Math.min(100, Math.round(res.score))),
+    reasons: res.reasons,
+  };
+}
+
+/**
+ * Q05 convergence vote: N DISTRIBUTED accumulating wallets raise the score;
+ * a single dominant whale is NOT convergence (neutral). Stale/sparse windows
+ * are neutral — never a false positive.
+ */
+export function convergenceVote(ctx: VoterContext): VoterOpinion {
+  const data = ctx.convergence;
+  if (!data || !Array.isArray(data.buys) || data.buys.length === 0) {
+    return { voter: 'convergence', score: 50, reasons: ['no convergence flow data — neutral'] };
+  }
+  const res = flowConvergenceScore(data.buys, data.config, data.now);
+  const finite = Number.isFinite(res.score);
+  if (!finite) {
+    return { voter: 'convergence', score: 50, reasons: res.reasons };
+  }
+  return {
+    voter: 'convergence',
+    score: Math.max(0, Math.min(100, Math.round(res.score))),
+    reasons: res.reasons,
+  };
+}
+
+/**
+ * Q12 rubric vote: weighted security rubric from concentration/spike/vol/liquidity.
+ * A missing REQUIRED factor means the rubric is NOT clean — fail closed to
+ * neutral 50 (never a confident read on incomplete data). Concentration/spike
+ * move the score.
+ */
+export function rubricVote(ctx: VoterContext): VoterOpinion {
+  if (!ctx.rubricMetrics) {
+    return { voter: 'rubric', score: 50, reasons: ['rubric metrics missing — neutral'] };
+  }
+  const factors = securityMetricFactors(ctx.rubricMetrics);
+  const rubric = computeRubric(factors);
+  if (!rubric.clean) {
+    const missing = rubric.factors.filter((f) => f.missing).map((f) => f.name);
+    return {
+      voter: 'rubric',
+      score: 50,
+      reasons: [`missing required factor(s): ${missing.join(', ')}`, 'rubric not clean — neutral (fail-closed)'],
+    };
+  }
+  return {
+    voter: 'rubric',
+    score: rubric.overall,
+    reasons: rubric.factors.map((f) => `${f.name}: ${f.score01.toFixed(2)}`),
+  };
 }
