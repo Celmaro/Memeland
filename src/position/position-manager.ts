@@ -42,6 +42,257 @@ export interface ActiveNFTPosition {
   tp50Triggered?: boolean;
 }
 
+/**
+ * PR12.c (SRC-209 vegapunk): graceful-exit helpers — a TP scale-out ladder and
+ * a refined stop-loss that tightens as the high-water mark rises but never
+ * loosens below a protective floor. Pure and fail-closed on invalid inputs.
+ */
+
+export interface TPLadderStep {
+  /** Price multiplier above entry at which this step triggers. */
+  targetMultiplier: number;
+  /** Fraction of the position to scale out at this step. */
+  scaleOutFraction: number;
+}
+
+export interface TPLadderResult {
+  triggered: TPLadderStep[];
+  totalScaleOutFraction: number;
+  remainingFraction: number;
+}
+
+export const DEFAULT_TP_LADDER: TPLadderStep[] = [
+  { targetMultiplier: 2, scaleOutFraction: 0.5 },
+  { targetMultiplier: 3, scaleOutFraction: 0.5 },
+];
+
+/**
+ * Compute the scale-out plan from a TP ladder. Steps must be sorted ascending
+ * by targetMultiplier; every triggered step's scale-out fraction is summed.
+ * Degenerate input yields an empty plan (never over-sells).
+ */
+export function tpLadderExit(
+  entryPriceUsd: number,
+  currentPriceUsd: number,
+  steps: TPLadderStep[] = DEFAULT_TP_LADDER,
+): TPLadderResult {
+  const ordered = (Array.isArray(steps) ? steps : [])
+    .filter(
+      (s) =>
+        Number.isFinite(s.targetMultiplier) &&
+        s.targetMultiplier > 1 &&
+        Number.isFinite(s.scaleOutFraction) &&
+        s.scaleOutFraction >= 0 &&
+        s.scaleOutFraction <= 1,
+    )
+    .sort((a, b) => a.targetMultiplier - b.targetMultiplier);
+  if (!Number.isFinite(entryPriceUsd) || entryPriceUsd <= 0) {
+    return { triggered: [], totalScaleOutFraction: 0, remainingFraction: 1 };
+  }
+  if (!Number.isFinite(currentPriceUsd) || currentPriceUsd < entryPriceUsd) {
+    return { triggered: [], totalScaleOutFraction: 0, remainingFraction: 1 };
+  }
+  const multiple = currentPriceUsd / entryPriceUsd;
+  const triggered = ordered.filter((s) => multiple >= s.targetMultiplier);
+  const total = Math.min(1, triggered.reduce((a, s) => a + s.scaleOutFraction, 0));
+  return { triggered, totalScaleOutFraction: total, remainingFraction: 1 - total };
+}
+
+export interface RefinedStopResult {
+  stopPriceUsd: number;
+  /** Stop distance below current highest price, as a fraction. */
+  trailPct: number;
+  /** Stop distance below entry, as a fraction (0.5 = -50%). */
+  protectionPct: number;
+  reason: string;
+}
+
+/**
+ * Refined stop-loss: the tighter of the high-water-mark trail and the entry
+ * protection floor, so gains are locked without ever loosening the downside
+ * protection. Returns null on invalid input (fail-closed).
+ */
+export function refinedStopLoss(
+  entryPriceUsd: number,
+  highestPriceUsd: number,
+  protectivePct = 0.5,
+  trailPct = 0.35,
+): RefinedStopResult | null {
+  if (!Number.isFinite(entryPriceUsd) || entryPriceUsd <= 0) return null;
+  if (!Number.isFinite(highestPriceUsd) || highestPriceUsd < entryPriceUsd) return null;
+  if (!Number.isFinite(protectivePct) || protectivePct < 0 || protectivePct > 1) return null;
+  if (!Number.isFinite(trailPct) || trailPct < 0 || trailPct > 1) return null;
+
+  const protectiveStop = entryPriceUsd * (1 - protectivePct);
+  const trailStop = highestPriceUsd * (1 - trailPct);
+  const stopPriceUsd = Math.max(protectiveStop, trailStop);
+  const reason = trailStop > protectiveStop ? 'high-water trail' : 'entry protection floor';
+  return {
+    stopPriceUsd,
+    trailPct,
+    protectionPct: protectivePct,
+    reason,
+  };
+}
+
+export interface Candle {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export interface TwoCandleAboveResult {
+  /** True only when the trailing candles all close above entry (confirming). */
+  confirmed: boolean;
+  /** Consecutive candle closes above entry, counting back from the latest. */
+  consecutiveAbove: number;
+  reason: string;
+}
+
+/**
+ * PR12.d (SRC-219 uerax all-in-one-bot): two-candle-above-entry confirmation
+ * rule. A signal/position is only considered confirmed when the most recent
+ * candle AND the one before it both close above entry (a win-rate filter that
+ * avoids entering into a one-candle pump that immediately fades). Fail-closed:
+ * any invalid candle or entry makes `confirmed` false.
+ */
+export function twoCandleAboveEntry(
+  candles: Candle[],
+  entryPriceUsd: number,
+): TwoCandleAboveResult {
+  const list = Array.isArray(candles) ? candles : [];
+  if (!Number.isFinite(entryPriceUsd) || entryPriceUsd <= 0) {
+    return { confirmed: false, consecutiveAbove: 0, reason: 'invalid entry price' };
+  }
+  if (list.length === 0) {
+    return { confirmed: false, consecutiveAbove: 0, reason: 'no candles to confirm' };
+  }
+  let consecutiveAbove = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const c = list[i];
+    if (
+      !c ||
+      !Number.isFinite(c.open) ||
+      !Number.isFinite(c.high) ||
+      !Number.isFinite(c.low) ||
+      !Number.isFinite(c.close)
+    ) {
+      break;
+    }
+    if (c.close > entryPriceUsd) consecutiveAbove++;
+    else break;
+  }
+  const confirmed = consecutiveAbove >= 2;
+  return {
+    confirmed,
+    consecutiveAbove,
+    reason: confirmed
+      ? `confirmed by ${consecutiveAbove} consecutive closes above entry`
+      : `only ${consecutiveAbove} consecutive close(s) above entry`,
+  };
+}
+
+export interface HWMHardStopResult {
+  stopPriceUsd: number;
+  hardStopUsd: number;
+  trailStopUsd: number;
+  reason: string;
+}
+
+/**
+ * PR12.h (SRC-067 fdv.lol): high-water-mark trailing hard-stop. The binding
+ * stop is the tighter of a fixed hard stop below entry and a trail below the
+ * running high-water mark, so a winner never gives back the whole move while
+ * the original downside protection still holds. Null on invalid input.
+ */
+export function highWaterMarkHardStop(
+  entryPriceUsd: number,
+  currentPriceUsd: number,
+  highWaterMarkUsd: number,
+  hardStopPct = 0.3,
+  trailPct = 0.5,
+): HWMHardStopResult | null {
+  if (!Number.isFinite(entryPriceUsd) || entryPriceUsd <= 0) return null;
+  if (!Number.isFinite(currentPriceUsd) || currentPriceUsd < 0) return null;
+  if (!Number.isFinite(highWaterMarkUsd) || highWaterMarkUsd < entryPriceUsd) return null;
+  if (!Number.isFinite(hardStopPct) || hardStopPct < 0 || hardStopPct > 1) return null;
+  if (!Number.isFinite(trailPct) || trailPct < 0 || trailPct > 1) return null;
+
+  const hwm = Math.max(highWaterMarkUsd, currentPriceUsd);
+  const hardStopUsd = entryPriceUsd * (1 - hardStopPct);
+  const trailStopUsd = hwm * (1 - trailPct);
+  const stopPriceUsd = Math.max(hardStopUsd, trailStopUsd);
+  return {
+    stopPriceUsd,
+    hardStopUsd,
+    trailStopUsd,
+    reason: trailStopUsd > hardStopUsd ? 'high-water trail' : 'fixed hard stop',
+  };
+}
+
+export interface ProfitLockResult {
+  locked: boolean;
+  floorUsd: number | null;
+}
+
+/**
+ * PR12.h profit-lock floor: once price reaches `lockMultiplier` x entry, a
+ * floor is locked at `floorMultiplier` x entry (default break-even), so a
+ * winner cannot give the profit back to a crash. Null floor until activated.
+ */
+export function profitLockFloor(
+  entryPriceUsd: number,
+  currentPriceUsd: number,
+  lockMultiplier = 1.5,
+  floorMultiplier = 1.0,
+): ProfitLockResult {
+  if (!Number.isFinite(entryPriceUsd) || entryPriceUsd <= 0) {
+    return { locked: false, floorUsd: null };
+  }
+  if (!Number.isFinite(currentPriceUsd) || currentPriceUsd < 0) {
+    return { locked: false, floorUsd: null };
+  }
+  if (!Number.isFinite(lockMultiplier) || lockMultiplier < 1) {
+    return { locked: false, floorUsd: null };
+  }
+  if (!Number.isFinite(floorMultiplier) || floorMultiplier < 0) {
+    return { locked: false, floorUsd: null };
+  }
+  if (currentPriceUsd < entryPriceUsd * lockMultiplier) {
+    return { locked: false, floorUsd: null };
+  }
+  return { locked: true, floorUsd: entryPriceUsd * floorMultiplier };
+}
+
+/**
+ * PR12.h rug blacklist: a fail-closed, in-memory denylist of known-rug
+ * identities keyed by `chain:address`. Unknown entries are simply absent (the
+ * caller decides how to treat an absent key); `has` never throws.
+ */
+export class RugBlacklist {
+  private readonly entries = new Set<string>();
+
+  add(chain: string, address: string): boolean {
+    const key = this.key(chain, address);
+    if (this.entries.has(key)) return false;
+    this.entries.add(key);
+    return true;
+  }
+
+  has(chain: string, address: string): boolean {
+    return this.entries.has(this.key(chain, address));
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  private key(chain: string, address: string): string {
+    return `${String(chain || '').toLowerCase()}:${String(address || '').toLowerCase()}`;
+  }
+}
+
 export class PositionManager {
   private stateStore: StateStore | null = null;
   private opportunityLedger: OpportunityLedger | null = null;
