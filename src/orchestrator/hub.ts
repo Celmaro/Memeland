@@ -6,6 +6,7 @@ import type { AgentReport, ScreeningAgent } from '../agents/shared/agent-contrac
 import type { KrystalCloudAdapter } from '../adapters/krystal-cloud-adapter.js';
 import type { GMGNAdapter } from '../adapters/gmgn-adapter.js';
 import { securityGateToken, securityAuditGate, tokenSecurityAuditLabel } from '../agents/shared/gmgn-meme-helpers.js';
+import { withClearedEnv } from '../services/env-sandbox.js';
 
 export interface ChannelStatus {
   channelId: string;
@@ -60,12 +61,14 @@ export class OpenCatzHub {
   }
 
   private runStrategySafely(strat: HubStrategyLike, arg: any): any {
-    try {
-      return strat.evaluate?.(arg);
-    } catch (err: any) {
-      console.warn(`[HUB] Strategy evaluate threw: ${err.message}`);
-      return null;
-    }
+    return withClearedEnv(() => {
+      try {
+        return strat.evaluate?.(arg);
+      } catch (err: any) {
+        console.warn(`[HUB] Strategy evaluate threw: ${err.message}`);
+        return null;
+      }
+    });
   }
 
   public attachStateStore(store: any): void {

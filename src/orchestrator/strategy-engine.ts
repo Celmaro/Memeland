@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import type { OpenCatStrategy, OpenCatIndicator } from './strategy-types.js';
+import { withClearedEnv } from '../services/env-sandbox.js';
 
 const requireEsm = createRequire(import.meta.url);
 
@@ -250,15 +251,21 @@ export class StrategyEngine {
   }
 
   private loadModule(filePath: string): any {
-    const mod = requireEsm(filePath);
-    return mod.default || mod;
+    // Import-time side effects run with an EMPTY env so untrusted module-level
+    // code (top-level imports, fs/network probe, process.exit) cannot read
+    // secrets even before any evaluate() call is made.
+    return withClearedEnv(() => {
+      const mod = requireEsm(filePath);
+      return mod.default || mod;
+    });
   }
 
   /**
-   * Execute a strategy/indicator evaluate/calculate call with a SANITIZED env.
+   * Execute a strategy/indicator evaluate/calculate call with an EMPTY env.
    * Strategy .mjs files are user/LLM-authored and run in-process; a malicious
-   * strategy could otherwise read private keys via process.env. We snapshot the
-   * real env, clear sensitive keys for the duration of the call, then restore.
+   * strategy could otherwise read private keys via process.env. We empty the
+   * entire environment for the duration of the call (not just sensitive keys)
+   * so a malicious evaluate cannot exfiltrate any process secret.
    */
   public runStrategySafely<T extends { evaluate?: (ctx: any) => any; calculate?: (candles: any[]) => any[] }>(
     strategy: T,
@@ -267,15 +274,8 @@ export class StrategyEngine {
   ): any {
     const fn = kind === 'evaluate' ? strategy?.evaluate : strategy?.calculate;
     if (typeof fn !== 'function') return undefined;
-    const snapshot = { ...process.env };
-    const sensitiveKeys = Object.keys(process.env).filter((k) =>
-      /KEY|TOKEN|SECRET|PRIVATE|PASSWORD|API/i.test(k) || k.startsWith('EVM_') || k.startsWith('AI_')
-    );
-    for (const k of sensitiveKeys) delete process.env[k];
-    try {
+    return withClearedEnv(() => {
       return fn.call(strategy, arg);
-    } finally {
-      process.env = snapshot; // restore full env
-    }
+    });
   }
 }
