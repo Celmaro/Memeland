@@ -47,18 +47,20 @@ describe('OpportunityPostMortem', () => {
     }
   });
 
-  it('attributes a profitable close as PROFITABLE_MISS and feeds success', () => {
-    const ledger = newLedger();
-    const id = closedOpportunity(ledger, '0xWIN', [1.0, 1.8]);
-    const fed: boolean[] = [];
-    const pm = new OpportunityPostMortem(ledger, (s) => fed.push(s));
+  it('attributes a profitable close as PROFITABLE_MISS but does NOT feed success (Q16: neutral)', () => {
+      const ledger = newLedger();
+      const id = closedOpportunity(ledger, '0xWIN', [1.0, 1.8]);
+      const fed: boolean[] = [];
+      const pm = new OpportunityPostMortem(ledger, (s) => fed.push(s));
 
-    const res = pm.run();
-    expect(res.attributedCount).toBe(1);
-    expect(res.fedSuccessCount).toBe(1);
-    expect(fed).toEqual([true]);
-    expect(ledger.get(id)!.finalOutcome).toBe('PROFITABLE_MISS');
-  });
+      const res = pm.run();
+      expect(res.attributedCount).toBe(1);
+      // PROFITABLE_MISS = the bot never held the trade — never feed a success weight.
+      expect(res.fedSuccessCount).toBe(0);
+      expect(res.skippedNeutralCount).toBe(1);
+      expect(fed).toEqual([]);
+      expect(ledger.get(id)!.finalOutcome).toBe('PROFITABLE_MISS');
+    });
 
   it('attributes a losing close as CORRECT_REJECTION and feeds failure', () => {
     const ledger = newLedger();

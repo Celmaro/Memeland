@@ -35,6 +35,10 @@ export class OpportunityPostMortem {
   private ledger: OpportunityLedger;
   private feedLearning: (success: boolean) => void;
 
+  /** Regression guard (Q16): an identity that already fed learning is never fed again, so the
+   *  swarm learns from a realized outcome exactly once in total even if run() is called repeatedly. */
+  private fed = new Set<string>();
+
   constructor(
     ledger: OpportunityLedger,
     feedLearning: (success: boolean) => void = (success: boolean) => {
@@ -45,7 +49,7 @@ export class OpportunityPostMortem {
     this.feedLearning = feedLearning;
   }
 
-  /** Attribute every closed-unattributed opportunity and feed learning. */
+  /** Attribute every closed-unattributed opportunity and feed learning (exactly once each). */
   public run(): PostMortemResult {
     const queue = this.ledger.closedUnattributed();
     let fedSuccessCount = 0;
@@ -53,13 +57,20 @@ export class OpportunityPostMortem {
     let skippedNeutralCount = 0;
 
     for (const identity of queue) {
+      const idKey = identity.opportunityId;
       const result = this.attribute(identity);
       this.ledger.setFinalOutcome(identity.opportunityId, result.outcome);
+      if (this.fed.has(idKey)) {
+        // already honored once — never feed the swarm twice for the same outcome
+        continue;
+      }
       if (result.success === true) {
         fedSuccessCount += 1;
+        this.fed.add(idKey);
         this.feedLearning(true);
       } else if (result.success === false) {
         fedLossCount += 1;
+        this.fed.add(idKey);
         this.feedLearning(false);
       } else {
         skippedNeutralCount += 1;
@@ -92,10 +103,14 @@ export class OpportunityPostMortem {
       return { outcome: 'CORRECT_REJECTION' };
     }
 
+    // Q16 soundness: an entry-anchored trajectory (from the evaluation's entry, not the
+    // token's first-ever tick). PROFITABLE_MISS = the bot NEVER held a live trade, so it is
+    // NEUTRAL — it must NOT feed a success weight (that would reward signals the bot
+    // didn't act on and corrupt the learning feed).
     const maxPrice = Math.max(entry, ...prices);
     const minPrice = Math.min(entry, ...prices);
     if (maxPrice / entry >= WIN_GAIN_RATIO) {
-      return { outcome: 'PROFITABLE_MISS', success: true };
+      return { outcome: 'PROFITABLE_MISS' }; // neutral — no positive feed
     }
     if (minPrice / entry <= LOSS_LOSS_RATIO) {
       return { outcome: 'CORRECT_REJECTION', success: false };

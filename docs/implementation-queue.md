@@ -1,6 +1,6 @@
 # Memeland - Implementation Queue (Adopt/Adapt, test-first)
 
-Status: **draft - reference + tracker only. No code implemented yet.**
+Status: **tracker, test-first. Phases 1-5 implemented (Q01-Q16) + Solana copy-trade + RH execution-core landed, all tests green.**
 
 Scope: turns the Adopt/Adapt verdicts from
 [`docs/research/memeland-ecosystem-review.md`](./research/memeland-ecosystem-review.md)
@@ -13,8 +13,7 @@ lands behind the existing Vitest suite.
 > chain-portable (green-label bar), fail-closed by default, personal-use scale
 > (no gold-plating), never expose or persist secrets.
 >
-> **Verify after every item:** `npm test` (Vitest; currently 48 test files
-> green) and `npx tsc --noEmit`. Push only when the user asks.
+> **Verify after every item:** `npm test` (Vitest; currently **66 test files / 509 tests green**) and `npx tsc --noEmit` (0 errors). Push when the user asks.
 
 ## How to run the suite and contribute tests
 
