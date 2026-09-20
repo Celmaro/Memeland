@@ -250,7 +250,7 @@ The concrete, recommended next integrations. Each item: *copy what -> where it b
 ### Batch 16/17 additions (18 sources; full evidence in source-notes.md Batches 16 & 17 - external web deep-reads)
 
 **Adopt (documented API contracts / patterns for Memeland's primary source)**
-- **SRC-001 GMGN Agent API** - official agent-skills contract: keyed `gmgn-market`/`token`/`portfolio` (read) vs `gmgn-swap` (+`GMGN_PRIVATE_KEY`, signed) boundary; `--raw` single-line JSON; SOL/BSC-BNB/Base/ETH only, IPv4-only. Codify this exact contract in Memeland's GMGN adapter.
+- **SRC-001 GMGN Agent API** - official agent-skills contract: keyed `gmgn-market`/`token`/`portfolio` (read) vs `gmgn-swap` (+`GMGN_PRIVATE_KEY`, signed) boundary; `--raw` single-line JSON; the skills quickstart lists SOL/BNB/Base/ETH, but the full OpenAPI + `gmgn-skills` repo include `robinhood` for `token`/`market`/`portfolio`/`track` and `swap`/`order`; keys IPv4-only. Codify this exact contract in Memeland's GMGN adapter.
 - **SRC-002 GMGN Callout OpenAPI** - official partner callout/webhook contract; adopt the schema for Memeland's signal callouts.
 - **SRC-028 Mobula GMGN APIs guide** - public multi-chain alternative to GMGN (GMGN-independence candidate); capture its request/response shape.
 
@@ -269,7 +269,7 @@ The concrete, recommended next integrations. Each item: *copy what -> where it b
 - **SRC-015 CoinMarketCap meme view** - paid-gated, redundant with GMGN/CoinGecko.
 - **SRC-248 OpenPump (MCP Market listing)** - hosted Solana-only paid API, custody delegated (consistent with prior SRC-178 verdict).
 
-**Cross-cutting themes from Batches 16/17:** official GMGN docs confirm Memeland's primary source is **SOL/BSC-Base/ETH only - no RH 4663**; the RH-chain GMGN guide (SRC-237) is the one direct RH reference. None of the hosted MCP/analytics vendors (Dune/Bitquery/crypto.com) document RH-4663 either, so every MCP/data win is again a **portable read-only-registry/normalized-schema pattern**, not a chain-native source. GMGN-independence options (Mobula SRC-028, Bitquery) now have concrete documented shapes. Security: never put API keys in committed URLs/query strings (Dune OAuth vs `?api_key=` warning); keep OAuth/refresh state and hosted-vendor billing out of the live trading path.
+**Cross-cutting themes from Batches 16/17 (corrected):** GMGN **does** serve Robinhood Chain — the official `gmgn-skills` repo's supported-chains table lists `robinhood` for `token`/`market`/`portfolio`/`track` **and** `swap`/`order`, and Memeland's own OpenCatz bot has run Robinhood screening on GMGN OpenAPI in production (it is the incumbent primary feed). The "SOL/BSC/Base/ETH only" phrasing that appeared in this review conflated GMGN's marketing chain menu (which headlines Solana/BNB/ETH/Base/Monad/TRON) and one stale agent-skills quickstart table with the actual OpenAPI chain set — **that claim was incorrect and is retracted here.** The RH-chain GMGN guide (SRC-237) is a direct RH reference, consistent with robinhood being a served chain. None of the hosted MCP/analytics vendors (Dune/Bitquery/crypto.com) document RH-4663 either, so every MCP/data win is again a **portable read-only-registry/normalized-schema pattern**, not a chain-native source. GMGN-independence options (Mobula SRC-028, Bitquery) now have concrete documented shapes. Security: never put API keys in committed URLs/query strings (Dune OAuth vs `?api_key=` warning); keep OAuth/refresh state and hosted-vendor billing out of the live trading path.
 
 ---
 
