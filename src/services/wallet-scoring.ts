@@ -121,3 +121,143 @@ export function walletScoreFromTrades(
     makerTags: [...tags],
   });
 }
+
+/**
+ * PR12.b (SRC-142 lyc0603/copytrading): one-sample t-statistic on a wallet's
+ * per-trade returns. Used as a profitability filter before copying a trader.
+ * Fail-closed: with fewer than 2 returns or a zero sample std the signal is
+ * null (cannot judge), never a false positive.
+ */
+export function walletTStat(returns: number[]): { t: number | null; mean: number; sampleStd: number; n: number } {
+  const list = Array.isArray(returns) ? returns.filter((v) => Number.isFinite(v)) : [];
+  const n = list.length;
+  if (n < 2) return { t: null, mean: 0, sampleStd: 0, n };
+  const mean = list.reduce((a, b) => a + b, 0) / n;
+  const variance = list.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1);
+  const sampleStd = Math.sqrt(variance);
+  if (sampleStd === 0) return { t: null, mean, sampleStd, n };
+  return { t: mean / (sampleStd / Math.sqrt(n)), mean, sampleStd, n };
+}
+
+export interface BotTrade {
+  side: 'buy' | 'sell';
+  amountUsd: number;
+  at?: number;
+  maker?: string;
+}
+
+export interface BotManipulationFeatures {
+  /** Fraction of buy amounts landing on "round" sizes (e.g. multiples of 100). */
+  roundAmountRate: number;
+  /** Fraction of buys sharing the exact same size (bots size identically). */
+  uniformSizeRate: number;
+  /** Fraction of buys signed by the single most frequent maker. */
+  topMakerBuyRate: number;
+  /** Max buys within any 60s window / total buys (burst/wash signal). */
+  maxBurstRate: number;
+  /** Max buy size / median buy size (high ratio = one giant wash print). */
+  sizeDispersion: number;
+}
+
+export interface BotManipulationResult {
+  /** 0-100 manipulation/wash risk score. Neutral = 0 (no signal). */
+  risk: number;
+  features: BotManipulationFeatures;
+  reasons: string[];
+  degraded: boolean;
+}
+
+function isRoundAmount(amountUsd: number): boolean {
+  if (!Number.isFinite(amountUsd) || amountUsd <= 0) return false;
+  for (const base of [100, 1000, 10000, 100000]) {
+    const ratio = amountUsd / base;
+    if (Math.abs(ratio - Math.round(ratio)) < 1e-6) return true;
+  }
+  return false;
+}
+
+/**
+ * PR12.b bot-manipulation feature detector. Looks for wash-trade / burst /
+ * uniform-sizing fingerprints in a wallet's trade tape. Fail-closed: empty or
+ * all-sell tapes report a neutral 0 risk with `degraded: true`.
+ */
+export function botManipulationScore(trades: BotTrade[]): BotManipulationResult {
+  const list = Array.isArray(trades) ? trades : [];
+  const buys = list.filter((t) => t.side === 'buy' && Number.isFinite(t.amountUsd) && t.amountUsd > 0);
+  const reasons: string[] = [];
+  if (buys.length === 0) {
+    return {
+      risk: 0,
+      features: {
+        roundAmountRate: 0,
+        uniformSizeRate: 0,
+        topMakerBuyRate: 0,
+        maxBurstRate: 0,
+        sizeDispersion: 0,
+      },
+      reasons: ['no buy tape to fingerprint — neutral'],
+      degraded: true,
+    };
+  }
+
+  const roundAmountRate = buys.filter((t) => isRoundAmount(t.amountUsd)).length / buys.length;
+
+  const sizeCounts = new Map<number, number>();
+  for (const t of buys) sizeCounts.set(t.amountUsd, (sizeCounts.get(t.amountUsd) ?? 0) + 1);
+  const mostCommonSize = Math.max(...Array.from(sizeCounts.values()));
+  const uniformSizeRate = mostCommonSize / buys.length;
+
+  const makerCounts = new Map<string, number>();
+  for (const t of buys) {
+    const maker = t.maker && t.maker.length > 0 ? t.maker : '?';
+    makerCounts.set(maker, (makerCounts.get(maker) ?? 0) + 1);
+  }
+  const topMakerBuyRate = Math.max(...Array.from(makerCounts.values())) / buys.length;
+
+  // Burst detection: max buys in any 60s window.
+  const timed = buys.filter((t) => typeof t.at === 'number' && Number.isFinite(t.at as number));
+  let maxBurstRate = 0;
+  if (timed.length >= 2) {
+    const sorted = timed.map((t) => t.at as number).sort((a, b) => a - b);
+    let left = 0;
+    let maxCount = 0;
+    for (let right = 0; right < sorted.length; right++) {
+      while (sorted[right] - sorted[left] > 60_000) left++;
+      maxCount = Math.max(maxCount, right - left + 1);
+    }
+    maxBurstRate = maxCount / buys.length;
+  }
+
+  const sizes = buys.map((t) => t.amountUsd).sort((a, b) => a - b);
+  const median = sizes[Math.floor(sizes.length / 2)] ?? 1;
+  const sizeDispersion = median > 0 ? (sizes[sizes.length - 1] ?? median) / median : 0;
+
+  let risk = 0;
+  if (roundAmountRate > 0.5) {
+    risk += 20;
+    reasons.push(`round-size clustering ${(roundAmountRate * 100).toFixed(0)}%`);
+  }
+  if (uniformSizeRate > 0.6) {
+    risk += 30;
+    reasons.push(`uniform sizing ${(uniformSizeRate * 100).toFixed(0)}%`);
+  }
+  if (topMakerBuyRate > 0.7) {
+    risk += 25;
+    reasons.push(`single-maker concentration ${(topMakerBuyRate * 100).toFixed(0)}%`);
+  }
+  if (maxBurstRate > 0.5) {
+    risk += 25;
+    reasons.push(`burst buys ${(maxBurstRate * 100).toFixed(0)}% in one minute`);
+  }
+  if (sizeDispersion > 20) {
+    risk += 10;
+    reasons.push(`size dispersion x${sizeDispersion.toFixed(0)}`);
+  }
+
+  return {
+    risk: Math.max(0, Math.min(100, Math.round(risk))),
+    features: { roundAmountRate, uniformSizeRate, topMakerBuyRate, maxBurstRate, sizeDispersion },
+    reasons,
+    degraded: false,
+  };
+}
