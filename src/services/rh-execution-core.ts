@@ -244,3 +244,80 @@ export async function assessSellability(
   }
   return { sellable: false, reason: 'cannot sell — fail-closed' };
 }
+
+export interface ExecutionSubmitMeta {
+  /** Per-token identity used to serialize concurrent submits for the same token. */
+  tokenAddress?: string;
+  tokenSymbol?: string;
+}
+
+export interface ExecutionSubmitResult {
+  ok: boolean;
+  txHash?: string;
+  error?: string;
+}
+
+/**
+ * PR12.e (SRC-227/230 warp-id solana-trading-bot): the TransactionExecutor
+ * interface. Every execution path depends on this abstraction rather than a
+ * concrete submitter, so transports can be swapped/mocked behind one seam.
+ */
+export interface TransactionExecutor {
+  submit(rawTx: string, meta?: ExecutionSubmitMeta): Promise<ExecutionSubmitResult>;
+}
+
+/**
+ * PR12.e: a TransactionExecutor decorator that serializes submissions per
+ * token via TxLock (one in-flight submit per token) and turns any throw into a
+ * fail-closed `ok:false` result. Without a tokenAddress it passes straight
+ * through. This makes concurrent callers impossible to double-fire on one token.
+ */
+export class TxLockedExecutor implements TransactionExecutor {
+  constructor(
+    private readonly base: TransactionExecutor,
+    private readonly lock: TxLock = new TxLock(),
+  ) {}
+
+  async submit(rawTx: string, meta?: ExecutionSubmitMeta): Promise<ExecutionSubmitResult> {
+    const tokenAddress = meta?.tokenAddress;
+    if (!tokenAddress || tokenAddress.length === 0) {
+      return this.invoke(rawTx, meta);
+    }
+    const release = await this.lock.acquire(tokenAddress);
+    try {
+      return await this.invoke(rawTx, meta);
+    } finally {
+      release();
+    }
+  }
+
+  private async invoke(rawTx: string, meta?: ExecutionSubmitMeta): Promise<ExecutionSubmitResult> {
+    try {
+      return await this.base.submit(rawTx, meta);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+}
+
+/**
+ * PR12.e: builds a TransactionExecutor that composes ingestion with veto-with-
+ * reason. A `veto` returning a reason string blocks the submit, fail-closed.
+ */
+export function vetoingExecutor(
+  inner: TransactionExecutor,
+  veto: (rawTx: string, meta?: ExecutionSubmitMeta) => string | null,
+): TransactionExecutor {
+  return {
+    async submit(rawTx, meta) {
+      let reason: string | null = null;
+      try {
+        reason = veto(rawTx, meta);
+      } catch {
+        reason = 'veto check threw — fail-closed';
+      }
+      if (reason) return { ok: false, error: `vetoed: ${reason}` };
+      return inner.submit(rawTx, meta);
+    },
+  };
+}
