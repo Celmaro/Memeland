@@ -383,3 +383,86 @@ export function computeBacktestMetrics(
     overfitVerdict: verdict.verdict,
   };
 }
+
+/** Per-period Sharpe of a return series (mean / sample std), 0 for degenerate. */
+export function sharpeRatio(returns: number[]): number {
+  const list = Array.isArray(returns) ? returns.filter((v) => Number.isFinite(v)) : [];
+  if (list.length < 2) return 0;
+  const mean = list.reduce((a, b) => a + b, 0) / list.length;
+  const variance = list.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (list.length - 1);
+  const std = Math.sqrt(variance);
+  if (std === 0) return 0;
+  return mean / std;
+}
+
+export interface WalkForwardFold {
+  /** Sharpe over the training (earlier) window. */
+  inSampleSharpe: number;
+  /** Sharpe over the immediately-following validation window (no look-ahead). */
+  outOfSampleSharpe: number;
+}
+
+export interface WalkForwardResult {
+  folds: WalkForwardFold[];
+  meanInSampleSharpe: number;
+  meanOutOfSampleSharpe: number;
+  /** mean OOS / mean IS ratio; NaN when the edge cannot be proven. */
+  ratio: number;
+  verdict: OverfitVerdict['verdict'];
+}
+
+/**
+ * PR12.a (SRC-058 tradingview-mcp): expanding-window walk-forward split.
+ * The input `returns` is assumed chronological; each fold trains on the
+ * strictly-earlier window and validates on the immediately-following block so
+ * the out-of-sample fold never leaks training data. Fail-closed: fewer than two
+ * validation blocks (or a non-positive in-sample edge) report OVERFITTED.
+ */
+export function walkForwardFolds(returns: number[], folds = 5): WalkForwardResult {
+  const data = Array.isArray(returns) ? returns.filter((v) => Number.isFinite(v)) : [];
+  const blockCount = Math.max(2, Math.floor(folds));
+  const n = data.length;
+  const block = Math.floor(n / blockCount);
+  if (n < 2 || block < 1) {
+    return {
+      folds: [],
+      meanInSampleSharpe: 0,
+      meanOutOfSampleSharpe: 0,
+      ratio: Number.NaN,
+      verdict: 'OVERFITTED',
+    };
+  }
+
+  const foldResults: WalkForwardFold[] = [];
+  // Walk-forward chaining: fold i trains on blocks [0..i], validates on block i+1.
+  for (let i = 1; i < blockCount && (i + 1) * block <= n; i++) {
+    const train = data.slice(0, i * block);
+    const validation = data.slice(i * block, (i + 1) * block);
+    foldResults.push({
+      inSampleSharpe: sharpeRatio(train),
+      outOfSampleSharpe: sharpeRatio(validation),
+    });
+  }
+  if (foldResults.length === 0) {
+    return {
+      folds: [],
+      meanInSampleSharpe: 0,
+      meanOutOfSampleSharpe: 0,
+      ratio: Number.NaN,
+      verdict: 'OVERFITTED',
+    };
+  }
+
+  const meanIS =
+    foldResults.reduce((a, b) => a + b.inSampleSharpe, 0) / foldResults.length;
+  const meanOOS =
+    foldResults.reduce((a, b) => a + b.outOfSampleSharpe, 0) / foldResults.length;
+  const verdict = walkForwardVerdict(meanIS, meanOOS);
+  return {
+    folds: foldResults,
+    meanInSampleSharpe: meanIS,
+    meanOutOfSampleSharpe: meanOOS,
+    ratio: verdict.ratio,
+    verdict: verdict.verdict,
+  };
+}
