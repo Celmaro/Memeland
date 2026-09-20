@@ -37,8 +37,8 @@ It coordinates **5 Specialist AI Scouts** across DEX tokens (Uniswap V3), concen
 ### 1. Clone & Install
 ```bash
 # Clone the Robinhood Chain repository
-git clone https://github.com/dizcorvus/opencatz-ai-robinhood-chain.git
-cd opencatz-ai-robinhood-chain
+git clone https://github.com/Celmaro/Memeland.git
+cd Memeland
 
 # Install dependencies
 npm install

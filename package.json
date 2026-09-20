@@ -1,7 +1,7 @@
 {
-  "name": "opencatz-robinhood-chain",
-  "version": "1.0.0",
-  "description": "Autonomous Multi-Agent Crypto Intelligence & Trading Ecosystem for Robinhood Chain (EVM)",
+  "name": "memeland",
+  "version": "1.1.0",
+  "description": "Memeland — autonomous multi-agent crypto intelligence & trading ecosystem for Robinhood Chain (EVM)",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -19,7 +19,7 @@
     "tui": "tsx src/cli/tui.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "deploy": "npm install && npm run build && (npx pm2 delete opencatz-agent || npx pm2 delete opencat-agent || true) && npx pm2 start dist/index.js --name opencatz-agent --update-env",
+    "deploy": "npm ci && npm audit --omit=dev && npm run build && (npx pm2 delete opencatz-agent || npx pm2 delete opencat-agent || true) && npx pm2 start dist/index.js --name opencatz-agent --update-env",
     "update": "node scripts/update-core.mjs",
     "uninstall": "node scripts/uninstall.mjs",
     "clean": "node scripts/uninstall.mjs",
@@ -28,12 +28,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dizcorvus/opencatz-ai-robinhood-chain.git"
+    "url": "git+https://github.com/Celmaro/Memeland.git"
   },
   "bugs": {
-    "url": "https://github.com/dizcorvus/opencatz-ai-robinhood-chain/issues"
+    "url": "https://github.com/Celmaro/Memeland/issues"
   },
-  "homepage": "https://opencatz.xyz",
+  "homepage": "https://github.com/Celmaro/Memeland",
   "keywords": [
     "opencatz",
     "nft-screening",
@@ -52,7 +52,7 @@
     "goplus",
     "nft-sniper"
   ],
-  "author": "dizcorvus",
+  "author": "Celmaro",
   "license": "MIT",
   "engines": {
     "node": ">=20.0.0"

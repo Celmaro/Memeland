@@ -41,7 +41,10 @@ function runCommand(command, cmdArgs) {
   const child = spawn(command, cmdArgs, {
     cwd: rootDir,
     stdio: 'inherit',
-    shell: true,
+    // No shell: argv is passed directly to the child, so user-controlled
+    // arguments (e.g. `opencatz uninstall <arg>`) cannot be interpreted as
+    // shell syntax / command injection.
+    shell: false,
   });
 
   child.on('exit', (code) => {
