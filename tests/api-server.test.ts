@@ -114,4 +114,95 @@ describe('OpenCatzRESTServer Test Suite', () => {
     });
     expect(missingHeader.status).toBe(401);
   });
+
+  it('refuses non-loopback binding without an API key', () => {
+    const prevHost = process.env.API_BIND_HOST;
+    const prevKey = process.env.OPENCATZ_API_KEY;
+    try {
+      process.env.API_BIND_HOST = '0.0.0.0';
+      delete process.env.OPENCATZ_API_KEY;
+      delete process.env.OPENCAT_API_KEY;
+      expect(() => new OpenCatzRESTServer(testPort)).toThrow(/non-loopback/i);
+    } finally {
+      if (prevHost === undefined) delete process.env.API_BIND_HOST; else process.env.API_BIND_HOST = prevHost;
+      if (prevKey === undefined) delete process.env.OPENCATZ_API_KEY; else process.env.OPENCATZ_API_KEY = prevKey;
+    }
+  });
+
+  it('allows non-loopback binding when a key is configured', () => {
+    const prevHost = process.env.API_BIND_HOST;
+    const prevKey = process.env.OPENCATZ_API_KEY;
+    let srv: OpenCatzRESTServer | null = null;
+    try {
+      process.env.API_BIND_HOST = '0.0.0.0';
+      process.env.OPENCATZ_API_KEY = 'bound_key_xyz';
+      srv = new OpenCatzRESTServer(testPort);
+      expect(srv).toBeInstanceOf(OpenCatzRESTServer);
+    } finally {
+      void srv?.stop();
+      if (prevHost === undefined) delete process.env.API_BIND_HOST; else process.env.API_BIND_HOST = prevHost;
+      if (prevKey === undefined) delete process.env.OPENCATZ_API_KEY; else process.env.OPENCATZ_API_KEY = prevKey;
+    }
+  });
+
+  it('enforces the CORS origin allowlist when configured', async () => {
+    const prevOrigins = process.env.API_ALLOWED_ORIGINS;
+    process.env.API_ALLOWED_ORIGINS = 'https://dashboard.example.com';
+    const ok = await fetch(`http://localhost:${testPort}/api/status`, {
+      headers: { Origin: 'https://dashboard.example.com' },
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('access-control-allow-origin')).toBe('https://dashboard.example.com');
+    const denied = await fetch(`http://localhost:${testPort}/api/status`, {
+      headers: { Origin: 'https://evil.example.com' },
+    });
+    expect(denied.status).toBe(403);
+    if (prevOrigins === undefined) delete process.env.API_ALLOWED_ORIGINS; else process.env.API_ALLOWED_ORIGINS = prevOrigins;
+  });
+
+  it('rejects an oversized request body', async () => {
+    const big = { command: 'x', args: { data: 'A'.repeat(2 * 1024 * 1024) } };
+    const res = await fetch(`http://localhost:${testPort}/api/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(big),
+    });
+    // With no key configured, /api/command is 401 before the body is read — so
+    // guard the oversized-body behavior via the authenticated path.
+    process.env.OPENCATZ_API_KEY = 'secret_key_123';
+    // The server caps the body at 1MB and forcibly closes the connection (a
+    // DoS guard — it never buffers the whole oversized payload into memory),
+    // so the authenticated oversized request either fails with a network
+    // reset or returns a 4xx/5xx. Assert rejection happens either way.
+    let status: number | undefined;
+    let reset = false;
+    try {
+      const authed = await fetch(`http://localhost:${testPort}/api/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-OpenCatz-Api-Key': 'secret_key_123' },
+        body: JSON.stringify(big),
+      });
+      status = authed.status;
+    } catch {
+      reset = true;
+    }
+    expect(res.status).toBe(401);
+    expect(reset || (status !== undefined && status >= 400)).toBe(true);
+    delete process.env.OPENCATZ_API_KEY;
+  });
+
+  it('does not leak internal error messages to the client', async () => {
+    process.env.OPENCATZ_API_KEY = 'secret_key_123';
+    // Send invalid JSON on an authenticated path — parse error must be generic.
+    const res = await fetch(`http://localhost:${testPort}/api/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-OpenCatz-Api-Key': 'secret_key_123' },
+      body: '{ this is not json',
+    });
+    const data = (await res.json()) as { error?: string };
+    expect(res.status).toBe(500);
+    expect(data.error).toBe('Internal server error');
+    expect(data.error).not.toMatch(/Invalid JS|path|stack/i);
+    delete process.env.OPENCATZ_API_KEY;
+  });
 });

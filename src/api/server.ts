@@ -20,6 +20,22 @@ export class OpenCatzRESTServer {
     // Bind to loopback by default; the REST surface can mutate state / execute
     // command tools, so it must not be exposed on all interfaces unintentionally.
     this.host = process.env.API_BIND_HOST || '127.0.0.1';
+
+    // Refuse non-loopback binding unless an API key is configured. Read and
+    // control endpoints are only authenticated when a key is present, so a
+    // remote bind with no key would otherwise expose trading state and the
+    // /api/agents/toggle mutation to the world. Fail startup loudly instead.
+    const isLoopback = this.host === '127.0.0.1' || this.host === 'localhost' || this.host === '::1';
+    const authKey = (
+      process.env.OPENCATZ_API_KEY ||
+      process.env.OPENCAT_API_KEY ||
+      ''
+    ).trim();
+    if (!isLoopback && !authKey) {
+      throw new Error(
+        `API_BIND_HOST=${this.host} is non-loopback — OPENCATZ_API_KEY (or OPENCAT_API_KEY) is required before remote exposure.`
+      );
+    }
   }
 
   public stop(): Promise<void> {
@@ -37,8 +53,27 @@ export class OpenCatzRESTServer {
     this.toolRegistry.attachOrchestrator(hub);
 
     this.server = http.createServer(async (req, res) => {
-      // Set CORS Headers for website integration
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      const origin = req.headers.origin;
+      const allowedOrigins = (process.env.API_ALLOWED_ORIGINS || '')
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean);
+      const isAllowedOrigin =
+        allowedOrigins.length === 0 || (origin !== undefined && allowedOrigins.includes(origin));
+      // Set CORS Headers for website integration. Only echo an explicit origin
+      // (from API_ALLOWED_ORIGINS); never emit the wildcard `*`, which would let
+      // any origin read authenticated responses and mutate state.
+      if (allowedOrigins.length === 0) {
+        // No allowlist configured → deny cross-origin browser access entirely
+        // (loopback dashboards work same-origin / via API calls, not browser CORS).
+        res.setHeader('Access-Control-Allow-Origin', '');
+      } else if (isAllowedOrigin && origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.statusCode = 403;
+        res.end(JSON.stringify({ success: false, error: 'Forbidden: origin not allowed' }));
+        return;
+      }
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-OpenCatz-Api-Key, X-OpenCat-Api-Key');
       res.setHeader('Content-Type', 'application/json');
@@ -50,11 +85,13 @@ export class OpenCatzRESTServer {
         return;
       }
 
-      // API Key Authentication Guard (if OPENCATZ_API_KEY or OPENCAT_API_KEY is configured)
+      // API Key Authentication Guard — applied to EVERY endpoint (read and
+      // write). When no key is configured the server is loopback-bound only
+      // (enforced in the constructor), so unauthenticated reads are contained.
       const authKey = process.env.OPENCATZ_API_KEY || process.env.OPENCAT_API_KEY;
       if (authKey && authKey.trim() !== '') {
         const clientKey = req.headers['x-opencatz-api-key'] || req.headers['x-opencat-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-        if (clientKey !== authKey) {
+        if (clientKey !== authKey.trim()) {
           res.statusCode = 401;
           res.end(JSON.stringify({ success: false, error: 'Unauthorized: Invalid or missing API Key' }));
           return;
@@ -224,9 +261,12 @@ export class OpenCatzRESTServer {
         res.end(JSON.stringify({ success: false, error: `Endpoint "${pathname}" not found.` }));
 
       } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        // Log the detailed error server-side, but never leak internal
+        // exception messages (filesystem paths, provider details, etc) to the
+        // client.
+        console.error('[API] Request failed:', err instanceof Error ? err.message : String(err));
         res.statusCode = 500;
-        res.end(JSON.stringify({ success: false, error: `Internal Server Error: ${errMsg}` }));
+        res.end(JSON.stringify({ success: false, error: 'Internal server error' }));
       }
     });
 
@@ -243,16 +283,33 @@ export type OpenCatRESTServer = OpenCatzRESTServer;
 function parseJsonBody(req: http.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let bodyStr = '';
+    let bodySize = 0;
+    const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+    const timeout = setTimeout(() => {
+      req.destroy();
+      reject(new Error('Request body timed out'));
+    }, 15 * 1000);
     req.on('data', (chunk) => {
-      bodyStr += chunk.toString();
+      bodySize += chunk.length;
+      if (bodySize > MAX_BODY_BYTES) {
+        clearTimeout(timeout);
+        req.destroy();
+        reject(new Error('Request body too large'));
+        return;
+      }
+      bodyStr += chunk.toString('utf8');
     });
     req.on('end', () => {
+      clearTimeout(timeout);
       try {
         resolve(bodyStr ? JSON.parse(bodyStr) : {});
       } catch (e) {
         reject(new Error('Invalid JSON payload'));
       }
     });
-    req.on('error', (err) => reject(err));
+    req.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
   });
 }
