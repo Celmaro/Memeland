@@ -82,6 +82,7 @@ export type OpportunityOutcomeReason =
   | 'EXECUTION_FAILED'
   | 'POSITION_EXIT_FAILED'
   | 'PROFITABLE_MISS'
+  | 'REALIZED'
   | 'CORRECT_REJECTION';
 
 export interface OpportunityIdentity {
@@ -96,6 +97,10 @@ export interface OpportunityIdentity {
   firstSeenLiquidityUsd?: number;
   currentState: OpportunityState;
   stateUpdatedAt: string;
+  /** ISO timestamp of first admission to the evaluation window (WATCHING). */
+  admittedAt?: string;
+  /** Price captured at evaluation-window admission — entry anchor for the post-mortem trajectory. */
+  admissionPriceUsd?: number;
   finalOutcome?: OpportunityOutcomeReason;
   /** ISO timestamp for the next Strategist review (parking/throttle). Undefined = due now. */
   nextReviewAt?: string;
@@ -235,6 +240,16 @@ export class OpportunityLedger {
     if (!STATE_TRANSITIONS[from].has(to)) return { ok: false, reason: `invalid transition '${from}' -> '${to}'` };
     identity.currentState = to;
     identity.stateUpdatedAt = new Date().toISOString();
+    // Capture the evaluation-window entry (first admission to WATCHING) exactly once.
+    // The post-mortem measures trajectory from this admission window, not the token's
+    // first-ever tick, so a pre-evaluation spike can never be misread as a profitable miss.
+    if (to === 'WATCHING' && identity.admittedAt === undefined) {
+      identity.admittedAt = identity.stateUpdatedAt;
+      const latestObs = [...this.observations]
+        .reverse()
+        .find((o) => o.opportunityId === opportunityId);
+      identity.admissionPriceUsd = latestObs?.priceUsd ?? identity.firstSeenPriceUsd;
+    }
     this.emitEvent(identity, type, { from, to, reason });
     this.save();
     return { ok: true };

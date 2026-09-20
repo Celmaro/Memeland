@@ -35,10 +35,6 @@ export class OpportunityPostMortem {
   private ledger: OpportunityLedger;
   private feedLearning: (success: boolean) => void;
 
-  /** Regression guard (Q16): an identity that already fed learning is never fed again, so the
-   *  swarm learns from a realized outcome exactly once in total even if run() is called repeatedly. */
-  private fed = new Set<string>();
-
   constructor(
     ledger: OpportunityLedger,
     feedLearning: (success: boolean) => void = (success: boolean) => {
@@ -57,20 +53,23 @@ export class OpportunityPostMortem {
     let skippedNeutralCount = 0;
 
     for (const identity of queue) {
-      const idKey = identity.opportunityId;
-      const result = this.attribute(identity);
-      this.ledger.setFinalOutcome(identity.opportunityId, result.outcome);
-      if (this.fed.has(idKey)) {
-        // already honored once — never feed the swarm twice for the same outcome
+      if (identity.currentState === 'EXITED') {
+        // A realized live trade — the swarm already recalibrated it exactly once through
+        // the live TP/SL loop (wallet-tracker -> updateSignalPrice). The post-mortem must
+        // NEVER re-feed it; it only drains the ledger with a truthful label so the queue
+        // stays honest without double-counting the same realized PnL.
+        this.ledger.setFinalOutcome(identity.opportunityId, 'REALIZED');
+        skippedNeutralCount += 1;
         continue;
       }
+
+      const result = this.attribute(identity);
+      this.ledger.setFinalOutcome(identity.opportunityId, result.outcome);
       if (result.success === true) {
         fedSuccessCount += 1;
-        this.fed.add(idKey);
         this.feedLearning(true);
       } else if (result.success === false) {
         fedLossCount += 1;
-        this.fed.add(idKey);
         this.feedLearning(false);
       } else {
         skippedNeutralCount += 1;
@@ -91,12 +90,25 @@ export class OpportunityPostMortem {
 
   private attribute(identity: OpportunityIdentity): AttributeResult {
     const observations = this.ledger.getObservations(identity.opportunityId);
-    const entry = identity.firstSeenPriceUsd ?? observations[0]?.priceUsd;
+    // Measure from the evaluation-window entry, not the token's first-ever tick.
+    const entry =
+      identity.admissionPriceUsd ??
+      identity.firstSeenPriceUsd ??
+      observations[0]?.priceUsd;
     if (entry === undefined || entry <= 0) {
       return { outcome: 'CORRECT_REJECTION' }; // no trajectory to judge
     }
 
+    // Never admitted to the evaluation window — the bot was never evaluating it, so no
+    // trajectory judgement (or learning feed) applies.
+    if (!identity.admittedAt) {
+      return { outcome: 'CORRECT_REJECTION' };
+    }
+
+    // Restrict the trajectory to observations at/after admission so a spike that happened
+    // pre-prefilter (before the strategy ever had a live chance) cannot be read as a win.
     const prices = observations
+      .filter((o) => o.observedAt && o.observedAt >= identity.admittedAt!)
       .map((o) => o.priceUsd)
       .filter((p): p is number => typeof p === 'number' && p > 0);
     if (prices.length === 0) {
