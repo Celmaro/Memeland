@@ -1,6 +1,7 @@
 import type { WalletService } from '../services/wallet-service.js';
 import { isDryRun as isDryRunMode } from '../config/config.js';
 import { loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
+import { clampSize, type AdapterError, type Result } from './result.js';
 
 export interface EVMTradeRequest {
   chain: string;
@@ -354,5 +355,239 @@ export class EVMTradeAdapter {
         error: errMsg,
       };
     }
+  }
+}
+
+/**
+ * PR 2 / Kernel E — two-lane RPC adapter (SRC-037 RABIQ read/submit lanes +
+ * `logsSplit`, SRC-055 Stampede portable failover + rotation weighting +
+ * per-host latency/error, SRC-039 PELLET throw-free `Result<T,E>`).
+ *
+ * Additive to `EVMTradeAdapter` (the high-level buy path above stays untouched).
+ * Read ops (`call`/`getLogs`) and submit ops (`sendRawTx`) draw from independent
+ * leaky-bucket lanes so a surge of reads never starves submissions. Failover is
+ * weighted by host + penalized by errors, and failed hosts enter a cooldown.
+ * `callLegacy` is the G2 deprecation shim that still throws — callers migrate to
+ * `call()` and the shim is removed at the end of the deprecation window.
+ */
+
+export type Bytes = string;
+export type TxHash = string;
+
+export interface Log {
+  address: string;
+  topics: string[];
+  data: string;
+  blockNumber: number;
+}
+
+export interface EvmCallRequest {
+  to: string;
+  data: string;
+  chain: string | number;
+  block?: string;
+}
+
+export interface LogRequest {
+  address: string;
+  topics: string[];
+  fromBlock: string | number;
+  toBlock?: string;
+  chain: string | number;
+}
+
+export interface SignedTx {
+  chain: string | number;
+  raw: string;
+}
+
+export interface RpcHost {
+  url: string;
+  rotationWeight?: number;
+}
+
+export interface HostHealth {
+  host: string;
+  latencyMs: number;
+  errors: number;
+  cooldownMs: number;
+}
+
+export interface RpcTransport {
+  request(host: string, method: string, params: unknown[]): Promise<{ ok: boolean; result?: unknown; error?: string }>;
+}
+
+export interface EvmAdapterOptions {
+  hosts: RpcHost[];
+  transport?: RpcTransport;
+  now?: () => number;
+  cooldownMs?: number;
+  laneTokensPerSec?: number;
+  readLaneCapacity?: number;
+  submitLaneCapacity?: number;
+}
+
+interface HostState {
+  url: string;
+  weight: number;
+  latencyMs: number;
+  errors: number;
+  cooldownUntil: number;
+}
+
+/** Leaky-bucket token lane — one per RPC lane (read vs submit). */
+class Lane {
+  private tokens: number;
+  private lastRefill: number;
+
+  constructor(
+    private readonly capacity: number,
+    private readonly refillPerSec: number,
+    private readonly now: () => number
+  ) {
+    this.tokens = capacity;
+    this.lastRefill = now();
+  }
+
+  public tryTake(): boolean {
+    const t = this.now();
+    const dt = (t - this.lastRefill) / 1000;
+    if (dt > 0) {
+      this.tokens = Math.min(this.capacity, this.tokens + dt * this.refillPerSec);
+      this.lastRefill = t;
+    }
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+}
+
+/** Minimal JSON-RPC transport over global fetch; injectable for tests. */
+class DefaultTransport implements RpcTransport {
+  async request(host: string, method: string, params: unknown[]): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+    try {
+      const res = await fetch(host, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      const body = (await res.json()) as { error?: { message?: string } | string; result?: unknown };
+      if (body.error) {
+        const message = typeof body.error === 'string' ? body.error : body.error?.message;
+        return { ok: false, error: message ?? 'json-rpc error' };
+      }
+      return { ok: true, result: body.result };
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+}
+
+export class EvmAdapter {
+  private readonly now: () => number;
+  private readonly transport: RpcTransport;
+  private readonly cooldownMs: number;
+  private readonly hosts: HostState[];
+  private readonly readLane: Lane;
+  private readonly submitLane: Lane;
+
+  constructor(opts: EvmAdapterOptions) {
+    this.now = opts.now ?? Date.now;
+    this.transport = opts.transport ?? new DefaultTransport();
+    this.cooldownMs = opts.cooldownMs ?? 0;
+    const cap = opts.laneTokensPerSec ?? 4;
+    this.readLane = new Lane(opts.readLaneCapacity ?? cap, cap, this.now);
+    this.submitLane = new Lane(opts.submitLaneCapacity ?? cap, cap, this.now);
+    this.hosts = opts.hosts.map((h) => ({
+      url: h.url,
+      weight: h.rotationWeight ?? 1,
+      latencyMs: 0,
+      errors: 0,
+      cooldownUntil: 0,
+    }));
+  }
+
+  private pickHost(): HostState | null {
+    const now = this.now();
+    const healthy = this.hosts.filter((h) => h.cooldownUntil <= now);
+    if (healthy.length === 0) return null;
+    let best: HostState | null = null;
+    let bestScore = -1;
+    for (const h of healthy) {
+      const score = h.weight / (h.errors + 1);
+      if (score > bestScore) {
+        bestScore = score;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  private async dispatch(method: string, params: unknown[]): Promise<Result<unknown, AdapterError>> {
+    const host = this.pickHost();
+    if (!host) return { ok: false, error: { code: 'NO_HOST', message: 'all RPC hosts in cooldown', retryable: true } };
+    const started = this.now();
+    const res = await this.transport.request(host.url, method, params);
+    host.latencyMs = this.now() - started;
+    if (res.ok) return { ok: true, value: res.result };
+    host.errors += 1;
+    if (this.cooldownMs > 0) host.cooldownUntil = this.now() + this.cooldownMs;
+    return { ok: false, error: { code: 'RPC_ERROR', message: res.error ?? 'rpc failed', retryable: true, host: host.url } };
+  }
+
+  /** Read-only lane: constant-call. Throttled independently of submissions. */
+  public async call(req: EvmCallRequest): Promise<Result<Bytes, AdapterError>> {
+    if (!this.readLane.tryTake()) {
+      return { ok: false, error: { code: 'RATE_LIMIT', message: 'read lane throttled', retryable: true } };
+    }
+    const r = await this.dispatch('eth_call', [{ to: req.to, data: req.data }, typeof req.block === 'string' ? req.block : 'latest']);
+    if (!r.ok) return r;
+    return { ok: true, value: r.value as Bytes };
+  }
+
+  /** Read-only lane: log filter. */
+  public async getLogs(req: LogRequest): Promise<Result<Log[], AdapterError>> {
+    if (!this.readLane.tryTake()) {
+      return { ok: false, error: { code: 'RATE_LIMIT', message: 'read lane throttled', retryable: true } };
+    }
+    const r = await this.dispatch('eth_getLogs', [
+      { address: req.address, topics: req.topics, fromBlock: req.fromBlock, toBlock: req.toBlock ?? 'latest' },
+    ]);
+    if (!r.ok) return r;
+    return { ok: true, value: r.value as Log[] };
+  }
+
+  /** Submit lane: broadcast. Independent 429/rate budget from reads. */
+  public async sendRawTx(req: SignedTx): Promise<Result<TxHash, AdapterError>> {
+    if (!this.submitLane.tryTake()) {
+      return { ok: false, error: { code: 'RATE_LIMIT', message: 'submit lane throttled', retryable: true } };
+    }
+    const r = await this.dispatch('eth_sendRawTransaction', [req.raw]);
+    if (!r.ok) return r;
+    return { ok: true, value: r.value as TxHash };
+  }
+
+  /** G2 deprecation shim: throws like the old throw-first contract. Remove later. */
+  public async callLegacy(req: EvmCallRequest): Promise<Bytes> {
+    const r = await this.call(req);
+    if (!r.ok) throw new Error(r.error.message);
+    return r.value;
+  }
+
+  public getHealth(): HostHealth[] {
+    return this.hosts.map((h) => ({
+      host: h.url,
+      latencyMs: h.latencyMs,
+      errors: h.errors,
+      cooldownMs: Math.max(0, h.cooldownUntil - this.now()),
+    }));
+  }
+
+  /** FLYWHEEL fail-safe: clamp a model-returned size to its cap before trusting it. */
+  public overrideSize(rawSize: number, maxSize: number): Result<number, AdapterError> {
+    return clampSize(rawSize, maxSize);
   }
 }
