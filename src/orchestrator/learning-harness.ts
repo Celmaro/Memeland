@@ -234,3 +234,152 @@ export function tca(
     implementationShortfallBps: basisBps * qty,
   };
 }
+
+export interface BacktestTrade {
+  entryPrice: number;
+  exitPrice: number;
+  peakPrice?: number;
+  qty: number;
+  feesUsd?: number;
+  slippageUsd?: number;
+}
+
+/**
+ * Peak Capture Ratio: fraction of the trade's peak (favorable excursion) that
+ * the exit actually captured. Null when no trade has a peak above entry, so a
+ * caller never mistakes "no data" for "perfect capture".
+ */
+export function peakCaptureRatio(trades: BacktestTrade[]): number | null {
+  const list = Array.isArray(trades) ? trades : [];
+  let numerator = 0;
+  let denominator = 0;
+  for (const t of list) {
+    const peak = t.peakPrice;
+    if (!Number.isFinite(peak) || (peak as number) <= t.entryPrice) continue;
+    const exitPnl = (t.exitPrice - t.entryPrice) * t.qty;
+    const peakPnl = ((peak as number) - t.entryPrice) * t.qty;
+    numerator += exitPnl;
+    denominator += peakPnl;
+  }
+  if (denominator <= 0) return null;
+  return numerator / denominator;
+}
+
+export interface GrossNetSplit {
+  grossPnlUsd: number;
+  netPnlUsd: number;
+  ratioPct: number | null;
+}
+
+/**
+ * Gross vs net deterministic split (agent-arena math port): net subtracts fees
+ * and slippage from gross. ratioPct is net/gross, null when gross is zero.
+ */
+export function grossNetSplit(trades: BacktestTrade[]): GrossNetSplit {
+  const list = Array.isArray(trades) ? trades : [];
+  let gross = 0;
+  let fees = 0;
+  let slippage = 0;
+  for (const t of list) {
+    gross += (t.exitPrice - t.entryPrice) * t.qty;
+    fees += Number.isFinite(t.feesUsd) ? (t.feesUsd as number) : 0;
+    slippage += Number.isFinite(t.slippageUsd) ? (t.slippageUsd as number) : 0;
+  }
+  const net = gross - fees - slippage;
+  return {
+    grossPnlUsd: gross,
+    netPnlUsd: net,
+    ratioPct: Math.abs(gross) > 1e-12 ? (net / gross) * 100 : null,
+  };
+}
+
+/** Largest peak-to-trough drawdown in percent of the running peak. */
+export function maxDrawdownPct(equityCurve: number[]): number {
+  const curve = Array.isArray(equityCurve) ? equityCurve : [];
+  let peak = -Infinity;
+  let maxDd = 0;
+  for (const v of curve) {
+    if (!Number.isFinite(v)) continue;
+    if (v > peak) peak = v;
+    if (peak > 0) maxDd = Math.max(maxDd, (peak - v) / peak);
+  }
+  return maxDd * 100;
+}
+
+export interface OverfitVerdict {
+  ratio: number;
+  verdict: 'ROBUST' | 'WEAK' | 'OVERFITTED';
+  detail: string;
+}
+
+/**
+ * Walk-forward overfitting verdict (PR8.a, SRC-058). Compares out-of-sample
+ * Sharpe against in-sample. Fail-closed: a non-positive in-sample Sharpe means
+ * the edge is not robust, so the result is OVERFITTED.
+ */
+export function walkForwardVerdict(
+  inSampleSharpe: number,
+  outOfSampleSharpe: number
+): OverfitVerdict {
+  const is = Number(inSampleSharpe);
+  const oos = Number(outOfSampleSharpe);
+  if (!Number.isFinite(is) || !Number.isFinite(oos) || is <= 0) {
+    return {
+      ratio: Number.NaN,
+      verdict: 'OVERFITTED',
+      detail: 'in-sample Sharpe is non-positive; edge cannot be proven',
+    };
+  }
+  const ratio = oos / is;
+  const verdict =
+    ratio >= 0.8 ? 'ROBUST' : ratio >= 0.2 ? 'WEAK' : 'OVERFITTED';
+  return {
+    ratio,
+    verdict,
+    detail: `OOS/IS Sharpe ratio ${ratio.toFixed(3)} -> ${verdict}`,
+  };
+}
+
+export interface BacktestMetricsInput {
+  candidateId?: string;
+  strategyId?: string;
+  trades: BacktestTrade[];
+  equityCurve?: number[];
+  inSampleSharpe?: number;
+  outOfSampleSharpe?: number;
+}
+
+export interface BacktestMetrics {
+  candidateId?: string;
+  strategyId?: string;
+  grossPnlUsd: number;
+  netPnlUsd: number;
+  ratioPct: number | null;
+  peakCaptureRatio: number | null;
+  maxDrawdownPct: number;
+  overfitVerdict: OverfitVerdict['verdict'];
+}
+
+/**
+ * Assemble per-candidate/strategy backtest metrics: gross-net split, peak
+ * capture, drawdown, and the walk-forward overfitting verdict.
+ */
+export function computeBacktestMetrics(
+  input: BacktestMetricsInput
+): BacktestMetrics {
+  const split = grossNetSplit(input.trades);
+  const verdict = walkForwardVerdict(
+    input.inSampleSharpe ?? Number.NaN,
+    input.outOfSampleSharpe ?? Number.NaN
+  );
+  return {
+    candidateId: input.candidateId,
+    strategyId: input.strategyId,
+    grossPnlUsd: split.grossPnlUsd,
+    netPnlUsd: split.netPnlUsd,
+    ratioPct: split.ratioPct,
+    peakCaptureRatio: peakCaptureRatio(input.trades),
+    maxDrawdownPct: maxDrawdownPct(input.equityCurve ?? []),
+    overfitVerdict: verdict.verdict,
+  };
+}

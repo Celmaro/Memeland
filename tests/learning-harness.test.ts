@@ -6,6 +6,8 @@ import {
   leakageDetector,
   latchedKillSwitch,
   tca,
+  peakCaptureRatio,
+  walkForwardVerdict,
 } from '../src/orchestrator/learning-harness.js';
 
 describe('learning-harness deflatedSharpe', () => {
@@ -126,5 +128,14 @@ describe('learning-harness tca', () => {
     const q1 = tca(102, 100, 'buy', 1);
     const q3 = tca(102, 100, 'buy', 3);
     expect(q3.implementationShortfallBps).toBeCloseTo(q1.implementationShortfallBps * 3, 0);
+  });
+});
+
+describe('learning-harness backtest metrics (PR8)', () => {
+  it('exposes peakCaptureRatio and walkForwardVerdict from the harness', () => {
+    expect(peakCaptureRatio([
+      { entryPrice: 100, exitPrice: 150, peakPrice: 200, qty: 1 },
+    ])).toBeCloseTo(0.5, 6);
+    expect(walkForwardVerdict(1, 0.85).verdict).toBe('ROBUST');
   });
 });
