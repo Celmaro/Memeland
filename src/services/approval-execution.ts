@@ -24,6 +24,12 @@ export interface ExecuteMemeBuyOptions {
   thesis: string;
   /** Journal strategy label — AUTO gate vs one-click operator approve differ. */
   strategyUsed?: string;
+  /** Q15 fail-closed safe-config gate. When provided and NOT safe, the fill is refused. */
+  safety?: { isSafe(): { safe: boolean; reason: string } };
+  /** Quoter-honeypot sellability proof (rh-execution-core). When provided and NOT sellable, refused. */
+  sellability?: { check(tokenAddress: string): Promise<{ sellable: boolean; reason: string }> };
+  /** Per-token tx serializer (rh-execution-core TxLock). When provided, only one in-flight tx per token. */
+  txLock?: { acquire(tokenAddress: string): Promise<() => void> };
 }
 
 export interface ExecuteMemeBuyResult {
@@ -64,36 +70,62 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     };
   }
 
-  const execRes = await opts.evm.executeBuyToken(
-    {
+  // ── Q15 fail-closed safety gate ─────────────────────────────────────────
+  // When a safe-config registry is injected, an explicit-safe config must be
+  // in force or the fill is refused (read-only default; remediate to enable).
+  if (opts.safety) {
+    const s = opts.safety.isSafe();
+    if (!s.safe) {
+      return { success: false, simulated: false, outputTokens: 0, error: `safety gate refused: ${s.reason}` };
+    }
+  } else {
+    console.warn('[EXEC] no safety gate injected — fills proceed unguarded (tests / unconfigured only)');
+  }
+
+  // ── Quoter-honeypot sellability proof (fail-closed) ─────────────────────
+  if (opts.sellability) {
+    const s = await opts.sellability.check(opts.contractAddress);
+    if (!s.sellable) {
+      return { success: false, simulated: false, outputTokens: 0, error: `sellability gate refused: ${s.reason}` };
+    }
+  }
+
+  // ── Per-token tx serialization (TxLock) ─────────────────────────────────
+  const release = opts.txLock ? await opts.txLock.acquire(opts.contractAddress) : null;
+  try {
+    const execRes = await opts.evm.executeBuyToken(
+      {
+        chain,
+        tokenAddress: opts.contractAddress,
+        amountEth: opts.amountEth,
+        slippagePercentage: 1.5,
+      },
+      opts.wallet
+    );
+
+    opts.journal.recordTradeEntry({
+      id: `TRADE_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      domain: 'MEME_ROBINHOOD',
+      symbol: opts.symbol || 'TOKEN',
+      contractAddressOrId: opts.contractAddress || opts.symbol || 'N/A',
       chain,
-      tokenAddress: opts.contractAddress,
-      amountEth: opts.amountEth,
-      slippagePercentage: 1.5,
-    },
-    opts.wallet
-  );
+      entryTimestamp: new Date().toISOString(),
+      entryPriceUsdOrEth: opts.entryPriceUsd,
+      positionSizeUsd: opts.amountEth * (opts.entryPriceUsd || 1),
+      swarmScore: opts.confidence,
+      strategyUsed: opts.strategyUsed || 'approval-approved',
+      aiThesisSummary: (opts.thesis || '').slice(0, 200),
+      status: 'OPEN',
+    });
 
-  opts.journal.recordTradeEntry({
-    id: `TRADE_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    domain: 'MEME_ROBINHOOD',
-    symbol: opts.symbol || 'TOKEN',
-    contractAddressOrId: opts.contractAddress || opts.symbol || 'N/A',
-    chain,
-    entryTimestamp: new Date().toISOString(),
-    entryPriceUsdOrEth: opts.entryPriceUsd,
-    positionSizeUsd: opts.amountEth * (opts.entryPriceUsd || 1),
-    swarmScore: opts.confidence,
-    strategyUsed: opts.strategyUsed || 'approval-approved',
-    aiThesisSummary: (opts.thesis || '').slice(0, 200),
-    status: 'OPEN',
-  });
-
-  opts.onExecuted();
-  return {
-    success: execRes.success,
-    simulated: execRes.simulated,
-    outputTokens: execRes.outputTokens,
-    error: execRes.error,
-  };
+    opts.onExecuted();
+    return {
+      success: execRes.success,
+      simulated: execRes.simulated,
+      outputTokens: execRes.outputTokens,
+      error: execRes.error,
+    };
+  } finally {
+    release?.();
+  }
 }

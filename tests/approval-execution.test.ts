@@ -147,11 +147,99 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
       thesis: 'robinhood label',
     });
     expect(res.success).toBe(true);
-    expect(evm.executeBuyToken).toHaveBeenCalledTimes(1);
-    expect(evm.executeBuyToken).toHaveBeenCalledWith(
-      expect.objectContaining({ chain: 'robinhood' }),
-      wallet
-    );
-    expect(onExecuted).toHaveBeenCalledTimes(1);
-  });
-});
+        expect(evm.executeBuyToken).toHaveBeenCalledTimes(1);
+        expect(evm.executeBuyToken).toHaveBeenCalledWith(
+          expect.objectContaining({ chain: 'robinhood' }),
+          wallet
+        );
+        expect(onExecuted).toHaveBeenCalledTimes(1);
+      });
+
+      // ── Phase-2 wiring: fail-closed execution gates (Q15 safety, Quoter sellability, TxLock) ──
+
+      it('refuses the fill before EVM/journal/funnel when the safety gate is NOT safe (Q15)', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const onExecuted = vi.fn();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted,
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          safety: { isSafe: () => ({ safe: false, reason: 'no safe-config — fail-closed' }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/safety gate refused/);
+        expect(res.error).toMatch(/no safe-config/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+        expect(onExecuted).not.toHaveBeenCalled();
+        expect(journal.listTrades()).toHaveLength(0);
+      });
+
+      it('executes when the safety gate is explicitly safe', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          safety: { isSafe: () => ({ safe: true, reason: 'safe v1' }) },
+        });
+        expect(res.success).toBe(true);
+        expect(evm.executeBuyToken).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses when the Quoter honeypot can NOT prove sellability (fail-closed)', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const onExecuted = vi.fn();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted,
+          symbol: 'TEST', contractAddress: '0xhnypot', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          sellability: { check: async () => ({ sellable: false, reason: 'cannot sell — fail-closed' }) },
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/sellability gate refused/);
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+        expect(onExecuted).not.toHaveBeenCalled();
+      });
+
+      it('executes when sellability is proven', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          sellability: { check: async () => ({ sellable: true, reason: 'quote ok' }) },
+        });
+        expect(res.success).toBe(true);
+        expect(evm.executeBuyToken).toHaveBeenCalledTimes(1);
+      });
+
+      it('TxLock: wraps the fill, releases exactly once, and serializes per token', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const releases: number[] = [];
+        const txLock = {
+          acquire: vi.fn(async () => {
+            releases.push(0);
+            return () => { releases.push(1); };
+          }),
+        };
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          txLock,
+        });
+        expect(res.success).toBe(true);
+        expect(txLock.acquire).toHaveBeenCalledWith('0xabc');
+        // lock acquired then released exactly once each, even though the EVM path succeeded
+        expect(releases.filter((r) => r === 0)).toHaveLength(1);
+        expect(releases.filter((r) => r === 1)).toHaveLength(1);
+      });
+
+      it('TxLock is still released when the EVM fill throws (no leaked lock)', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        (evm.executeBuyToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('rpc down'));
+        let released = 0;
+        const txLock = { acquire: vi.fn(async () => () => { released += 1; }) };
+        await expect(executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          txLock,
+        })).rejects.toThrow('rpc down');
+        expect(released).toBe(1);
+      });
+    });
