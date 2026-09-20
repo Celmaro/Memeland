@@ -123,3 +123,103 @@ export function walkForwardSplit(rows: CalibrationRow[], folds = 5): WalkForward
   const splitAt = Math.max(0, ordered.length - valSize);
   return { train: ordered.slice(0, splitAt), validation: ordered.slice(splitAt) };
 }
+
+/**
+ * PR12.i (SRC-208 AutoHedge): the Director/Quant/Risk/Execution division. An
+ * idea flows Quant -> Risk -> Execution; any stage may refuse and the whole run
+ * fails closed. ONLY the decision division is ported — autonomous execution is
+ * deliberately skipped. Each stage is injectable so scoring-calibration callers
+ * can test each responsibility in isolation.
+ */
+
+export interface AutoHedgeIdea {
+  symbol: string;
+  /** 0-1 model confidence. */
+  confidence: number;
+  /** 0-100 raw signal score. */
+  signalScore: number;
+}
+
+export interface AutoHedgePlan {
+  idea: AutoHedgeIdea;
+  riskApproved: boolean;
+  riskReason: string;
+  /** Fraction of bankroll the Execution stage sizes. */
+  sizeFraction: number;
+  stagesRun: string[];
+}
+
+export type AutoHedgeQuant = (idea: AutoHedgeIdea) => AutoHedgeIdea | null;
+export type AutoHedgeRisk = (idea: AutoHedgeIdea) => { approved: boolean; reason?: string };
+export type AutoHedgeExecution = (idea: AutoHedgeIdea) => { sizeFraction: number } | null;
+
+export interface WorkflowDirectorDeps {
+  quant?: AutoHedgeQuant;
+  risk?: AutoHedgeRisk;
+  execution?: AutoHedgeExecution;
+}
+
+export interface WorkflowDirectorResult {
+  plan: AutoHedgePlan | null;
+  refusedAt?: string;
+  reason?: string;
+}
+
+export class WorkflowDirector {
+  private readonly quant: AutoHedgeQuant;
+  private readonly risk: AutoHedgeRisk;
+  private readonly execution: AutoHedgeExecution;
+
+  constructor(deps: WorkflowDirectorDeps) {
+    this.quant = deps.quant ?? ((idea) => idea);
+    this.risk = deps.risk ?? (() => ({ approved: true }));
+    this.execution = deps.execution ?? ((idea) => ({ sizeFraction: idea.confidence }));
+  }
+
+  run(idea: AutoHedgeIdea): WorkflowDirectorResult {
+    const stagesRun: string[] = [];
+
+    let current: AutoHedgeIdea | null;
+    try {
+      current = this.quant(idea);
+    } catch {
+      current = null;
+    }
+    stagesRun.push('QUANT');
+    if (!current) {
+      return { plan: null, refusedAt: 'QUANT', reason: 'quant stage discarded the idea' };
+    }
+
+    stagesRun.push('RISK');
+    let review: { approved: boolean; reason?: string };
+    try {
+      review = this.risk(current);
+    } catch {
+      review = { approved: false, reason: 'risk stage threw — fail-closed' };
+    }
+    if (!review.approved) {
+      return { plan: null, refusedAt: 'RISK', reason: review.reason ?? 'rejected by risk' };
+    }
+
+    stagesRun.push('EXECUTION');
+    let sizing: { sizeFraction: number } | null;
+    try {
+      sizing = this.execution(current);
+    } catch {
+      sizing = null;
+    }
+    if (!sizing) {
+      return { plan: null, refusedAt: 'EXECUTION', reason: 'execution sizing refused' };
+    }
+
+    return {
+      plan: {
+        idea: current,
+        riskApproved: true,
+        riskReason: review.reason ?? 'approved',
+        sizeFraction: Math.max(0, Math.min(1, sizing.sizeFraction)),
+        stagesRun,
+      },
+    };
+  }
+}
