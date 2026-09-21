@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
+import type { SellTrade } from '../services/sellability/sellability-simulator.js';
 
 /** All chains GMGN OpenAPI serves for market/token/track routes (multi-chain expansion, 2026-09-18). */
 export type Chain = 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood';
@@ -70,6 +71,10 @@ export interface GMGNRawToken {
   /** Bonding curve progress 0-1 (trenches/signal snapshot). */
   progress: number | null;
   source: 'gmgn' | 'dexscreener';
+  /** Optional EVM deployed bytecode for BytecodeScanner wiring (EVM-only). */
+  bytecode?: string;
+  /** Optional round-trip sell proof input for SellabilitySimulator wiring (EVM-only). */
+  sellTrade?: SellTrade;
 }
 
 export interface TokenSignalEvent {

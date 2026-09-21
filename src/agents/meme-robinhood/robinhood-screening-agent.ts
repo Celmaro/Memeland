@@ -5,6 +5,8 @@ import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { globalMarketRegimeFilter } from '../../services/market-regime.js';
 import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
 import { globalRugScoring } from '../../services/rug-scoring.js';
+import { BytecodeScanner } from '../../services/bytecode-scanner.js';
+import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
@@ -85,6 +87,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private tapeTokenAddresses: string[];
   /** Q06 keyless DexScreener feed. Empty until injected. */
   private dexscreener: MarketDataProvider | null;
+  /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
+  private bytecodeScanner: BytecodeScanner;
+  /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
+  private sellability: SellabilitySimulator;
 
   /** Last pass funnel stats — consumed by index.ts for the Phase-1 [FUNNEL] counters. */
   private lastFunnel: { scanned: number; prefiltered: number; emitted: number } = { scanned: 0, prefiltered: 0, emitted: 0 };
@@ -92,7 +98,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   constructor(
     config?: Partial<RobinhoodScreeningConfig>,
     strategyParams?: () => Record<string, unknown>,
-    opts: { voterSwarm?: boolean; critic?: CriticVoter | null; tape?: RhFillTapeReader; tapeTokenAddresses?: string[]; dexscreener?: MarketDataProvider } = {}
+    opts: {
+      voterSwarm?: boolean;
+      critic?: CriticVoter | null;
+      tape?: RhFillTapeReader;
+      tapeTokenAddresses?: string[];
+      dexscreener?: MarketDataProvider;
+      bytecodeScanner?: BytecodeScanner;
+      sellability?: SellabilitySimulator;
+    } = {}
   ) {
     this.gmgn = new GMGNAdapter();
     this.strategyEngine = new StrategyEngine();
@@ -104,6 +118,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.tape = opts.tape ?? null;
     this.tapeTokenAddresses = opts.tapeTokenAddresses ?? [];
     this.dexscreener = opts.dexscreener ?? null;
+    this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
+    this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
   }
 
   /**
@@ -563,6 +579,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             }
             const rugFeature = globalRugScoring.assess(t);
             securityPenalties.push(...rugFeature.penalties);
+            if (typeof t.bytecode === 'string') {
+              const scan = this.bytecodeScanner.scan(t.bytecode);
+              securityPenalties.push(...scan.findings);
+            }
+            const sellCheck = await this.sellability.check(t.sellTrade ?? { liquidityUsd: t.liquidityUsd });
+            if (!sellCheck.sellable) securityPenalties.push(...sellCheck.reasons);
             const baseCtx: VoterContext = {
               token: t,
               chain,

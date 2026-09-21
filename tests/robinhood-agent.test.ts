@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { RobinhoodScreeningAgent, RobinhoodSignal } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import { createDedupe, volume24hOf, buildSignalBoostMap, applySignalBoost } from '../src/agents/shared/gmgn-meme-helpers.js';
 import type { GMGNRawToken } from '../src/adapters/gmgn-adapter.js';
+import { BytecodeScanner } from '../src/services/bytecode-scanner.js';
+import { SellabilitySimulator } from '../src/services/sellability/sellability-simulator.js';
 
 const ETH_PRICE = 1929.03;
 
@@ -22,7 +24,37 @@ const mkToken = (over: Partial<GMGNRawToken> = {}): GMGNRawToken => ({
 });
 
 describe('RobinhoodScreeningAgent', () => {
-  afterEach(() => { vi.unstubAllGlobals(); delete process.env.GMGN_API_KEY; });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.GMGN_API_KEY; delete process.env.X_API_BEARER_TOKEN; });
+
+  const securityResponse = {
+    code: 0,
+    data: {
+      is_honeypot: false, is_blacklist: false, is_renounced: true,
+      renounced_mint: false, renounced_freeze_account: false, can_not_sell: false,
+      buy_tax: '0', sell_tax: '0', average_tax: '0', high_tax: '0',
+      is_open_source: true, burn_ratio: '0', lock_summary: { is_locked: false },
+      is_show_alert: false, flags: [],
+    },
+  };
+
+  async function runVoterSwarmSecurityPass(agent: RobinhoodScreeningAgent, token: GMGNRawToken) {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('api.coingecko.com')) {
+        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ethereum: { usd: ETH_PRICE, usd_24h_change: 1.5 } }) };
+      }
+      if (url.includes('openapi.gmgn.ai/v1/token/security')) {
+        return { ok: true, status: 200, headers: { get: () => null }, json: async () => securityResponse };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    vi.spyOn(agent, 'collectCandidates').mockResolvedValue([token]);
+    vi.spyOn(agent, 'collectSignalBoostMap').mockResolvedValue(new Map());
+    vi.spyOn(agent, 'collectTrackAccumulation').mockResolvedValue(new Map());
+    vi.spyOn(agent, 'collectTrackCandidates').mockResolvedValue([]);
+    vi.spyOn(agent, 'collectTapeCandidates').mockResolvedValue([]);
+    vi.spyOn(agent, 'collectDexscreenerCandidates').mockResolvedValue([]);
+    return agent.runScreeningPass();
+  }
 
   it('preFilter passes young & unknown-age tokens (age gate off — degen early)', () => {
     const agent = new RobinhoodScreeningAgent();
@@ -192,6 +224,40 @@ describe('RobinhoodScreeningAgent', () => {
     const reports = await agent.runScreeningPass();
     expect(reports.length).toBe(1);
     expect(reports[0].payload?.domain).toBe('MEME_ROBINHOOD');
+  });
+
+  it('voter swarm: flagged bytecode lowers the security score even when sell simulation passes', async () => {
+    const scanSpy = vi.spyOn(BytecodeScanner.prototype, 'scan');
+    const sellSpy = vi.spyOn(SellabilitySimulator.prototype, 'check')
+      .mockResolvedValue({ sellable: true, score: 90, reasons: ['round-trip sell simulated OK'] });
+    const token = mkToken({
+      creatorClose: false,
+      bytecode: '0x6342966c6877',
+      sellTrade: { liquidityUsd: 50000, blockAgeMs: 0, expectedSlippagePct: 1 },
+    });
+    const agent = new RobinhoodScreeningAgent({}, undefined, { voterSwarm: true });
+
+    const reports = await runVoterSwarmSecurityPass(agent, token);
+
+    expect(reports).toHaveLength(1);
+    expect(scanSpy).toHaveBeenCalledWith(token.bytecode);
+    expect(sellSpy).toHaveBeenCalledWith(token.sellTrade);
+    expect(reports[0].payload?.voterScores?.security ?? 100).toBeLessThan(100);
+  });
+
+  it('voter swarm: unpinned sellability check fail-closes the security score', async () => {
+    const sellSpy = vi.spyOn(SellabilitySimulator.prototype, 'check')
+      .mockResolvedValue({ sellable: false, score: 0, reasons: ['block not pinned or stale - score 0'] });
+    const scanSpy = vi.spyOn(BytecodeScanner.prototype, 'scan');
+    const token = mkToken({ creatorClose: false, bytecode: undefined });
+    const agent = new RobinhoodScreeningAgent({}, undefined, { voterSwarm: true });
+
+    const reports = await runVoterSwarmSecurityPass(agent, token);
+
+    expect(reports).toHaveLength(1);
+    expect(sellSpy).toHaveBeenCalledWith({ liquidityUsd: token.liquidityUsd });
+    expect(scanSpy).not.toHaveBeenCalled();
+    expect(reports[0].payload?.voterScores?.security ?? 100).toBeLessThan(100);
   });
 
   it('preFilter rejects honeypot & high-tax tokens from GMGN audit data', () => {
