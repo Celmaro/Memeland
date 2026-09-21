@@ -15,6 +15,7 @@
 
 import { HyperliquidAdapter, HyperliquidPosition, HyperliquidTradeFill } from '../../adapters/hyperliquid-adapter.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
+import { figureGroundingGate, type FigureGround, type FigureGroundingOptions, type FigureGroundingResult } from '../../services/figure-grounding-gate.js';
 
 export interface WhaleTraderPosition {
   address: string;
@@ -345,4 +346,25 @@ export class WhaleScreeningAgent implements ScreeningAgent<WhalePositionSignal> 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+export interface GroundWhaleSignalResult {
+  signal: WhalePositionSignal;
+  grounding: FigureGroundingResult;
+}
+
+/**
+ * Whale-agent wrapper around the PR12.j fail-closed figure-grounding gate. The
+ * whale book is only treated as actionable when observable spot prints ground
+ * it inside the recency window and never after the signal timestamp.
+ */
+export function groundWhaleSignal(
+  signal: WhalePositionSignal,
+  marketPrints: FigureGround[],
+  options: FigureGroundingOptions = {},
+): GroundWhaleSignalResult {
+  return {
+    signal,
+    grounding: figureGroundingGate(marketPrints, signal.generatedAt, options),
+  };
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HyperliquidAdapter } from '../src/adapters/hyperliquid-adapter.js';
-import { WhaleScreeningAgent } from '../src/agents/whale-eth/whale-screening-agent.js';
+import { groundWhaleSignal, WhaleScreeningAgent, type WhalePositionSignal } from '../src/agents/whale-eth/whale-screening-agent.js';
 import defaultStrategy from '../strategies/whale-eth-default.mjs';
 import standardStrategy from '../strategies/whale-eth-standard.mjs';
 
@@ -136,5 +136,44 @@ describe('HyperliquidAdapter & WhaleScreeningAgent Test Suite', () => {
     const stdSmallEval = standardStrategy.evaluate(smallCtx);
     expect(stdSmallEval.confidence).toBe(0);
     expect(stdSmallEval.recommendedAction).toBe('SKIP');
+  });
+});
+
+describe('groundWhaleSignal (figure-grounding wiring)', () => {
+  const signal: WhalePositionSignal = {
+    coin: 'ETH',
+    totalLongUsd: 5_000_000,
+    totalShortUsd: 1_000_000,
+    netUsd: 4_000_000,
+    longCount: 2,
+    shortCount: 1,
+    longTraders: [],
+    shortTraders: [],
+    spotFlow: [],
+    generatedAt: 1_000_000,
+  };
+
+  it('grounds a whale signal in recent observable prints', () => {
+    const result = groundWhaleSignal(signal, [
+      { at: signal.generatedAt - 60_000, value: 5_000_000 },
+      { at: signal.generatedAt - 30_000, value: 4_800_000 },
+    ]);
+    expect(result.grounding.grounded).toBe(true);
+    expect(result.grounding.supportingPrints).toBe(2);
+  });
+
+  it('fails closed when there is no market tape', () => {
+    const result = groundWhaleSignal(signal, []);
+    expect(result.grounding.grounded).toBe(false);
+    expect(result.grounding.reason).toContain('fail-closed');
+  });
+
+  it('rejects future prints as lookahead', () => {
+    const result = groundWhaleSignal(signal, [
+      { at: signal.generatedAt - 60_000, value: 1 },
+      { at: signal.generatedAt + 60_000, value: 9_000_000 },
+    ]);
+    expect(result.grounding.grounded).toBe(true);
+    expect(result.grounding.supportingPrints).toBe(1);
   });
 });
