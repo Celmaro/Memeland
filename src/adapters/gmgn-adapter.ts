@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 import type { SellTrade } from '../services/sellability/sellability-simulator.js';
+import { chainIdFor, type MarketToken } from './market-data-provider.js';
 
 /** All chains GMGN OpenAPI serves for market/token/track routes (multi-chain expansion, 2026-09-18). */
 export type Chain = 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood';
@@ -75,6 +76,26 @@ export interface GMGNRawToken {
   bytecode?: string;
   /** Optional round-trip sell proof input for SellabilitySimulator wiring (EVM-only). */
   sellTrade?: SellTrade;
+}
+
+/**
+ * Map a normalized GMGN token onto the shared {@link MarketToken} discovery shape.
+ * Chains outside the discovery map (e.g. `eth`) return `undefined` and are dropped,
+ * matching how the keyless feeds treat unsupported chains.
+ */
+export function gmgnTokenToMarketToken(t: GMGNRawToken): MarketToken | undefined {
+  const chainId = chainIdFor(t.chain);
+  if (chainId === undefined) return undefined;
+  return {
+    address: t.address,
+    chainId,
+    symbol: t.symbol,
+    name: t.name || undefined,
+    priceUsd: t.priceUsd,
+    liquidityUsd: t.liquidityUsd,
+    volume24hUsd: t.volume24hUsd,
+    mcapUsd: t.marketCapUsd > 0 ? t.marketCapUsd : undefined,
+  };
 }
 
 export interface TokenSignalEvent {
@@ -675,6 +696,11 @@ export class GMGNAdapter {
     const tokens = data[0]?.tokens;
     if (!Array.isArray(tokens)) return [];
     return tokens.map((t: any) => this.normalizeToken(t, chain, 'gmgn', this.volumeWindowForInterval(opts.interval || '1h')));
+  }
+
+  /** Map GMGN-normalized tokens onto the shared {@link MarketToken} discovery shape. */
+  toMarketTokens(tokens: GMGNRawToken[]): MarketToken[] {
+    return tokens.map(gmgnTokenToMarketToken).filter((t): t is MarketToken => t !== undefined);
   }
 
   /**
