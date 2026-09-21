@@ -11,6 +11,8 @@
  */
 
 import type { RefusalCode } from '../orchestrator/swarm-guards.js';
+import path from 'path';
+import { atomicWriteJsonSync, readJsonFileSafe } from '../storage/atomic-file-store.js';
 
 // ── Persistence contract (same shape as SafeConfigIO) ──────────────────────
 export interface ReputationIO {
@@ -91,6 +93,25 @@ interface ReputationState {
 
 const CURRENT_VERSION = 1;
 const EMPTY_IO: ReputationIO = { read: () => null, write: () => {} };
+
+export const DEFAULT_REPUTATION_FILE = path.resolve('database', 'reputation-memory.json');
+
+/** File-backed ReputationIO using the atomic-file-store helpers (same pattern as safe-config). */
+export function fileReputationIO(filePath: string = DEFAULT_REPUTATION_FILE): ReputationIO {
+  return {
+    read: () => {
+      const parsed = readJsonFileSafe<unknown>(filePath, null);
+      return parsed === null || parsed === undefined ? null : JSON.stringify(parsed);
+    },
+    write: (payloadJson: string) => {
+      try {
+        atomicWriteJsonSync(filePath, JSON.parse(payloadJson) as unknown);
+      } catch (error) {
+        console.warn(`[REPUTATION MEMORY] Failed to persist ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  };
+}
 
 export class ReputationMemory {
   private readonly state: ReputationState;
@@ -244,3 +265,6 @@ export function classifyWallet(w: WalletProfile): WalletTagCode {
   if (w.historyCount >= 6) return 'KNOWN_RUGGER';
   return 'UNKNOWN';
 }
+
+/** Live singleton used by the index.ts scheduler writes and voter reads. */
+export const globalReputationMemory = new ReputationMemory(fileReputationIO());

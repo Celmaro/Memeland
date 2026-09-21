@@ -15,7 +15,8 @@
  */
 
 import type { GMGNRawToken } from '../adapters/gmgn-adapter.js';
-import { walletScore, type WalletScoreInput } from '../services/wallet-scoring.js';
+import { walletScore, walletScoreWithReputation, type WalletScoreInput } from '../services/wallet-scoring.js';
+import type { ReputationMemory, AegisSnapshot, WalletProfile } from '../services/reputation-memory.js';
 import { flowConvergenceScore, type BuyEvent, type FlowConvergenceConfig } from '../services/flow-convergence.js';
 import { securityMetricFactors, computeRubric } from '../services/risk-rubric.js';
 import type { DecisionCache } from '../services/decision-cache.js';
@@ -70,6 +71,15 @@ export interface VoterContext {
   convergence?: { buys: BuyEvent[]; config?: FlowConvergenceConfig; now?: number };
   /** Security metric inputs for the risk rubric (Q12). */
   rubricMetrics?: { concentration?: number; spikePct?: number; volatility?: number; liquidityUsd?: number };
+  /** Reputation-memory wiring (Kernel A). Missing => existing fail-closed neutral voters. */
+  reputation?: VoterReputationContext;
+}
+
+export interface VoterReputationContext {
+  memory: ReputationMemory;
+  deployer: string;
+  profile: WalletProfile;
+  snapshot: AegisSnapshot;
 }
 
 export type VoterScores = Partial<Record<VoterId, number>>;
@@ -241,6 +251,80 @@ export function walletVote(ctx: VoterContext): VoterOpinion {
     voter: 'wallet',
     score: Math.max(0, Math.min(100, Math.round(res.score))),
     reasons: res.reasons,
+  };
+}
+
+/** Kernel A wiring: wallet vote with deployer reputation read. Fail-closed on degraded/known-rugged reads. */
+export function reputationAwareWalletVote(ctx: VoterContext): VoterOpinion {
+  const rep = ctx.reputation;
+  if (!ctx.walletMetrics || !rep) return walletVote(ctx);
+
+  const tokenId =
+    typeof ctx.token.address === 'string' && ctx.token.address.length > 0
+      ? ctx.token.address
+      : `${ctx.chain}:${ctx.token.symbol ?? 'TOKEN'}`;
+  const res = walletScoreWithReputation(
+    ctx.walletMetrics,
+    rep.memory,
+    tokenId,
+    rep.deployer,
+    rep.profile,
+    rep.snapshot,
+  );
+
+  const knownRugged = rep.memory.deployerKnown(rep.deployer) === 'rugged';
+  if (res.degraded || knownRugged || res.tag === 'KNOWN_RUGGER') {
+    return {
+      voter: 'wallet',
+      score: 50,
+      reasons: [
+        ...res.reasons,
+        knownRugged ? 'KNOWN_RUGGER deployer — neutral (fail-closed)' : 'reputation/wallet read not trustworthy — neutral (fail-closed)',
+      ],
+    };
+  }
+
+  return {
+    voter: 'wallet',
+    score: Math.max(0, Math.min(100, Math.round(res.score))),
+    reasons: res.reasons,
+  };
+}
+
+/** Kernel A wiring: security vote with known-rugged / below-floor deployer reputation read. */
+export function reputationAwareSecurityVote(
+  auditPassed: boolean,
+  reputation: ReputationMemory,
+  token: string,
+  deployer: string,
+  snapshot: AegisSnapshot,
+  penalties: string[] = [],
+  botRisk = 0,
+): VoterOpinion {
+  if (!auditPassed) return securityVote(false, penalties, botRisk);
+
+  const known = reputation.deployerKnown(deployer);
+  const adjusted = reputation.reputationAdjustment(token, deployer, snapshot);
+  if (known === 'rugged') {
+    return {
+      voter: 'security',
+      score: 0,
+      reasons: [...penalties, 'known-rugged deployer — fail-closed'],
+    };
+  }
+  if (adjusted.score < 60) {
+    return {
+      voter: 'security',
+      score: 0,
+      reasons: [...penalties, ...adjusted.evidence, 'reputation below floor — fail-closed'],
+    };
+  }
+
+  const base = securityVote(true, penalties, botRisk);
+  return {
+    voter: 'security',
+    score: base.score,
+    reasons: [...base.reasons, ...adjusted.evidence],
   };
 }
 

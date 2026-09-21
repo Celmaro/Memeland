@@ -26,6 +26,7 @@ import { OpportunityLedger } from './services/opportunity-ledger.js';
 import { OpportunityStrategist } from './services/opportunity-strategist.js';
 import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
 import { globalDecisionLedger } from './services/decision-ledger.js';
+import { globalReputationMemory } from './services/reputation-memory.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
@@ -611,6 +612,17 @@ const runScreeningCycle = async () => {
       const closed = scorecard.filter((e) => e.status !== 'OPEN');
       const wins = closed.filter((e) => e.status === 'TP').length;
       const winRate = closed.length > 0 ? Math.round((wins / closed.length) * 100) : 0;
+      // Kernel A: write terminal follow-up labels from the live scorecard.
+      try {
+        for (const entry of closed) {
+          if (!entry.contractAddress) continue;
+          const followUp = entry.status === 'TP' ? 'live' : entry.status === 'SL' ? 'rugged' : 'abandoned';
+          globalReputationMemory.labelAfterFollowup(entry.contractAddress, followUp);
+        }
+        globalReputationMemory.flush();
+      } catch (repErr: any) {
+        console.warn(`[REPUTATION MEMORY] scorecard write failed: ${repErr.message}`);
+      }
       console.log(`[SCORECARD] open=${openCount} closed=${closed.length} tp=${wins} sl=${closed.length - wins} winRate=${winRate}%`);
     } catch (scErr: any) {
       console.warn(`[SCORECARD] mark-to-market failed this cycle: ${scErr.message}`);
