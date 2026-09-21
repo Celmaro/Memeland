@@ -18,6 +18,8 @@ import { GMGNAdapter } from './adapters/gmgn-adapter.js';
 import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
 import { DexScreenerFeed } from './adapters/dexscreener-feed.js';
+import { CodexFeed } from './adapters/codex-feed.js';
+import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
 import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
@@ -32,7 +34,7 @@ import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
-import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from './services/execution-gates.js';
+import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability } from './services/execution-gates.js';
 import { bootstrapStartupConfig, printStartupBanner } from './startup/bootstrap.js';
 import { registerGracefulShutdown } from './startup/shutdown.js';
 import { createMarketRiskMonitor, startRuntimeMonitoring } from './startup/risk.js';
@@ -194,6 +196,9 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     critic: new CriticVoter(aiService),
     // Q06 keyless DexScreener booster feed. Inert unless DEXSCREENER_FEED_ENABLED=true.
     dexscreener: new DexScreenerFeed(),
+    // PR7 keyless Codex.io / DEXPaprika booster feeds. Inert unless their env gates are on.
+    codex: new CodexFeed(),
+    dexpaprika: new DexpaprikaFeed(),
   },
 );
 const hyperliquidAdapter = new HyperliquidAdapter();
@@ -470,6 +475,7 @@ const runScreeningCycle = async () => {
                   safety: { isSafe: gateSafety },
                   txLock: gateTxLock(),
                   sizer: gateSizer(),
+                  sellability: gateSellability(),
                   fillSim: gateFillSim(),
                   costGate: gateCostGate(),
                   governance: gateGovernance(),

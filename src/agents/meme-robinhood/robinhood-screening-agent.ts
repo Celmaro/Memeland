@@ -16,8 +16,12 @@ import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
   type VoterOpinion, type VoterScores, type VoterContext, scoresFromOpinions,
-  whaleVote, regimeVote, securityVote, walletVote, convergenceVote, rubricVote,
+  whaleVote, regimeVote, securityVote, walletVote, rubricVote,
+  reputationAwareSecurityVote, reputationAwareWalletVote, reputationContextFromToken,
+  stickyQuantVote, ownerDedupedConvergenceVote,
 } from '../../orchestrator/voters.js';
+import { globalReputationMemory } from '../../services/reputation-memory.js';
+import { globalDecisionCache } from '../../services/decision-cache.js';
 
 export interface RobinhoodSignal {
   token: GMGNRawToken;
@@ -87,6 +91,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private tapeTokenAddresses: string[];
   /** Q06 keyless DexScreener feed. Empty until injected. */
   private dexscreener: MarketDataProvider | null;
+  /** PR7 keyless Codex.io feed. Empty until injected. */
+  private codex: MarketDataProvider | null;
+  /** PR7 keyless DEXPaprika feed. Empty until injected. */
+  private dexpaprika: MarketDataProvider | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -104,6 +112,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       tape?: RhFillTapeReader;
       tapeTokenAddresses?: string[];
       dexscreener?: MarketDataProvider;
+      codex?: MarketDataProvider;
+      dexpaprika?: MarketDataProvider;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
     } = {}
@@ -118,6 +128,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.tape = opts.tape ?? null;
     this.tapeTokenAddresses = opts.tapeTokenAddresses ?? [];
     this.dexscreener = opts.dexscreener ?? null;
+    this.codex = opts.codex ?? null;
+    this.dexpaprika = opts.dexpaprika ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
   }
@@ -229,19 +241,47 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    * chain) into GMGNRawToken with source 'dexscreener'. Fail-open: empty.
    */
   public async collectDexscreenerCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
-    if (process.env.DEXSCREENER_FEED_ENABLED !== 'true') return [];
-    if (!this.dexscreener) return [];
+    return this.collectProviderCandidates(this.dexscreener, 'dexscreener', 'DEXSCREENER_FEED_ENABLED', chain);
+  }
+
+  /** PR7 Codex.io keyless feed candidates (BOOSTER). Guarded by CODEX_FEED_ENABLED=true. */
+  public async collectCodexCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.codex, 'codex', 'CODEX_FEED_ENABLED', chain);
+  }
+
+  /** PR7 DEXPaprika keyless feed candidates (BOOSTER). Guarded by DEXPAPRIKA_FEED_ENABLED=true. */
+  public async collectDexpaprikaCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.dexpaprika, 'dexpaprika', 'DEXPAPRIKA_FEED_ENABLED', chain);
+  }
+
+  /**
+   * Shared keyless-feed collector. Fails open (empty) unless the env gate is on
+   * and a provider is injected. Normalizes discovered MarketTokens (filtered to
+   * the current chain) into GMGNRawToken tagged with the source name.
+   */
+  private async collectProviderCandidates(
+    provider: MarketDataProvider | null,
+    source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika',
+    envVar: string,
+    chain: Chain = 'robinhood',
+  ): Promise<GMGNRawToken[]> {
+    if (process.env[envVar] !== 'true') return [];
+    if (!provider) return [];
     try {
       const chainId = chainIdFor(chain);
-      const tokens = await this.dexscreener.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
-      return tokens.map((t) => this.normalizeDexToken(chain, t));
+      const tokens = await provider.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
+      return tokens.map((t) => this.normalizeDexToken(chain, t, source));
     } catch (err: any) {
-      console.warn(`[ROBINHOOD AGENT] DexScreener candidates failed (skipped): ${err.message}`);
+      console.warn(`[ROBINHOOD AGENT] ${source} candidates failed (skipped): ${err.message}`);
       return [];
     }
   }
 
-  private normalizeDexToken(chain: Chain, t: MarketToken): GMGNRawToken {
+  private normalizeDexToken(
+    chain: Chain,
+    t: MarketToken,
+    source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika' = 'dexscreener',
+  ): GMGNRawToken {
     const symbol = t.symbol || 'TOKEN';
     return {
       chain,
@@ -263,7 +303,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       twitterRenameCount: 0, twitterDelPostCount: 0, twitterCreateTokenCount: 0,
       buyTax: null, sellTax: null, dexscrBoostFee: 0, dexscrAd: 0, totalFeeNative: null,
       exchange: null, launchpadPlatform: null, launchpadStatus: null, progress: null,
-      source: 'dexscreener',
+      source,
     };
   }
 
@@ -455,10 +495,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // self-guarded by env flags and fail-open empty when off/unconfigured.
                   const tapeCandidates = await this.collectTapeCandidates(chain);
                   const dexscreenerCandidates = await this.collectDexscreenerCandidates(chain);
+                  const codexCandidates = await this.collectCodexCandidates(chain);
+                  const dexpaprikaCandidates = await this.collectDexpaprikaCandidates(chain);
                   // Merge by address (candidates already deduped in collectCandidates; this
                   // merge must not hit the 60s dedupe cooldown — plain by-address dedupe only).
                   const merged = new Map<string, GMGNRawToken>();
-                  for (const t of [...candidates, ...trackCandidates, ...tapeCandidates, ...dexscreenerCandidates]) merged.set(t.address.toLowerCase(), t);
+                  for (const t of [...candidates, ...trackCandidates, ...tapeCandidates, ...dexscreenerCandidates, ...codexCandidates, ...dexpaprikaCandidates]) merged.set(t.address.toLowerCase(), t);
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         if (signalBoostMap.size > 0) {
@@ -561,6 +603,9 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // payload — the consensus gate in index.ts re-derives confidence from the weighted
           // average, so the swarm (not the agent) has the final word.
           if (this.voterSwarm) {
+            // Kernel A reputation read-path: active only when a deployer address is
+            // available; otherwise the plain fail-closed voters run unchanged.
+            const repCtx = reputationContextFromToken(globalReputationMemory, t);
             // Security vote: carry elevated-but-passing indicators so the 0.25-weight
             // security voter isn't a constant 100 for finalists (still fail-closed 0 on
             // audit failure — that's rejected before we get here).
@@ -593,15 +638,27 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               signalConfidence: confidence,
             };
             const opinions: VoterOpinion[] = [
-              securityVote(true, securityPenalties, botReport.botRisk),
-              { voter: 'quant', score: confidence, reasons: [`detected ${det.type} (post-strategy ${confidence}%)`] },
+              repCtx
+                ? reputationAwareSecurityVote(true, repCtx.memory, t.address, repCtx.deployer, repCtx.snapshot, securityPenalties, botReport.botRisk)
+                : securityVote(true, securityPenalties, botReport.botRisk),
+              await stickyQuantVote(globalDecisionCache, confidence, {
+                key: `${t.address.toLowerCase()}:${det.type}`,
+                reasons: [`detected ${det.type} (post-strategy ${confidence}%)`],
+                priceMovePct: 10,
+                price: (t as any).nativePrice ?? 0,
+              }),
             ];
             // Q03 wallet-score voter — feeds the wallet/concentration/dev dimension.
             // Fail-open neutral when the runtime can't compute the wallet score; the existing
             // security vote still enforces hard penalties above.
-            opinions.push(walletVote({ ...baseCtx, walletMetrics: (t as any).walletMetrics }));
+            opinions.push(
+              repCtx
+                ? reputationAwareWalletVote({ ...baseCtx, walletMetrics: (t as any).walletMetrics, reputation: repCtx })
+                : walletVote({ ...baseCtx, walletMetrics: (t as any).walletMetrics }),
+            );
             // Q05 flow-convergence voter — neutral when the agent didn't accumulate any buy flow.
-            opinions.push(convergenceVote({ ...baseCtx, convergence: (t as any).convergence }));
+            // Kernel F owner-dedup: one actor's N wallets count as one confirmation.
+            opinions.push(await ownerDedupedConvergenceVote(globalDecisionCache, { ...baseCtx, convergence: (t as any).convergence }));
             // Q12 risk-rubric voter (portable rubric) — neutral when no rubric metrics present.
             opinions.push(rubricVote({ ...baseCtx, rubricMetrics: (t as any).rubricMetrics }));
             const sent = sentimentMap.get(t.address.toLowerCase());

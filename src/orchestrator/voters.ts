@@ -82,6 +82,39 @@ export interface VoterReputationContext {
   snapshot: AegisSnapshot;
 }
 
+/**
+ * Build a Kernel A reputation context from a normalized token. Returns null when
+ * no deployer address is present so the live path fails back to the plain
+ * fail-closed voters. Snapshot fields default to "no evidence" (not risky)
+ * because the deployer-known and below-floor checks are the strong signals.
+ */
+export function reputationContextFromToken(
+  memory: ReputationMemory,
+  token: GMGNRawToken,
+): VoterReputationContext | null {
+  const deployer = typeof token.deployer === 'string' ? token.deployer.trim() : '';
+  if (!deployer) return null;
+
+  const snapshot: AegisSnapshot = {
+    mintAuthority: !token.renouncedMint,
+    freezeAuthority: !token.renouncedFreeze,
+    topHolderConcPct: typeof token.top10HolderRate === 'number' ? Math.round(token.top10HolderRate * 100) : 0,
+    bundleDetected: (token.bundlerRate ?? 0) >= 0.3,
+    lpStatus: token.creatorClose ? 'none' : 'locked',
+    metadataFlags: token.creatorClose,
+  };
+
+  const profile: WalletProfile = {
+    ageDays:
+      typeof token.creationTimestamp === 'number'
+        ? Math.max(0, (Date.now() - token.creationTimestamp * 1000) / 86_400_000)
+        : 0,
+    historyCount: 0,
+  };
+
+  return { memory, deployer, profile, snapshot };
+}
+
 export type VoterScores = Partial<Record<VoterId, number>>;
 
 /**

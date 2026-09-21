@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "type": "module",
   "bin": {
+    "memeland": "./bin/opencatz.js",
     "opencatz": "./bin/opencatz.js",
     "opencat": "./bin/opencatz.js"
   },
@@ -19,7 +20,7 @@
     "tui": "tsx src/cli/tui.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "deploy": "npm ci && npm audit --omit=dev && npm run build && (npx pm2 delete opencatz-agent || npx pm2 delete opencat-agent || true) && npx pm2 start dist/index.js --name opencatz-agent --update-env",
+    "deploy": "npm ci && npm audit --omit=dev && npm run build && (npx pm2 delete memeland-agent || npx pm2 delete opencatz-agent || npx pm2 delete opencat-agent || true) && npx pm2 start dist/index.js --name memeland-agent --update-env",
     "update": "node scripts/update-core.mjs",
     "uninstall": "node scripts/uninstall.mjs",
     "clean": "node scripts/uninstall.mjs",

@@ -3,6 +3,16 @@ import { allowDecision, refuseDecision, type DecisionResult } from '../decision/
 import { RefusalCode } from '../decision/refusal-code.js';
 import { aggregateVoterScores } from './voters.js';
 import { globalSwarmLearning } from './swarm-learning.js';
+import {
+  regimeAwareFloor,
+  resolveConflict,
+  calibratedConfidence,
+  cohortVote,
+  CircuitBreaker,
+  StickyConviction,
+  type Regime,
+  type DirectionVote,
+} from './swarm-guards.js';
 
 export interface SignalCandidate {
   symbol: string;
@@ -13,8 +23,18 @@ export interface SignalCandidate {
   securityAuditPassed: boolean;
   socialHypeScore: number; // 0 - 100
   confidence?: number; // agent-computed confidence (0-100); when present, swarm acts as pure gate
-  /** Arch-3 7-voter swarm scores. When present, the weighted voter average becomes the confidence. */
+  /** Arch-3 10-voter swarm scores. When present, the weighted voter average becomes the confidence. */
   voterScores?: Partial<Record<string, number>>;
+  /** Kernel B — prism-insight regime (raises the consensus floor in a bear market). */
+  regime?: Regime;
+  /** Kernel B — Decision Hub asymmetric conflict (1BUY + 2SELL = veto). */
+  directionVotes?: DirectionVote[];
+  /** Kernel B — zetryn downgrade-only calibration map (score -> calibrated). */
+  calibrationMap?: Record<number, number>;
+  /** Kernel B — FlySwarm cohort overlap; high crime-noise lowers confidence. */
+  cohort?: { observed: string[]; cohort: string[] };
+  /** Kernel B — azimuth sticky-conviction key; holds the last confidence within TTL. */
+  stickyKey?: string;
 }
 
 export interface ConsensusResult {
@@ -52,6 +72,11 @@ export class SwarmConsensusEngine {
 
   private activeOpposingIntents: Map<string, { domain: string; direction: 'LONG' | 'SHORT' | 'BUY' | 'SELL'; timestamp: number }> = new Map();
 
+  // Kernel B wiring (swarm-guards): circuit breaker + sticky conviction live on
+  // the engine so failures/successes and conviction can be recorded by index.ts.
+  private readonly circuitBreaker = new CircuitBreaker(3, 3_600_000);
+  private readonly sticky = new StickyConviction(300_000);
+
   /**
    * Register a direction intent from an agent (e.g. a SHORT on BTC vs a spot BUY) to enable Cross-Agent Veto
    */
@@ -60,8 +85,43 @@ export class SwarmConsensusEngine {
     this.activeOpposingIntents.set(key, { domain, direction, timestamp: Date.now() });
   }
 
+  /** Kernel B — pump-scanner circuit breaker: record a signal outcome (failed => toward open). */
+  public registerConsensusOutcome(failed: boolean): { tripped: boolean; cooldownMs: number } {
+    return this.circuitBreaker.record(failed);
+  }
+
+  public resetConsensusCircuit(): void {
+    this.circuitBreaker.reset();
+  }
+
+  /** Kernel B — azimuth sticky conviction: read the held confidence for a key. */
+  public getConviction(key: string): number | null {
+    return this.sticky.get(key);
+  }
+
+  public setConviction(key: string, value: number): void {
+    this.sticky.store(key, value);
+  }
+
   public evaluateSignal(candidate: SignalCandidate & { direction?: 'LONG' | 'SHORT' | 'BUY' | 'SELL' }): ConsensusResult {
     const symbolKey = candidate.symbol.toUpperCase();
+
+    // Kernel B — circuit breaker: a tripped circuit refuses before any scoring.
+    if (this.circuitBreaker.isOpen()) {
+      const id = `CONSENSUS_${candidate.domain}_${symbolKey}_CIRCUIT_${Date.now()}`;
+      return {
+        passed: false,
+        confidenceScore: 0,
+        decision: refuseDecision(
+          id,
+          RefusalCode.CIRCUIT_OPEN,
+          `Circuit breaker open for ${candidate.domain}.`,
+          [{ id: 'circuit', passed: false, reason: 'circuit open' }],
+        ),
+        breakdown: { quantScore: 0, catalystScore: 0, securityScore: 0, reputationMultiplier: 1.0 },
+        reason: `🛑 **Circuit Open:** recent consensus failures tripped the breaker — ${candidate.domain} signals refused during the cooldown.`,
+      };
+    }
 
     // Cross-Agent Conflict Veto Check (e.g., SHORT intent vs SPOT BUY)
     const existingIntent = this.activeOpposingIntents.get(symbolKey);
@@ -87,6 +147,26 @@ export class SwarmConsensusEngine {
       }
     }
 
+    // Kernel B — Decision Hub asymmetric conflict veto (1BUY + 2SELL = block).
+    if (candidate.directionVotes && candidate.directionVotes.length > 0) {
+      const conflict = resolveConflict(candidate.directionVotes);
+      if (conflict.conflicted && !conflict.resume) {
+        const id = `CONSENSUS_${candidate.domain}_${symbolKey}_ASYMMETRIC_${Date.now()}`;
+        return {
+          passed: false,
+          confidenceScore: 0,
+          decision: refuseDecision(
+            id,
+            RefusalCode.ASYMMETRIC_CONFLICT,
+            `${conflict.reason ?? 'asymmetric conflict'} on ${symbolKey}.`,
+            [{ id: 'directionConflict', passed: false, reason: conflict.reason }],
+          ),
+          breakdown: { quantScore: 0, catalystScore: 0, securityScore: 0, reputationMultiplier: 1.0 },
+          reason: `🛑 **Asymmetric Conflict Block:** ${conflict.reason} on $${symbolKey}.`,
+        };
+      }
+    }
+
     // Agent reputation is always neutral (1.0) until wired to real trade outcomes;
     // evaluateSignal must never fail-open from a stale/nonexistent reputation entry.
     const reputationMultiplier = 1.0;
@@ -102,9 +182,9 @@ export class SwarmConsensusEngine {
         // emphasis feeds the voter aggregate (bounded ±30%, renormalized). Default
         // weights are used whenever learning has not diverged from baseline.
         const voterWeights = globalSwarmLearning.getVoterWeights();
-        // Arch-3 7-voter swarm path: weighted average across the voters that rendered
-        // a score (quant/ml/security/sentiment/whale/regime/critic). The meme agent's
-        // own confidence rides in as the 'quant' vote, so nothing is lost.
+        // Arch-3 10-voter swarm path: weighted average across the voters that rendered
+        // a score (quant/ml/security/sentiment/whale/regime/critic/wallet/convergence/rubric).
+        // The meme agent's own confidence rides in as the 'quant' vote, so nothing is lost.
         if (candidate.voterScores && Object.keys(candidate.voterScores).length > 0) {
           const agg = aggregateVoterScores(candidate.voterScores, voterWeights);
           baseConfidence = agg.score;
@@ -122,6 +202,31 @@ export class SwarmConsensusEngine {
       securityScore = candidate.securityAuditPassed ? 100 : 0;
       isFastLane = quantScore >= 90 && candidate.securityAuditPassed;
       baseConfidence = quantScore * 0.35 + catalystScore * 0.35 + securityScore * 0.30;
+    }
+
+    // Kernel B — zetryn downgrade-only calibration: never let a calibrated value
+    // exceed the raw score.
+    if (candidate.calibrationMap) {
+      baseConfidence = calibratedConfidence(baseConfidence, candidate.calibrationMap);
+    }
+
+    // Kernel B — FlySwarm cohort overlap: high overlap with a known cohort
+    // distrusts the signal (safety demerit, additive and optional).
+    let cohortReason = '';
+    if (candidate.cohort && candidate.cohort.observed.length > 0) {
+      const cohort = cohortVote(candidate.cohort.observed, candidate.cohort.cohort);
+      if (cohort.crimeNoise >= 0.6) {
+        baseConfidence = Math.max(0, baseConfidence - Math.round(cohort.crimeNoise * 30));
+        cohortReason = ` (cohort overlap ${(cohort.crimeNoise * 100).toFixed(0)}% distrusts)`;
+      }
+    }
+
+    // Kernel B — azimuth sticky conviction: hold the last confidence for a key
+    // within TTL so a brief re-check cannot erode a fresh high-conviction read.
+    if (candidate.stickyKey) {
+      const held = this.sticky.get(candidate.stickyKey);
+      if (held !== null && held > baseConfidence) baseConfidence = held;
+      this.sticky.store(candidate.stickyKey, baseConfidence);
     }
 
     let confidenceScore = isFastLane
@@ -172,20 +277,26 @@ export class SwarmConsensusEngine {
       }
     }
 
-    const passed = confidenceScore >= 80 && candidate.securityAuditPassed;
+    // Kernel B — prism-insight regime floor: a bear market raises the bar to 90%.
+    const floor = candidate.regime ? Math.round(regimeAwareFloor(candidate.regime) * 100) : 80;
+    const passed = confidenceScore >= floor && candidate.securityAuditPassed;
 
     const checks = [
-      { id: 'confidence', passed: confidenceScore >= 80, reason: `${confidenceScore}% confidence` },
+      { id: 'confidence', passed: confidenceScore >= floor, reason: `${confidenceScore}% confidence (floor ${floor}%)` },
       { id: 'security', passed: candidate.securityAuditPassed, reason: candidate.securityAuditPassed ? 'audit passed' : 'audit failed' },
     ];
+    if (candidate.regime) checks.push({ id: 'regime', passed: floor === 80 || confidenceScore >= floor, reason: `regime ${candidate.regime}` });
     const decision: DecisionResult<number> = passed
       ? allowDecision(confidenceScore, `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`, checks)
       : refuseDecision(
           `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          RefusalCode.CONSENSUS,
-          `Signal rejected (${confidenceScore}% confidence below 80% threshold or security failed).`,
+          candidate.regime && confidenceScore < floor ? RefusalCode.REGIME_REJECTED : RefusalCode.CONSENSUS,
+          `Signal rejected (${confidenceScore}% confidence below ${floor}% threshold or security failed).`,
           checks,
         );
+
+    // Kernel B — record the outcome so repeated failures trip the circuit breaker.
+    this.registerConsensusOutcome(!passed);
 
     const result: ConsensusResult = {
       passed,
@@ -203,9 +314,9 @@ export class SwarmConsensusEngine {
           : isFastLane 
             ? `⚡ **FAST-LANE AGENT CONSENSUS PASSED** (${confidenceScore}% confidence, Sub-second High Conviction, Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
             : voterBreakdown
-              ? `Signal passed 7-voter Swarm Consensus (${confidenceScore}% confidence; voters: ${JSON.stringify(voterBreakdown)}).`
+              ? `Signal passed 10-voter Swarm Consensus (${confidenceScore}% confidence; voters: ${JSON.stringify(voterBreakdown)})${cohortReason}.`
               : `Signal passed Multi-Agent Consensus with ${confidenceScore}% confidence (Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
-        : `Signal rejected (${confidenceScore}% confidence below 80% threshold or security failed).`,
+        : `Signal rejected (${confidenceScore}% confidence below ${floor}% threshold or security failed).`,
     };
 
     result.decision = decision;

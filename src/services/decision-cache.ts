@@ -152,3 +152,13 @@ export class DecisionCache {
     return value.toLowerCase();
   }
 }
+
+/**
+ * Kernel F global decision cache (W-03 wiring). No constructor seams are wired
+ * (getPrice / resolveOwner / fetchVolTarget are absent) so the cache is
+ * intentionally inert: getSticky/getImmutable/dedupByOwner all behave
+ * pass-through / fail-closed, which keeps the live path neutral unless a caller
+ * later injects real resolution. The one shared instance lets the screening
+ * agent and consensus read the same sticky/immutable facts within a process.
+ */
+export const globalDecisionCache = new DecisionCache();

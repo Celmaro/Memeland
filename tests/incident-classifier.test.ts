@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyIncident,
+} from '../src/orchestrator/incident-classifier.js';
+import {
   classifyWallet,
   type TokenSnapshot,
 } from '../src/services/reputation-memory.js';

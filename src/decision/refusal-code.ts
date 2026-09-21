@@ -7,6 +7,10 @@ export const RefusalCode = {
   RISK: 'RISK',
   LIMIT: 'LIMIT',
   DUPLICATE: 'DUPLICATE',
+  LOW_CONFIDENCE: 'LOW_CONFIDENCE',
+  ASYMMETRIC_CONFLICT: 'ASYMMETRIC_CONFLICT',
+  REGIME_REJECTED: 'REGIME_REJECTED',
+  CIRCUIT_OPEN: 'CIRCUIT_OPEN',
 } as const;
 
 export type RefusalCode = (typeof RefusalCode)[keyof typeof RefusalCode];

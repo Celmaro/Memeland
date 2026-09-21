@@ -105,6 +105,12 @@ export class CircuitBreaker {
     this.fails = 0;
     this.trippedAt = 0;
   }
+
+  /** True when the circuit is still in a cooldown from a previous trip. */
+  public isOpen(): boolean {
+    if (this.trippedAt <= 0) return false;
+    return this.now() - this.trippedAt < this.cooldownMs;
+  }
 }
 
 /** azimuth sticky conviction: short-TTL cache; a stale entry is treated as absent. */

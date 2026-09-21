@@ -71,11 +71,13 @@ export interface GMGNRawToken {
   launchpadStatus: string | null;
   /** Bonding curve progress 0-1 (trenches/signal snapshot). */
   progress: number | null;
-  source: 'gmgn' | 'dexscreener';
+  source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika';
   /** Optional EVM deployed bytecode for BytecodeScanner wiring (EVM-only). */
   bytecode?: string;
   /** Optional round-trip sell proof input for SellabilitySimulator wiring (EVM-only). */
   sellTrade?: SellTrade;
+  /** Optional deployer/creator address (EVM). When absent, the reputation read-path stays fail-closed neutral. */
+  deployer?: string;
 }
 
 /**

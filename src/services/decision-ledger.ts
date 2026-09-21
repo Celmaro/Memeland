@@ -14,6 +14,8 @@
  * so the module stays pure/testable and never touches a live executor or secrets.
  */
 
+import fs from 'fs';
+import path from 'path';
 import { ApprovalGovernance, type ApprovalOrder } from './exec-governance.js';
 
 export type ReconcileState = 'confirmed' | 'failed' | 'unknown' | 'replaced';
@@ -231,5 +233,22 @@ export class DecisionLedger {
   }
 }
 
-/** Live-process audit ledger used by the shared execution/AUTO path. */
-export const globalDecisionLedger = new DecisionLedger();
+export const DEFAULT_LEDGER_FILE = path.resolve('database', 'decision-ledger.jsonl');
+
+/** File-backed DecisionLedgerIO — appends one JSON line per event (JSONL). */
+export function fileDecisionLedgerIO(filePath: string = DEFAULT_LEDGER_FILE): DecisionLedgerIO {
+  return {
+    append: (line: string) => {
+      try {
+        const absolutePath = path.resolve(filePath);
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+        fs.appendFileSync(absolutePath, `${line}\n`, 'utf-8');
+      } catch (error) {
+        console.warn(`[DECISION LEDGER] Failed to append ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  };
+}
+
+/** Live-process audit ledger used by the shared execution/AUTO path (file-backed JSONL). */
+export const globalDecisionLedger = new DecisionLedger({ io: fileDecisionLedgerIO() });

@@ -11,6 +11,7 @@ import {
 import {
   reputationAwareSecurityVote,
   reputationAwareWalletVote,
+  reputationContextFromToken,
   type VoterContext,
 } from '../src/orchestrator/voters.js';
 
@@ -123,5 +124,50 @@ describe('reputation memory atomic-file persistence (Kernel A wiring)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('reputationContextFromToken (Kernel A read-path)', () => {
+  it('returns null when the token has no deployer address', () => {
+    const memory = new ReputationMemory();
+    const token = {
+      address: '0xTOKEN',
+      symbol: 'TOKEN',
+      name: 'Token',
+      chain: 'base',
+      top10HolderRate: 0.1,
+      creatorClose: false,
+      bundlerRate: 0,
+      renouncedMint: true,
+      renouncedFreeze: true,
+      creationTimestamp: Date.now() / 1000 - 86_400,
+    };
+    expect(reputationContextFromToken(memory, token as never)).toBeNull();
+  });
+
+  it('builds a snapshot and profile when a deployer is present', () => {
+    const memory = new ReputationMemory();
+    const token = {
+      address: '0xTOKEN',
+      symbol: 'TOKEN',
+      name: 'Token',
+      chain: 'base',
+      deployer: '0xDEP',
+      top10HolderRate: 0.1,
+      creatorClose: false,
+      bundlerRate: 0,
+      renouncedMint: true,
+      renouncedFreeze: true,
+      creationTimestamp: Date.now() / 1000 - 86_400,
+    };
+    const ctx = reputationContextFromToken(memory, token as never);
+    expect(ctx).not.toBeNull();
+    expect(ctx?.deployer).toBe('0xDEP');
+    expect(ctx?.snapshot.mintAuthority).toBe(false);
+    expect(ctx?.snapshot.freezeAuthority).toBe(false);
+    expect(ctx?.snapshot.topHolderConcPct).toBe(10);
+    expect(ctx?.snapshot.bundleDetected).toBe(false);
+    expect(ctx?.snapshot.lpStatus).toBe('locked');
+    expect(ctx?.profile.ageDays).toBeGreaterThan(0);
   });
 });
