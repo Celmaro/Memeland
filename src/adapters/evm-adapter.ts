@@ -1,6 +1,6 @@
 import type { WalletService } from '../services/wallet-service.js';
 import { isDryRun as isDryRunMode } from '../config/config.js';
-import { loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
+import { fetchWithKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 import { clampSize, type AdapterError, type Result } from './result.js';
 import { callWithRetry } from '../io/call-policy.js';
 
@@ -85,40 +85,24 @@ export class EVMTradeAdapter {
         configs: [{ protocols: ['V2','V3','V4'], routingType: 'CLASSIC', enableUniversalRouter: true }],
       };
 
-      const maxAttempts = Math.max(1, this.uniswapKeyPool.size);
-      let attempts = 0;
-      let quoteRes: Response | null = null;
-
-      while (attempts < maxAttempts) {
-        const key = this.uniswapKeyPool.get() || '';
-        if (!key) break;
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 10_000);
-        try {
-          quoteRes = await fetch('https://trade-api.gateway.uniswap.org/v1/quote', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-api-key': key, 'accept': 'application/json' },
-            body: JSON.stringify(quoteBody),
-            signal: controller.signal,
-          });
-          clearTimeout(timer);
-
-          if (quoteRes.ok) break;
-
-          if ((quoteRes.status === 401 || quoteRes.status === 403 || quoteRes.status === 429) && this.uniswapKeyPool.size > 1) {
-            const reason = quoteRes.status === 429 ? 'HTTP 429 (Rate limit)' : `HTTP ${quoteRes.status}`;
-            console.warn(`[EVM ADAPTER] Uniswap API key failed: ${reason} - rotating to backup key...`);
-            this.uniswapKeyPool.markFailed(reason);
-            attempts++;
-            continue;
+      const quoteRes = await fetchWithKeyPool(
+        this.uniswapKeyPool,
+        async (key) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 10_000);
+          try {
+            return await fetch('https://trade-api.gateway.uniswap.org/v1/quote', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-api-key': key, 'accept': 'application/json' },
+              body: JSON.stringify(quoteBody),
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timer);
           }
-          break;
-        } catch (err: any) {
-          clearTimeout(timer);
-          console.warn(`[EVM ADAPTER] Uniswap API request network error: ${err.message}`);
-          break;
-        }
-      }
+        },
+        { label: '[EVM ADAPTER]', retryStatuses: [401, 403, 429] }
+      );
 
       if (!quoteRes || !quoteRes.ok) {
         const errText = quoteRes ? await quoteRes.text().catch(() => '') : 'Network error';

@@ -9,7 +9,7 @@
  * incentives (farm rewards). No fabrication.
  */
 
-import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
+import { createApiKeyPool, fetchWithKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 
 export interface KrystalPoolSignal {
   poolAddress: string;
@@ -78,48 +78,21 @@ export class KrystalCloudAdapter {
    * rejected; network errors / non-ok HTTP → null (never fabricated data).
    */
   private async request<T>(path: string): Promise<T | null> {
-    if (this.keyPool.size === 0) return null;
-    const maxAttempts = Math.max(1, this.keyPool.size);
-    let attempts = 0;
-
-    while (attempts < maxAttempts) {
-      const key = this.keyPool.get() || '';
-      if (!key) return null;
-
-      try {
-        const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await fetchWithKeyPool(
+      this.keyPool,
+      (key) =>
+        fetch(`${this.baseUrl}${path}`, {
           headers: { 'KC-APIKey': key, 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(15000),
-        });
-
-        if (res.ok) {
-          return (await res.json()) as T;
-        }
-
-        // Rotate on unauthorized (401), out of credits (402), forbidden (403), or rate limited (429)
-        if ((res.status === 401 || res.status === 402 || res.status === 403 || res.status === 429) && this.keyPool.size > 1) {
-          const reason = res.status === 402
-            ? 'HTTP 402 (No credit left)'
-            : res.status === 429
-              ? 'HTTP 429 (Rate limited)'
-              : `HTTP ${res.status}`;
-          console.warn(`[KRYSTAL] Key failed: ${reason} - rotating to backup key...`);
-          this.keyPool.markFailed(reason);
-          attempts++;
-          continue;
-        }
-
-        if (res.status === 402) {
-          console.warn(`[KRYSTAL] Request failed: HTTP 402 (No credit left on Krystal Cloud account). Top up or provide backup key.`);
-        } else {
-          console.warn(`[KRYSTAL] Request failed (fail-closed): HTTP ${res.status}`);
-        }
-        return null;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[KRYSTAL] Request failed (fail-closed): ${message}`);
-        return null;
-      }
+        }),
+      { label: '[KRYSTAL]' }
+    );
+    if (!res) return null;
+    if (res.ok) return (await res.json()) as T;
+    if (res.status === 402) {
+      console.warn('[KRYSTAL] Request failed: HTTP 402 (No credit left on Krystal Cloud account). Top up or provide backup key.');
+    } else {
+      console.warn(`[KRYSTAL] Request failed (fail-closed): HTTP ${res.status}`);
     }
     return null;
   }

@@ -8,6 +8,87 @@ export interface ApiKeyPool {
   getMaskedList(): string[];
 }
 
+/** Options for {@link fetchWithKeyPool}. */
+export interface FetchWithKeyPoolOptions {
+  /** Log label prefix, e.g. `[OPENSEA]`. Used only for the rotation warning. */
+  label: string;
+  /** HTTP statuses that are treated as key-retryable (rotate + retry). Default `[401,402,403,429]`. */
+  retryStatuses?: readonly number[];
+  /** Max loop iterations. Default `Math.max(1, pool.size)`. */
+  maxAttempts?: number;
+  /** Optional reason string used for logging the rotation. Default maps 402/429 specially. */
+  reasonFor?: (status: number) => string;
+  /** When true and the pool is empty, issue a single keyless request (used by GoPlus). Default false. */
+  allowEmptyPool?: boolean;
+}
+
+function defaultReasonForStatus(status: number): string {
+  if (status === 402) return 'HTTP 402 (No credit left)';
+  if (status === 429) return 'HTTP 429 (Rate limited)';
+  return `HTTP ${status}`;
+}
+
+/**
+ * Run a fetch against the active pool key, rotating to backup keys on the
+ * retryable auth/rate statuses (401/402/403/429). Encapsulates the loop that
+ * was previously copy-pasted across the adapters:
+ *
+ * - Empty pool → fail-closed `null` (unless `allowEmptyPool`, then one keyless attempt).
+ * - `build(key)` returns a `Response`; `ok` → returned immediately.
+ * - Retryable status + `size > 1` → `markFailed` + retry with the next key.
+ * - Any other non-ok response → returned as-is (caller decides).
+ * - Fetch throws → `null` (fail-closed; no fabricated data).
+ * - All keys exhausted → the last response (callers already treat `!ok` as failure).
+ *
+ * @returns the winning `Response`, a non-ok `Response`, the last `Response`
+ *   after exhausting every key, or `null` on empty pool / network error.
+ */
+export async function fetchWithKeyPool(
+  pool: ApiKeyPool,
+  build: (key: string) => Promise<Response>,
+  opts: FetchWithKeyPoolOptions
+): Promise<Response | null> {
+  const retryStatuses = opts.retryStatuses ?? [401, 402, 403, 429];
+  const maxAttempts = opts.maxAttempts ?? Math.max(1, pool.size);
+  const reasonFor = opts.reasonFor ?? defaultReasonForStatus;
+  if (pool.size === 0) {
+    if (!opts.allowEmptyPool) return null;
+    try {
+      return await build('');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`${opts.label} Request error: ${message}`);
+      return null;
+    }
+  }
+
+  let attempts = 0;
+  let last: Response | null = null;
+
+  while (attempts < maxAttempts) {
+    const key = pool.get() || '';
+    if (!key) return null;
+    try {
+      const res = await build(key);
+      last = res;
+      if (res.ok) return res;
+      if (retryStatuses.includes(res.status) && pool.size > 1) {
+        const reason = reasonFor(res.status);
+        console.warn(`${opts.label} Key failed: ${reason} - rotating to backup key...`);
+        pool.markFailed(reason);
+        attempts++;
+        continue;
+      }
+      return res;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`${opts.label} Request error: ${message}`);
+      return null;
+    }
+  }
+  return last;
+}
+
 const PLACEHOLDER_RE = /YOUR_|placeholder|mock/i;
 
 export function createApiKeyPool(baseVar: string, keys: string[]): ApiKeyPool {

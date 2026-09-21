@@ -1,6 +1,6 @@
 import type { WalletService } from '../services/wallet-service.js';
 import { isDryRun as isDryRunMode } from '../config/config.js';
-import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
+import { createApiKeyPool, fetchWithKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 
 /**
  * Whale sweep info — FACTUAL from the events API (not an estimate):
@@ -82,32 +82,14 @@ export class OpenSeaAdapter {
    * and retry across all available keys. Fail-closed: null when no key or all keys rejected.
    */
   private async fetchWithKey<T>(build: (key: string) => { url: string; init: RequestInit }): Promise<Response | null> {
-    if (this.keyPool.size === 0) return null;
-    const maxAttempts = Math.max(1, this.keyPool.size);
-    let attempts = 0;
-
-    while (attempts < maxAttempts) {
-      const key = this.keyPool.get() || '';
-      if (!key) return null;
-      const { url, init } = build(key);
-      try {
-        const res = await fetch(url, init);
-        if (res.ok) return res;
-
-        if ((res.status === 401 || res.status === 402 || res.status === 403 || res.status === 429) && this.keyPool.size > 1) {
-          const reason = res.status === 429 ? 'HTTP 429 (Rate limit)' : `HTTP ${res.status}`;
-          console.warn(`[OPENSEA] Key failed: ${reason} - rotating to backup key...`);
-          this.keyPool.markFailed(reason);
-          attempts++;
-          continue;
-        }
-        return res;
-      } catch (err: any) {
-        console.warn(`[OPENSEA] Request network error: ${err.message}`);
-        return null;
-      }
-    }
-    return null;
+    return fetchWithKeyPool(
+      this.keyPool,
+      async (key) => {
+        const { url, init } = build(key);
+        return fetch(url, init);
+      },
+      { label: '[OPENSEA]' }
+    );
   }
 
   /**

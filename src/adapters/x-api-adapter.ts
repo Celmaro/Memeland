@@ -1,4 +1,4 @@
-import { loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
+import { fetchWithKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 
 export interface XTweetSignal {
   id: string;
@@ -52,36 +52,18 @@ export class XApiAdapter {
     const timeout = setTimeout(() => controller.abort(), 10_000);
 
     const endpoint = `https://api.twitter.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&tweet.fields=created_at,public_metrics,author_id&max_results=25`;
-    const maxAttempts = Math.max(1, this.keyPool.size);
-    let attempts = 0;
-    let response: Response | null = null;
-
-    while (attempts < maxAttempts) {
-      const currentToken = this.keyPool.get() || bearerToken;
-      try {
-        response = await fetch(endpoint, {
+    const response = await fetchWithKeyPool(
+      this.keyPool,
+      (currentToken) =>
+        fetch(endpoint, {
           headers: {
             'Authorization': `Bearer ${currentToken}`,
             'User-Agent': 'OpenCatzAI-Robinhood/1.0.0',
           },
           signal: controller.signal,
-        });
-
-        if (response.ok) break;
-
-        if ((response.status === 401 || response.status === 403 || response.status === 429) && this.keyPool.size > 1) {
-          const reason = response.status === 429 ? 'HTTP 429 (Rate limit)' : `HTTP ${response.status}`;
-          console.warn(`[X API] Key failed: ${reason} - rotating to backup key...`);
-          this.keyPool.markFailed(reason);
-          attempts++;
-          continue;
-        }
-        break;
-      } catch (err: any) {
-        console.warn(`[X API] Network error: ${err.message}`);
-        break;
-      }
-    }
+        }),
+      { label: '[X API]', retryStatuses: [401, 403, 429] }
+    );
 
     clearTimeout(timeout);
 
