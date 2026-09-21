@@ -5,6 +5,8 @@
  * missing/NaN fields degrade to a neutral baseline and never create a false win.
  */
 
+import { ReputationMemory, type AegisSnapshot, type WalletProfile, type WalletTagCode } from './reputation-memory.js';
+
 export interface WalletScoreInput {
   /** Fraction (0-1) of buys signed as bundles/rat-trader — distrust raises risk. */
   bundlerRate?: number | null;
@@ -259,5 +261,44 @@ export function botManipulationScore(trades: BotTrade[]): BotManipulationResult 
     features: { roundAmountRate, uniformSizeRate, topMakerBuyRate, maxBurstRate, sizeDispersion },
     reasons,
     degraded: false,
+  };
+}
+
+export interface ReputationAwareWalletScore {
+  /** Blended 0-100 score: wallet microstructure plus deployer reputation. */
+  score: number;
+  walletScore: number;
+  reputationScore: number;
+  tag: WalletTagCode;
+  reasons: string[];
+  /** True when the base wallet-score degraded or the deployer scored below the floor. */
+  degraded: boolean;
+}
+
+/**
+ * Wallet-tracker/scoring wrapper around the Kernel A reputation memory. Blends
+ * the fail-closed GMGN wallet score with the AEGIS deployer reputation score,
+ * then classifies the wallet with the meme-radar rule. Additive: it leaves the
+ * underlying functions untouched and only layers a combined read.
+ */
+export function walletScoreWithReputation(
+  input: WalletScoreInput,
+  reputation: ReputationMemory,
+  token: string,
+  deployer: string,
+  profile: WalletProfile,
+  snapshot: AegisSnapshot,
+): ReputationAwareWalletScore {
+  const wallet = walletScore(input);
+  const adjusted = reputation.reputationAdjustment(token, deployer, snapshot);
+  const tag = reputation.classifyWallet(profile);
+  const score = Math.max(0, Math.min(100, Math.round(wallet.score * 0.6 + adjusted.score * 0.4)));
+  return {
+    score,
+    walletScore: wallet.score,
+    reputationScore: adjusted.score,
+    tag,
+    reasons: [...wallet.reasons, ...adjusted.evidence, `wallet tag ${tag}`],
+    degraded: wallet.degraded || adjusted.score < 60,
   };
 }

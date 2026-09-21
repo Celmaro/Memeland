@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   walletTStat,
   botManipulationScore,
+  walletScoreWithReputation,
   type BotTrade,
 } from '../src/services/wallet-scoring.js';
+import { ReputationMemory, type AegisSnapshot, type WalletProfile } from '../src/services/reputation-memory.js';
 
 function trade(overrides: Partial<BotTrade> & { side: 'buy' | 'sell' }): BotTrade {
   return { amountUsd: 100, side: overrides.side, ...overrides };
@@ -71,5 +73,56 @@ describe('botManipulationScore (SRC-142 bot-manipulation features)', () => {
     ]);
     expect(r.risk).toBe(0);
     expect(r.degraded).toBe(false);
+  });
+});
+
+describe('walletScoreWithReputation (Kernel A wiring)', () => {
+  const snapshot: AegisSnapshot = {
+    mintAuthority: true,
+    freezeAuthority: false,
+    topHolderConcPct: 35,
+    bundleDetected: true,
+    lpStatus: 'none',
+    metadataFlags: false,
+  };
+
+  it('docks the wallet score when the deployer has a known-rugged record', () => {
+    const reputation = new ReputationMemory();
+    reputation.setDeployerKnown('0xRUG', 'rugged');
+    const profile: WalletProfile = { ageDays: 30, historyCount: 12 };
+
+    const result = walletScoreWithReputation(
+      { netFlowRatio: 0.8, top10HolderRate: 0.2, distinctMakers: 6 },
+      reputation,
+      'TOKEN',
+      '0xRUG',
+      profile,
+      snapshot,
+    );
+
+    expect(result.reputationScore).toBeLessThan(60);
+    expect(result.score).toBeLessThan(result.walletScore);
+    expect(result.tag).toBe('KNOWN_RUGGER');
+    expect(result.reasons.some((r) => r.includes('known-rugged'))).toBe(true);
+  });
+
+  it('keeps missing wallet inputs fail-closed even when reputation is clean', () => {
+    const reputation = new ReputationMemory();
+    reputation.setDeployerKnown('0xGOOD', 'good');
+    const profile: WalletProfile = { ageDays: 200, historyCount: 40 };
+
+    const result = walletScoreWithReputation(
+      {},
+      reputation,
+      'TOKEN',
+      '0xGOOD',
+      profile,
+      { ...snapshot, mintAuthority: false, topHolderConcPct: 10, bundleDetected: false },
+    );
+
+    expect(result.walletScore).toBe(50); // neutral baseline
+    expect(result.degraded).toBe(true);
+    expect(result.tag).toBe('ESTABLISHED');
+    expect(result.reputationScore).toBeGreaterThan(60);
   });
 });
