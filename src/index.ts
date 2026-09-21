@@ -35,8 +35,17 @@ import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from './services/execution-gates.js';
+import { assertStartupConfig } from './config/startup-validation.js';
+import { startScreeningScheduler } from './startup/screening-scheduler.js';
 
 dotenv.config();
+
+try {
+  assertStartupConfig();
+} catch (err: any) {
+  console.error(`[CONFIG] REFUSING TO START: ${err.message}`);
+  process.exit(1);
+}
 
 const telegramService = new TelegramService();
 const apiKeyGuard = new ApiKeyGuardService();
@@ -53,22 +62,6 @@ console.log(`[CONFIG] OpenCatz Execution Mode: ${execMode} (Primary Swap Venue: 
 // the "secure defaults" posture — trusting DRY_RUN=true + AUTO_EXECUTE_ENABLED
 // default values is fine, but flipping to live must be an explicit, multi-flag,
 // deliberate decision. Fail startup rather than trade unacknowledged.
-if (!isDryRunMode() && process.env.AUTO_EXECUTE_ENABLED === 'true') {
-  const acknowledged =
-    process.env.LIVE_TRADING_ACKNOWLEDGED === 'true' ||
-    process.env.LIVE_TRADING_ACKNOWLEDGED === '1';
-  const operatorApproval =
-    process.env.OPERATOR_APPROVAL_REQUIRED !== 'false';
-  if (!acknowledged || !operatorApproval) {
-    console.error(
-      '[CONFIG] REFUSING TO START LIVE TRADING: DRY_RUN=false + AUTO_EXECUTE_ENABLED=true requires ' +
-      'LIVE_TRADING_ACKNOWLEDGED=true and OPERATOR_APPROVAL_REQUIRED=true. ' +
-      'Set these explicitly before enabling live execution.'
-    );
-    process.exit(1);
-  }
-}
-
 // Initialize persistent StateStore (survives bot restarts)
 const stateStore = new StateStore();
 
@@ -703,45 +696,11 @@ if (discordToken && clientId) {
       }
     };
 
-    // Non-overlapping scheduler: a cycle that runs longer than the 5-minute
-    // interval must not start a second cycle concurrently (which would double
-    // API spend, duplicate signals/orders, and interleave state writes). The
-    // per-agent withScreeningTimeout resolves its wrapper early but does NOT
-    // cancel the underlying work, so this guard is the durable overlap lock.
-    let screeningCycleRunning = false;
-    const runSchedulingCycle = async () => {
-      if (screeningCycleRunning) {
-        console.warn('[SCREENING] Previous cycle still running — skipping this tick (non-overlap lock).');
-        return;
-      }
-      screeningCycleRunning = true;
-      try {
-        await runScreeningCycle();
-      } catch (err: any) {
-        console.error('[SCREENING CYCLE BOOT ERROR]', err?.message || err);
-      } finally {
-        screeningCycleRunning = false;
-      }
-    };
-
-    // Run the first screening cycle immediately on startup, then every 5 minutes.
-    void runSchedulingCycle();
-    setInterval(() => { void runSchedulingCycle(); }, 5 * 60 * 1000);
-
-    // MarketSentinel — decoupled risk monitor (arXiv 2601.04687). Runs on its
-    // OWN 60s schedule, completely outside the screening/trading loop. It only
-    // flips the RiskEngineV2 kill-switch on persistent market-wide bot/regime
-    // risk; it never gates or rejects an individual signal.
+    // Scheduler and the independent market-risk monitor are owned by the startup module.
     const marketSentinel = new MarketSentinel(
       marketSentinelProbe(globalBotRiskWindow, globalMarketRegimeFilter)
     );
-    setInterval(() => {
-      try {
-        marketSentinel.checkAndReact();
-      } catch (err: any) {
-        console.warn(`[MARKET SENTINEL] pass error (${err.message}) — ignored.`);
-      }
-    }, 60 * 1000);
+    startScreeningScheduler({ runCycle: runScreeningCycle, marketSentinel });
   });
 
   client.on('interactionCreate', (interaction) => {

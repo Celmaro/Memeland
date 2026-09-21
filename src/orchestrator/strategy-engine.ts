@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
+import { execFileSync, spawnSync } from 'child_process';
 import { pathToFileURL } from 'url';
 import type { OpenCatStrategy, OpenCatIndicator } from './strategy-types.js';
 import { withClearedEnv } from '../services/env-sandbox.js';
@@ -20,6 +20,19 @@ export class StrategyEngine {
   private readonly strategiesBackupDir: string;
   private readonly indicatorsBackupDir: string;
   private readonly activeFile: string;
+
+  /**
+   * Baseline Windows env for spawning child Node processes. The metadata
+   * worker restricts the env to block secret leakage (see `secretOnlyEnv`),
+   * but `runStrategySafely` falls back to a baseline env when needed.
+   */
+  private baselineEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of ['SystemRoot','SystemDrive','WINDIR','ComSpec','PATHEXT','PATH','TEMP','TMP','USERPROFILE']) {
+      if (process.env[key]) env[key] = process.env[key];
+    }
+    return env;
+  }
 
   /**
    * Hermetic override: tests can point the engine at temp dirs so write/
@@ -86,13 +99,140 @@ export class StrategyEngine {
       const res = execFileSync(
         process.execPath,
         ['--input-type=module', '-e', script, url, kind],
-        { timeout: 20000, encoding: 'utf-8', windowsHide: true }
+        { timeout: 20000, encoding: 'utf-8', windowsHide: true, env: this.baselineEnv() }
       );
       return { ok: true };
     } catch (err: any) {
       const stderr = typeof err?.stderr === 'string' ? err.stderr.trim() : (err?.message || 'Validation failed.');
       return { ok: false, error: stderr };
     }
+  }
+
+  private loadModuleMetadata(filePath: string): Record<string, unknown> {
+    const script = `
+      const url = process.argv[1];
+      const marker = '__OPENCATZ_RESULT__';
+      (async () => {
+        try {
+          const mod = await import(url);
+          const value = mod.default || mod;
+          const kind = typeof value?.evaluate === 'function' ? 'strategy' : typeof value?.calculate === 'function' ? 'indicator' : null;
+          if (!kind || typeof value?.id !== 'string' || !value.id) throw new Error('module has an invalid strategy/indicator shape');
+          process.stdout.write(marker + JSON.stringify({ ok: true, kind, id: value.id, name: value.name, version: value.version, description: value.description, params: value.params || {} }));
+        } catch (error) {
+          process.stdout.write(marker + JSON.stringify({ ok: false, error: error?.message || String(error) }));
+          process.exitCode = 1;
+        }
+      })();
+    `;
+    const result = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', script, pathToFileURL(filePath).href],
+      { env: this.baselineEnv(), timeout: 10000, maxBuffer: 256 * 1024, encoding: 'utf8', windowsHide: true }
+    );
+    if (result.error) throw new Error(`module metadata worker error: ${result.error.message} (status=${result.status}, signal=${result.signal})`);
+    if (result.signal) throw new Error(`module metadata worker terminated by ${result.signal}`);
+    const marker = '__OPENCATZ_RESULT__';
+    if (result.status !== 0 && !result.stdout.includes(marker)) {
+      throw new Error(`module metadata worker failed (status=${result.status}, signal=${result.signal})`);
+    }
+    const output = result.stdout.slice(result.stdout.lastIndexOf(marker) + marker.length);
+    let parsed: Record<string, unknown>;
+    try { parsed = JSON.parse(output || '{}'); } catch { throw new Error('worker returned invalid module metadata'); }
+    if (!parsed.ok) throw new Error(String(parsed.error || 'module metadata failed'));
+    return parsed;
+  }
+
+  /**
+   * Run a user-authored strategy/indicator call. Two-stage execution:
+   * 1) Try an out-of-process worker (defense in depth — a malicious module
+   *    cannot directly read process secrets from the parent).
+   * 2) On worker-runtime failure (e.g. nested sandbox / CSPRNG abort under
+   *    vitest forks on Windows), fall back to in-process empty-env execution
+   *    via the legacy env sandbox so the bot never silently regresses.
+   */
+  private runModuleInWorker(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
+    try {
+      return this.runModuleInWorkerChild(filePath, kind, arg);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      const isWorkerCrash = /status=(13\d|null)/.test(msg) || /EINVAL/.test(msg) || /CSPRNG/.test(msg);
+      if (!isWorkerCrash) throw err;
+      console.warn(`[STRATEGY ENGINE] worker unavailable (${msg.slice(0, 200)}) — falling back to in-process empty-env execution.`);
+      return this.runModuleInProcess(filePath, kind, arg);
+    }
+  }
+
+  private runModuleInWorkerChild(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
+    const script = `
+      import fs from 'node:fs';
+      const url = process.argv[1];
+      const kind = process.argv[2];
+      const marker = '__OPENCATZ_RESULT__';
+      (async () => {
+        try {
+          const mod = await import(url);
+          const value = mod.default || mod;
+          const fn = value?.[kind];
+          if (typeof fn !== 'function') throw new Error('module does not export ' + kind);
+          const input = fs.readFileSync(0, 'utf8');
+          const output = fn.call(value, input ? JSON.parse(input) : undefined);
+          process.stdout.write(marker + JSON.stringify({ ok: true, value: output === undefined ? null : output }));
+        } catch (error) {
+          process.stdout.write(marker + JSON.stringify({ ok: false, error: error?.message || String(error) }));
+          process.exitCode = 1;
+        }
+      })();
+    `;
+    // The call body is untrusted but the *module import* already ran inside
+    // the metadata worker (see loadModuleMetadata). Pass a baseline Windows
+    // env so Node's crypto subsystem (CSPRNG) can initialise on nested forks.
+    const result = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', script, pathToFileURL(filePath).href, kind],
+      {
+        env: this.baselineEnv(),
+        input: JSON.stringify(arg ?? null),
+        timeout: 5000,
+        maxBuffer: 1024 * 1024,
+        encoding: 'utf8',
+        windowsHide: true,
+      }
+    );
+    if (result.error) throw new Error(`strategy worker failed: ${result.error.message} (status=${result.status})`);
+    if (result.signal) throw new Error(`strategy worker terminated by ${result.signal}`);
+    const marker = '__OPENCATZ_RESULT__';
+    if (result.status !== 0 && !result.stdout.includes(marker)) {
+      throw new Error(`strategy worker exited unsuccessfully (status=${result.status})`);
+    }
+    const output = result.stdout.slice(result.stdout.lastIndexOf(marker) + marker.length);
+    let parsed: { ok?: boolean; value?: unknown; error?: string };
+    try { parsed = JSON.parse(output || '{}'); } catch { throw new Error('strategy worker returned invalid output'); }
+    if (!parsed.ok) throw new Error(parsed.error || 'strategy worker rejected execution');
+    return parsed.value;
+  }
+
+  /**
+   * Legacy in-process fallback. The untrusted module is imported exactly
+   * once with an empty env so its top-level code (and any side effects
+   * like `import` statements that probe fs/process) never sees process
+   * secrets; cached per filePath so we don't re-import on every call.
+   */
+  private importCache = new Map<string, { mod: unknown; kind: 'strategy' | 'indicator' }>();
+  private runModuleInProcess(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
+    let entry = this.importCache.get(filePath);
+    if (!entry) {
+      entry = withClearedEnv(() => {
+        const required = requireEsm(filePath);
+        const mod = required?.default || required;
+        const modKind: 'strategy' | 'indicator' = typeof mod?.evaluate === 'function' ? 'strategy' : 'indicator';
+        return { mod, kind: modKind };
+      });
+      this.importCache.set(filePath, entry);
+    }
+    const fn = (entry.mod as any)?.[kind];
+    if (typeof fn !== 'function') throw new Error('module does not export ' + kind);
+    return withClearedEnv(() => fn.call(entry!.mod, arg ?? null));
   }
 
   // ─── Write (sandbox + backup + validate + rollback) ──────────────────
@@ -251,21 +391,24 @@ export class StrategyEngine {
   }
 
   private loadModule(filePath: string): any {
-    // Import-time side effects run with an EMPTY env so untrusted module-level
-    // code (top-level imports, fs/network probe, process.exit) cannot read
-    // secrets even before any evaluate() call is made.
-    return withClearedEnv(() => {
-      const mod = requireEsm(filePath);
-      return mod.default || mod;
-    });
+    // Primary path: child-process worker (defense in depth). If the worker
+    // runtime fails (CSPRNG abort in nested forks), the in-process fallback
+    // inside runModuleInWorker takes over without losing functionality.
+    const metadata = this.loadModuleMetadata(filePath);
+    const proxy: Record<string, unknown> = { ...metadata };
+    if (metadata.kind === 'strategy') {
+      proxy.evaluate = (ctx: unknown) => this.runModuleInWorker(filePath, 'evaluate', ctx);
+    }
+    if (metadata.kind === 'indicator') {
+      proxy.calculate = (candles: unknown) => this.runModuleInWorker(filePath, 'calculate', candles);
+    }
+    return proxy;
   }
 
   /**
-   * Execute a strategy/indicator evaluate/calculate call with an EMPTY env.
-   * Strategy .mjs files are user/LLM-authored and run in-process; a malicious
-   * strategy could otherwise read private keys via process.env. We empty the
-   * entire environment for the duration of the call (not just sensitive keys)
-   * so a malicious evaluate cannot exfiltrate any process secret.
+   * Execute a strategy/indicator call. File-backed modules are worker proxies
+   * with an automatic in-process fallback; injected test doubles remain
+   * supported with the legacy empty-env guard.
    */
   public runStrategySafely<T extends { evaluate?: (ctx: any) => any; calculate?: (candles: any[]) => any[] }>(
     strategy: T,

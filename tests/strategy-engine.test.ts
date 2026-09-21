@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { StrategyEngine } from '../src/orchestrator/strategy-engine.js';
 
@@ -39,6 +40,31 @@ afterEach(() => {
 });
 
 describe('StrategyEngine', () => {
+  it('runs file-backed strategies without inheriting parent secrets', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'memeland-strategy-'));
+    const strategiesDir = path.join(tempRoot, 'strategies');
+    const indicatorsDir = path.join(tempRoot, 'indicators');
+    fs.mkdirSync(strategiesDir, { recursive: true });
+    fs.writeFileSync(path.join(strategiesDir, '.active.json'), JSON.stringify({ test: 'secret-reader' }));
+    fs.writeFileSync(path.join(strategiesDir, 'secret-reader.mjs'), `
+      export default {
+        id: 'secret-reader',
+        evaluate: () => ({ reason: process.env.SECRET_FOR_TEST || 'none' }),
+      };
+    `);
+    const previous = process.env.SECRET_FOR_TEST;
+    process.env.SECRET_FOR_TEST = 'parent-secret';
+    try {
+      const strategy = new StrategyEngine({ strategiesDir, indicatorsDir }).getActiveStrategy('test');
+      expect(strategy?.evaluate({}).reason).toBe('none');
+      expect(process.env.SECRET_FOR_TEST).toBe('parent-secret');
+    } finally {
+      if (previous === undefined) delete process.env.SECRET_FOR_TEST;
+      else process.env.SECRET_FOR_TEST = previous;
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('writes and validates a strategy module', () => {
     const engine = new StrategyEngine();
     const res = engine.writeStrategy('test-momentum', VALID_STRATEGY);

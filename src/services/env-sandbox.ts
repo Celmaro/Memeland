@@ -1,12 +1,9 @@
 /**
- * Env sandbox for running untrusted (user/LLM-authored) code in-process.
+ * Legacy environment guard for injected code paths.
  *
- * Strategy .mjs modules (and the LP evaluate path in the hub) run in the main
- * Node process. A crafted module could otherwise read private keys, API tokens,
- * or other secrets out of `process.env`, both at module-import time and inside
- * its evaluate/calculate call. `withClearedEnv` snapshots the environment,
- * empties it for the duration of `fn`, then restores every entry — so untrusted
- * code sees no process secrets regardless of where it runs.
+ * File-backed strategy and indicator modules run in short-lived child processes.
+ * This helper remains for injected test doubles and other synchronous legacy
+ * paths that cannot use the worker proxy.
  *
  * The restore mutates the existing env object in place (rather than assigning a
  * new object) so it behaves predictably on Windows.
