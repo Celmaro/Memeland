@@ -11,6 +11,7 @@ import {
   sizeCopyTradeGuarded,
   assessSolanaTimeOnCurve,
   sizeCopyByGarchVol,
+  simulateCopyReplay,
   type WalletTradeRecord,
 } from '../src/services/wallet-tracker.js';
 
@@ -184,6 +185,37 @@ describe('sizeCopyByGarchVol (Q14 GARCH walk-forward wiring)', () => {
     expect(result.validated).toBe(false);
     expect(result.suggestedUsd).toBe(0);
     expect(result.reason).toContain('too few returns');
+  });
+});
+
+describe('simulateCopyReplay (PR8 next-close causal fill wiring)', () => {
+  const bars = [
+    { time: 0, high: 11, low: 9, close: 10, liquidityUsd: 100000 },
+    { time: 1, high: 21, low: 19, close: 20, liquidityUsd: 100000 },
+    { time: 2, high: 31, low: 29, close: 30, liquidityUsd: 100000 },
+  ];
+
+  it('replays a copy buy at the next observed close with conservative fees', () => {
+    const result = simulateCopyReplay(bars, [
+      { id: 'c1', side: 'buy', sizeUsd: 100, decisionBarIndex: 0 },
+    ], { feePct: 0.3, slippagePct: 0.2 });
+
+    const fill = result.fills.find((f) => f.orderId === 'c1')!;
+    expect(fill.status).toBe('filled');
+    expect(fill.barIndex).toBe(1);
+    expect(fill.fillPrice).toBeGreaterThan(20);
+    expect(fill.feesUsd).toBeGreaterThan(0);
+  });
+
+  it('cancels a copy fill that would gap past the allowed window', () => {
+    const result = simulateCopyReplay(bars, [
+      { id: 'c2', side: 'buy', sizeUsd: 100, decisionBarIndex: 0, maxGapBars: 0 },
+    ], { feePct: 0, slippagePct: 0 });
+
+    const fill = result.fills.find((f) => f.orderId === 'c2')!;
+    expect(fill.status).toBe('cancelled');
+    expect(fill.cancelReason).toBe('gap');
+    expect(result.cancelledCount).toBe(1);
   });
 });
 

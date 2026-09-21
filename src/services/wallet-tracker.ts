@@ -9,6 +9,7 @@ import { PaperBroker, sizeCopyPosition, type PaperFill } from './solana-copy-tra
 import { HesitationMemory, type HesitationBrief, type MemoryKind, type MemoryStatus } from './hesitation-memory.js';
 import { TimeOnCurveFilter, type TimeOnCurveResult, type TimeOnCurveAssessOptions } from './time-on-curve.js';
 import { garchHarnessValidation, garchWalkForward, volTargetSize, type GarchParams } from './garch-vol.js';
+import { simulateNextClose, type NextCloseBar, type NextCloseConfig, type NextCloseOrder, type NextCloseResult } from './next-close-simulator.js';
 
 export type EvmBalanceReader = (chain: string, token: string, owner: string) => Promise<bigint | null>;
 
@@ -542,6 +543,20 @@ export function sizeCopyByGarchVol(
     validated: true,
     reason: harness.reason,
   };
+}
+
+/**
+ * Wallet-tracker copy-path wrapper around the PR8 causal next-close simulator.
+ * Orders fill on the next observed close, never on the decision bar, and gap
+ * fills are cancelled instead of guessed. Additive: existing paper-broker paths
+ * are unchanged.
+ */
+export function simulateCopyReplay(
+  bars: NextCloseBar[],
+  orders: NextCloseOrder[],
+  config: NextCloseConfig = {},
+): NextCloseResult {
+  return simulateNextClose(bars, orders, config);
 }
 
 export interface ConcentrationResult {
