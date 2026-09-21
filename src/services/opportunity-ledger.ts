@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
+import { StateMachine, type StateTransitions } from '../lifecycle/state-machine.js';
 
 export type OpportunityState =
   | 'FIRST_SEEN'
@@ -50,6 +51,11 @@ export const STATE_TRANSITIONS: Readonly<Record<OpportunityState, ReadonlySet<Op
   CORRECT_REJECTION: new Set(),
   EXPIRED: new Set(),
 };
+
+/** Array-backed view of {@link STATE_TRANSITIONS} for the shared {@link StateMachine} kernel. */
+const OPPORTUNITY_TRANSITIONS: StateTransitions<OpportunityState> = Object.fromEntries(
+  (Object.keys(STATE_TRANSITIONS) as OpportunityState[]).map((s) => [s, [...STATE_TRANSITIONS[s]]])
+) as unknown as StateTransitions<OpportunityState>;
 
 export type OpportunityEventType =
   | 'FIRST_SEEN'
@@ -237,8 +243,9 @@ export class OpportunityLedger {
     if (!identity) return { ok: false, reason: `unknown opportunity '${opportunityId}'` };
     const from = identity.currentState;
     if (from === to) return { ok: true, reason: 'no-op' };
+    const sm = new StateMachine<OpportunityState>(from, OPPORTUNITY_TRANSITIONS);
     if (TERMINAL_STATES.has(from)) return { ok: false, reason: `state '${from}' is terminal` };
-    if (!STATE_TRANSITIONS[from].has(to)) return { ok: false, reason: `invalid transition '${from}' -> '${to}'` };
+    if (!sm.canTransitionTo(to)) return { ok: false, reason: `invalid transition '${from}' -> '${to}'` };
     identity.currentState = to;
     identity.stateUpdatedAt = new Date().toISOString();
     // Capture the evaluation-window entry (first admission to WATCHING) exactly once.
@@ -283,7 +290,8 @@ export class OpportunityLedger {
     const target: OpportunityState = type === 'MOVED_TO_OPEN' ? 'OPEN' : 'EXITED';
     const from = identity.currentState;
     let to = from;
-    if (from !== target && !TERMINAL_STATES.has(from) && STATE_TRANSITIONS[from].has(target)) {
+    const sm = new StateMachine<OpportunityState>(from, OPPORTUNITY_TRANSITIONS);
+    if (from !== target && !TERMINAL_STATES.has(from) && sm.canTransitionTo(target)) {
       identity.currentState = target;
       identity.stateUpdatedAt = new Date().toISOString();
       to = target;
