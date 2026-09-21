@@ -8,6 +8,8 @@
  * a confident guess.
  */
 
+import { TechnicalIndicatorsService } from '../../services/technical-indicators.js';
+
 export interface KlineLike {
   timestamp: number;
   open: number;
@@ -25,21 +27,20 @@ export interface PredictionResult {
   reasons: string[];
 }
 
-/** Simple Wilder-style RSI over close prices. Returns 0-100 or null when insufficient. */
+const technicalIndicators = new TechnicalIndicatorsService();
+
+/** Wilder-style RSI over close prices via TechnicalIndicatorsService. Returns 0-100 or null when insufficient. */
 export function rsi(closes: number[], period = 14): number | null {
   if (closes.length < period + 1) return null;
-  let gains = 0;
-  let losses = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const delta = closes[i] - closes[i - 1];
-    if (delta >= 0) gains += delta;
-    else losses -= delta;
-  }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
+  const candles = closes.map((close, i) => ({
+    openTime: i,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 0,
+  }));
+  return technicalIndicators.calculateRSI(candles, period, 'H1').currentValue;
 }
 
 /**

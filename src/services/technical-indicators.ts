@@ -111,8 +111,12 @@ export class TechnicalIndicatorsService {
     avgLoss /= period;
 
     // First RSI value
-    const firstRS = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsiValues.push(100 - (100 / (1 + firstRS)));
+    const rsiFromAverages = (gain: number, loss: number): number => {
+      if (loss === 0) return 100;
+      if (gain === 0) return 0;
+      return 100 - (100 / (1 + (gain / loss)));
+    };
+    rsiValues.push(rsiFromAverages(avgGain, avgLoss));
 
     // Wilder's smoothing for remaining candles
     for (let i = period + 1; i < closes.length; i++) {
@@ -123,15 +127,14 @@ export class TechnicalIndicatorsService {
       avgGain = (avgGain * (period - 1) + gain) / period;
       avgLoss = (avgLoss * (period - 1) + loss) / period;
 
-      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-      rsiValues.push(100 - (100 / (1 + rs)));
+      rsiValues.push(rsiFromAverages(avgGain, avgLoss));
     }
 
     return {
       period,
       timeframe,
       values: rsiValues,
-      currentValue: rsiValues[rsiValues.length - 1] || 50,
+      currentValue: rsiValues[rsiValues.length - 1] ?? 50,
     };
   }
 
