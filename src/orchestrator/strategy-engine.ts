@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { pathToFileURL } from 'url';
 import type { OpenCatStrategy, OpenCatIndicator } from './strategy-types.js';
 import { withClearedEnv } from '../services/env-sandbox.js';
+import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 
 const requireEsm = createRequire(import.meta.url);
 
@@ -355,7 +356,7 @@ export class StrategyEngine {
 
   private writeActiveMap(map: Record<string, string | boolean>): void {
     try {
-      fs.writeFileSync(this.activeFile, JSON.stringify(map, null, 2), 'utf-8');
+      atomicWriteJsonSync(this.activeFile, map);
     } catch (err: any) {
       console.warn(`[STRATEGY ENGINE] Failed to persist the active map: ${err.message}`);
     }

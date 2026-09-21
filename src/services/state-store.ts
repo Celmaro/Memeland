@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 import { OpenPosition, ActiveLPPosition, ActiveNFTPosition } from '../position/position-manager.js';
 import { PriceAlert } from './price-alert-service.js';
 import { TradeJournalEntry } from './trade-journal-service.js';
@@ -255,9 +256,7 @@ export class StateStore {
   private saveToDiskSync(state: OpenCatPersistedState): void {
     try {
       state.lastUpdated = new Date().toISOString();
-      const tempPath = `${this.dbFilePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8');
-      fs.renameSync(tempPath, this.dbFilePath); // Atomic file replace
+      atomicWriteJsonSync(this.dbFilePath, state);
     } catch (err: any) {
       console.error('[STATE STORE ERROR] Failed to save state:', err.message);
     }

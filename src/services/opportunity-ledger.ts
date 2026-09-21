@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 
 export type OpportunityState =
   | 'FIRST_SEEN'
@@ -388,9 +389,12 @@ export class OpportunityLedger {
 
   private writeToDisk(): void {
     try {
-      const tempPath = `${this.dbFilePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ identities: this.identities, observations: this.observations, events: this.events, version: CURRENT_VERSION } as OpportunityLedgerState, null, 2), 'utf-8');
-      fs.renameSync(tempPath, this.dbFilePath);
+      atomicWriteJsonSync(this.dbFilePath, {
+        identities: this.identities,
+        observations: this.observations,
+        events: this.events,
+        version: CURRENT_VERSION,
+      } as OpportunityLedgerState);
     } catch (err: any) {
       console.error(`[OPPORTUNITY LEDGER ERROR] Failed saving ledger: ${err.message}`);
     }

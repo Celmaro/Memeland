@@ -24,6 +24,7 @@ import { sizePosition } from '../orchestrator/position-sizing.js';
 import { CostGate } from './cost-gating.js';
 import { simulateFill } from './fill-simulation.js';
 import { ApprovalGovernance } from './exec-governance.js';
+import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 
 /** Read a positive env number with a default (invalid/absent → default). */
 function envNum(key: string, def: number): number {
@@ -44,8 +45,7 @@ const safeIO: SafeConfigIO = {
     }
   },
   write(payloadJson: string) {
-    fs.mkdirSync(path.dirname(safeConfigFilePath()), { recursive: true });
-    fs.writeFileSync(safeConfigFilePath(), payloadJson, 'utf-8');
+    atomicWriteJsonSync(safeConfigFilePath(), JSON.parse(payloadJson));
   },
 };
 

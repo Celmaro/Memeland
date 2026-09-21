@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 import type { VoterId } from './voters.js';
 import { deflationFactor, deflatedSharpe } from './learning-harness.js';
 import { icWeightDeltas, applyDeltas } from './scoring-calibration.js';
@@ -79,7 +80,7 @@ export class SwarmLearningEngine {
       fs.mkdirSync(dir, { recursive: true });
     }
     if (!fs.existsSync(this.dbPath)) {
-      fs.writeFileSync(this.dbPath, JSON.stringify({ outcomes: [], weights: this.weights }, null, 2), 'utf-8');
+      atomicWriteJsonSync(this.dbPath, { outcomes: [], weights: this.weights });
     }
   }
 
@@ -99,11 +100,7 @@ export class SwarmLearningEngine {
 
   private saveState(): void {
     try {
-      fs.writeFileSync(
-        this.dbPath,
-        JSON.stringify({ outcomes: this.outcomes, weights: this.weights }, null, 2),
-        'utf-8'
-      );
+      atomicWriteJsonSync(this.dbPath, { outcomes: this.outcomes, weights: this.weights });
     } catch (err: any) {
       console.error(`[SWARM LEARNING ERROR] Failed saving learning state: ${err.message}`);
     }

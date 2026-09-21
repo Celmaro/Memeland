@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 
 export interface AuditMemoryRecord {
   id: string;
@@ -28,7 +29,7 @@ export class SessionMemoryService {
       fs.mkdirSync(dir, { recursive: true });
     }
     if (!fs.existsSync(this.dbPath)) {
-      fs.writeFileSync(this.dbPath, JSON.stringify({ auditMemories: [], userQueries: [] }, null, 2), 'utf-8');
+      atomicWriteJsonSync(this.dbPath, { auditMemories: [], userQueries: [] });
     }
   }
 
@@ -45,11 +46,7 @@ export class SessionMemoryService {
 
   private saveMemory(): void {
     try {
-      fs.writeFileSync(
-        this.dbPath,
-        JSON.stringify({ auditMemories: this.auditMemories, userQueries: [] }, null, 2),
-        'utf-8'
-      );
+      atomicWriteJsonSync(this.dbPath, { auditMemories: this.auditMemories, userQueries: [] });
     } catch (err: any) {
       console.error(`[SESSION MEMORY ERROR] Failed saving memory store: ${err.message}`);
     }
