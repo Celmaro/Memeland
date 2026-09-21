@@ -20,9 +20,13 @@ export class StrategyEngine {
   private readonly strategiesBackupDir: string;
   private readonly indicatorsBackupDir: string;
   private readonly activeFile: string;
+  // Vitest can run many child Node processes concurrently on Windows; the
+  // Hermes Node runtime may abort in that nested environment. Production
+  // still uses workers, while tests use the cleared-env fallback directly.
+  private workerUsable = !process.env.VITEST && !process.argv.some((arg) => arg.includes('vitest'));
 
   /**
-   * Baseline Windows env for spawning child Node processes. The metadata
+   * Baseline Windows env for spawning child Node processes.
    * worker restricts the env to block secret leakage (see `secretOnlyEnv`),
    * but `runStrategySafely` falls back to a baseline env when needed.
    */
@@ -79,6 +83,23 @@ export class StrategyEngine {
   // ─── Validation (subprocess import — reliable in dist & test envs) ───
 
   private validateModuleFile(filePath: string, kind: 'strategy' | 'indicator'): { ok: boolean; error?: string } {
+    // In test environments the nested child Node aborts (CSPRNG); validate
+    // in-process with the cleared-env import instead of burning a 20s timeout.
+    if (!this.workerUsable) {
+      try {
+        const entry = this.importCached(filePath);
+        const mod = entry.mod as any;
+        if (typeof mod?.id !== 'string' || !mod.id) return { ok: false, error: 'module must export string id' };
+        if (kind === 'strategy') {
+          if (typeof mod?.evaluate !== 'function') return { ok: false, error: 'module must export { id, evaluate(ctx) }' };
+        } else {
+          if (typeof mod?.calculate !== 'function') return { ok: false, error: 'module must export { id, calculate(candles) }' };
+        }
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'validation failed' };
+      }
+    }
     const url = pathToFileURL(filePath).href;
     const script = `
       const url = process.argv[1];
@@ -109,6 +130,15 @@ export class StrategyEngine {
   }
 
   private loadModuleMetadata(filePath: string): Record<string, unknown> {
+    // In test environments skip the nested child entirely; derive metadata
+    // from the cleared-env in-process import.
+    if (!this.workerUsable) {
+      const entry = this.importCached(filePath);
+      const mod = entry.mod as any;
+      const kind: 'strategy' | 'indicator' = typeof mod?.evaluate === 'function' ? 'strategy' : 'indicator';
+      if (!kind || typeof mod?.id !== 'string' || !mod.id) throw new Error('module has an invalid strategy/indicator shape');
+      return { ok: true, kind, id: mod.id, name: mod.name, version: mod.version, description: mod.description, params: mod.params || {} };
+    }
     const script = `
       const url = process.argv[1];
       const marker = '__OPENCATZ_RESULT__';
@@ -144,15 +174,7 @@ export class StrategyEngine {
   }
 
   /**
-     * Worker-lifecycle state. After one CSPRNG/EBUSY crash we skip future
-     * worker attempts in the same process and fall back straight to in-process
-     * execution — every retry costs ~5s on Windows and exceeds the test
-     * timeout budget once several strategies activate in sequence.
-     */
-    private workerUsable = true;
-
-    /**
-     * Run a user-authored strategy/indicator call. Two-stage execution:
+   * Run a user-authored strategy/indicator call. Two-stage execution:
      * 1) Try an out-of-process worker (defense in depth — a malicious module
      *    cannot directly read process secrets from the parent).
      * 2) On worker-runtime failure (e.g. nested sandbox / CSPRNG abort under
@@ -230,21 +252,26 @@ export class StrategyEngine {
    * secrets; cached per filePath so we don't re-import on every call.
    */
   private importCache = new Map<string, { mod: unknown; kind: 'strategy' | 'indicator' }>();
-  private runModuleInProcess(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
-    let entry = this.importCache.get(filePath);
-    if (!entry) {
-      entry = withClearedEnv(() => {
-        const required = requireEsm(filePath);
-        const mod = required?.default || required;
-        const modKind: 'strategy' | 'indicator' = typeof mod?.evaluate === 'function' ? 'strategy' : 'indicator';
-        return { mod, kind: modKind };
-      });
-      this.importCache.set(filePath, entry);
+    /** Import a module once with a cleared env and cache the entry. */
+    private importCached(filePath: string): { mod: unknown; kind: 'strategy' | 'indicator' } {
+      let entry = this.importCache.get(filePath);
+      if (!entry) {
+        entry = withClearedEnv(() => {
+          const required = requireEsm(filePath);
+          const mod = required?.default || required;
+          const modKind: 'strategy' | 'indicator' = typeof mod?.evaluate === 'function' ? 'strategy' : 'indicator';
+          return { mod, kind: modKind };
+        });
+        this.importCache.set(filePath, entry);
+      }
+      return entry;
     }
-    const fn = (entry.mod as any)?.[kind];
-    if (typeof fn !== 'function') throw new Error('module does not export ' + kind);
-    return withClearedEnv(() => fn.call(entry!.mod, arg ?? null));
-  }
+    private runModuleInProcess(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
+      const entry = this.importCached(filePath);
+      const fn = (entry.mod as any)?.[kind];
+      if (typeof fn !== 'function') throw new Error('module does not export ' + kind);
+      return withClearedEnv(() => fn.call(entry.mod, arg ?? null));
+    }
 
   // ─── Write (sandbox + backup + validate + rollback) ──────────────────
 
