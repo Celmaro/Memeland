@@ -5,6 +5,7 @@ import { StateStore } from '../services/state-store.js';
 import { WalletService } from '../services/wallet-service.js';
 import { TradeJournalService } from '../services/trade-journal-service.js';
 import { GMGNAdapter, type GMGNTrackTrade } from '../adapters/gmgn-adapter.js';
+import { PaperBroker, sizeCopyPosition, type PaperFill } from './solana-copy-trade.js';
 
 export type EvmBalanceReader = (chain: string, token: string, owner: string) => Promise<bigint | null>;
 
@@ -323,6 +324,48 @@ export function rankTradersByRealizedPnl(
       winRatePct: rec.trades > 0 ? (rec.wins / rec.trades) * 100 : 0,
     }))
     .sort((a, b) => b.realizedPnlUsd - a.realizedPnlUsd);
+}
+
+export interface CopyTradeSizingConfig {
+  baseNotionalUsd?: number;
+  maxNotionalUsd?: number;
+  minNotionalUsd?: number;
+}
+
+export const DEFAULT_COPY_TRADE_CONFIG: CopyTradeSizingConfig = {
+  baseNotionalUsd: 100,
+  maxNotionalUsd: 500,
+  minNotionalUsd: 10,
+};
+
+/**
+ * Wire SRC-108 copy sizing + paper broker into trader-following. Uses the
+ * Solana copy-trade kernel's proportional sizing, then records a dry-run fill
+ * that never touches a live executor.
+ */
+export async function sizeAndPaperCopyTrade(
+  tokenAddress: string,
+  leaderMultiplier: number,
+  midPriceUsd: number,
+  cfg: CopyTradeSizingConfig = {}
+): Promise<{ suggestedUsd: number; accepted: boolean; fill?: PaperFill; reason?: string }> {
+  const config = { ...DEFAULT_COPY_TRADE_CONFIG, ...cfg };
+  const suggestedUsd = sizeCopyPosition(config.baseNotionalUsd!, leaderMultiplier, {
+    baseNotionalUsd: config.baseNotionalUsd!,
+    maxNotionalUsd: config.maxNotionalUsd!,
+    minNotionalUsd: config.minNotionalUsd!,
+  });
+  if (suggestedUsd <= 0) {
+    return { suggestedUsd, accepted: false, reason: 'invalid copy sizing inputs' };
+  }
+  const res = await new PaperBroker().submitFill({
+    tokenAddress,
+    side: 'buy',
+    sizeUsd: suggestedUsd,
+    midPriceUsd,
+    slippagePct: 0,
+  });
+  return { suggestedUsd, accepted: res.accepted, fill: res.fill, reason: res.reason };
 }
 
 export interface ConcentrationResult {

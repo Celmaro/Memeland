@@ -6,6 +6,7 @@ import {
   BalanceBatchReader,
   retryWithBackoff,
   dedupMerge,
+  sizeAndPaperCopyTrade,
   type WalletTradeRecord,
 } from '../src/services/wallet-tracker.js';
 
@@ -28,6 +29,34 @@ describe('rankTradersByRealizedPnl', () => {
 
   it('returns an empty list for no trades', () => {
     expect(rankTradersByRealizedPnl([])).toEqual([]);
+  });
+});
+
+describe('sizeAndPaperCopyTrade (SRC-108 copy-trade wiring)', () => {
+  it('sizes a proportional paper fill from a leader multiplier and records it', async () => {
+    const result = await sizeAndPaperCopyTrade('COPYTOK', 2, 0.5, {
+      baseNotionalUsd: 100,
+      maxNotionalUsd: 500,
+      minNotionalUsd: 10,
+    });
+
+    expect(result.suggestedUsd).toBe(200);
+    expect(result.accepted).toBe(true);
+    expect(result.fill).toMatchObject({
+      tokenAddress: 'COPYTOK',
+      side: 'buy',
+      sizeUsd: 200,
+      sequence: 1,
+    });
+  });
+
+  it('fails closed without recording a fill on invalid copy sizing inputs', async () => {
+    const result = await sizeAndPaperCopyTrade('COPYTOK', -2, 0.5);
+
+    expect(result.suggestedUsd).toBe(0);
+    expect(result.accepted).toBe(false);
+    expect(result.fill).toBeUndefined();
+    expect(result.reason).toContain('invalid');
   });
 });
 
