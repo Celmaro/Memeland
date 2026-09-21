@@ -364,12 +364,13 @@ export class EVMTradeAdapter {
  * per-host latency/error, SRC-039 PELLET throw-free `Result<T,E>`).
  *
  * Additive to `EVMTradeAdapter` (the high-level buy path above stays untouched).
- * Read ops (`call`/`getLogs`) and submit ops (`sendRawTx`) draw from independent
- * leaky-bucket lanes so a surge of reads never starves submissions. Failover is
- * weighted by host + penalized by errors, and failed hosts enter a cooldown.
- * `callLegacy` is the G2 deprecation shim that still throws — callers migrate to
- * `call()` and the shim is removed at the end of the deprecation window.
- */
+  * Read ops (`call`/`getLogs`) and submit ops (`sendRawTx`) draw from independent
+  * leaky-bucket lanes so a surge of reads never starves submissions. Failover is
+  * weighted by host + penalized by errors, and failed hosts enter a cooldown.
+  * PR 2 / Week 3 (G2 deprecation complete): the `callLegacy` throw-shim is
+  * removed — callers consume `Result<Bytes, AdapterError>` directly via `call()`
+  * (see `quoter-call-adapter.ts` for the first production caller).
+  */
 
 export type Bytes = string;
 export type TxHash = string;
@@ -568,13 +569,6 @@ export class EvmAdapter {
     const r = await this.dispatch('eth_sendRawTransaction', [req.raw]);
     if (!r.ok) return r;
     return { ok: true, value: r.value as TxHash };
-  }
-
-  /** G2 deprecation shim: throws like the old throw-first contract. Remove later. */
-  public async callLegacy(req: EvmCallRequest): Promise<Bytes> {
-    const r = await this.call(req);
-    if (!r.ok) throw new Error(r.error.message);
-    return r.value;
   }
 
   public getHealth(): HostHealth[] {

@@ -71,16 +71,18 @@ describe('EvmAdapter two-lane RPC (PR 2 / Kernel E — RABIQ + Stampede)', () =>
     expect(ha.cooldownMs).toBeGreaterThan(0);
   });
 
-  it('callLegacy throws the adapter error (G2 deprecation shim)', async () => {
-    const hosts: RpcHost[] = [{ url: 'http://a', rotationWeight: 1 }];
-    const transport: RpcTransport = {
-      async request() {
-        return { ok: false, error: 'downstream down' };
-      },
-    };
-    const dl = new EvmAdapter({ hosts, transport });
-    await expect(dl.callLegacy({ to: '0x0', data: '0x', chain: 'robinhood' })).rejects.toThrow('downstream down');
-  });
+  it('call returns err on transport failure (no throw — G2 contract)', async () => {
+      const hosts: RpcHost[] = [{ url: 'http://a', rotationWeight: 1 }];
+      const transport: RpcTransport = {
+        async request() {
+          return { ok: false, error: 'downstream down' };
+        },
+      };
+      const dl = new EvmAdapter({ hosts, transport });
+      const r = await dl.call({ to: '0x0', data: '0x', chain: 'robinhood' });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.code).toBe('RPC_ERROR');
+    });
 
   it('overrideSize clamps a model-returned over-max size', async () => {
     const hosts: RpcHost[] = [{ url: 'http://a', rotationWeight: 1 }];

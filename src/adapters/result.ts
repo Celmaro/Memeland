@@ -4,9 +4,10 @@
  * FLYWHEEL: clamp-before-trust sizing).
  *
  * Additive: adapters may keep throwing for now; callers are migrated to Result
- * and the throw-based `callLegacy` shim is removed at the end of the deprecation
- * window (G2). Nothing here touches network, config, or secrets.
- */
+  * and the throw-based `callLegacy` shim is removed at the end of the deprecation
+  * window (G2 — completed Week 3; see tests/quoter-call-adapter.test.ts).
+  * Nothing here touches network, config, or secrets.
+  */
 
 export interface AdapterError {
   code: string;
