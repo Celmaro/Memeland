@@ -2,7 +2,7 @@ import { StateStore } from './state-store.js';
 
 export interface TradeJournalEntry {
   id: string;
-  domain: 'MEME_ROBINHOOD' | 'NFT' | 'LP_ROBINHOOD';
+  domain: 'MEME_ROBINHOOD';
   symbol: string;
   contractAddressOrId: string;
   chain: string;

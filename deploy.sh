@@ -7,7 +7,7 @@ set -euo pipefail
 # 24-Bit TrueColor RGB Palette (OpenCatz Master Design System)
 LIME='\033[38;2;204;255;0m'       # #CCFF00 Robinhood Green (Legendary Hero)
 PINK='\033[38;2;255;183;178m'     # #FFB7B2 Pastel Pink (Meme / Accents)
-LAVENDER='\033[38;2;214;199;255m' # #D6C7FF Lavender Purple (NFT / Chain)
+LAVENDER='\033[38;2;214;199;255m' # #D6C7FF Lavender Purple (Chain)
 CYAN='\033[38;2;128;222;234m'     # #80DEEA Retro Cyan (LP / Info)
 YELLOW='\033[38;2;255;245;157m'   # #FFF59D Pastel Yellow (Alpha / Warn)
 GOLD='\033[38;2;255;215;0m'       # #FFD700 Golden Fortune

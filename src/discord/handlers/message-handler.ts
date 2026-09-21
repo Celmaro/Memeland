@@ -71,7 +71,7 @@ export async function handleControlRoomMessage(
   // 0a. Sub-agent PAUSE / STOP intent
   if (lowerQuery.includes('pause') || lowerQuery.includes('stop') || lowerQuery.includes('matikan') || lowerQuery.includes('hentikan')) {
     if (lowerQuery.includes('agent') || lowerQuery.includes('sub agent') || lowerQuery.includes('screening')) {
-      const agentDomains = ['meme-robinhood', 'lp-robinhood', 'nft', 'all'];
+  const agentDomains = ['meme-robinhood', 'all'];
       const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'all';
       const result = await toolRegistry.executeToolCall('pause_sub_agent', { agentId: foundDomain });
       await safeReply(message, `🔴 **OPENCATZ CONTROL CENTER**: ${result.message}\n\nSub-agent status updated in Hub Orchestrator state.`);
@@ -82,7 +82,7 @@ export async function handleControlRoomMessage(
   // 0b. Sub-agent RESUME / START intent
   if (lowerQuery.includes('resume') || lowerQuery.includes('start') || lowerQuery.includes('nyalakan') || lowerQuery.includes('aktifkan')) {
     if (lowerQuery.includes('agent') || lowerQuery.includes('sub agent') || lowerQuery.includes('screening')) {
-      const agentDomains = ['meme-robinhood', 'lp-robinhood', 'nft', 'all'];
+  const agentDomains = ['meme-robinhood', 'all'];
       const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'all';
       const result = await toolRegistry.executeToolCall('resume_sub_agent', { agentId: foundDomain });
       await safeReply(message, `🟢 **OPENCATZ CONTROL CENTER**: ${result.message}\n\nSub-agent status updated in Hub Orchestrator state.`);
@@ -92,7 +92,7 @@ export async function handleControlRoomMessage(
 
   // 0c. Trigger ON-DEMAND Screening Pass intent
   if (lowerQuery.includes('run screening') || lowerQuery.includes('trigger screening') || lowerQuery.includes('start screening')) {
-    const agentDomains = ['meme-robinhood', 'lp-robinhood', 'nft'];
+  const agentDomains = ['meme-robinhood'];
     const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'meme-robinhood';
     await safeReply(message, `⚡ **OPENCATZ ON-DEMAND SCREENING TRIGGERED** for \`${foundDomain.toUpperCase()}\`...\nScreening pass in progress.`);
     const result = await toolRegistry.executeToolCall('trigger_screening_pass', { agentId: foundDomain });
@@ -126,7 +126,7 @@ export async function handleControlRoomMessage(
   // 0f. Natural Language Schedule Automation intent
   if (lowerQuery.includes('every') || lowerQuery.includes('schedule')) {
     if (lowerQuery.includes('hour') || lowerQuery.includes('min') || lowerQuery.includes('minute')) {
-      const agentDomains = ['meme-robinhood', 'lp-robinhood', 'nft'];
+  const agentDomains = ['meme-robinhood'];
       const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'meme-robinhood';
       const result = await toolRegistry.executeToolCall('schedule_automation', {
         interval: userQuery,

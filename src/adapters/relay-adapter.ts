@@ -360,21 +360,7 @@ export class RelayAdapter {
       const res = await evmAdapter.swapToken({ chain: quote.chainId, fromToken: request.fromToken, toToken: request.toToken, amountEth: request.amount }, walletService);
       return { ...quote, txHash: res.txHash, explorerUrl: res.explorerUrl, simulated: false };
     } catch (err: any) {
-      console.warn(`[RELAY ADAPTER] Relay Swap failed (${err.message}). Attempting OpenSea DEX Aggregator fallback...`);
-      try {
-        const { OpenSeaAdapter } = await import('./opensea-adapter.js');
-        const osAdapter = new OpenSeaAdapter();
-        const osRes = await osAdapter.executeSwap({ chain: quote.chainId, fromToken: request.fromToken, toToken: request.toToken, amount: request.amount }, walletService);
-        return {
-          ...quote,
-          expectedAmountOut: osRes.expectedAmountOut,
-          txHash: osRes.txHash,
-          explorerUrl: osRes.explorerUrl,
-          simulated: osRes.simulated,
-        };
-      } catch (osErr: any) {
-        return { ...quote, error: `Relay & OpenSea Swaps failed: ${osErr.message}` };
-      }
+      return { ...quote, error: `Relay Swap failed: ${err.message}` };
     }
   }
 

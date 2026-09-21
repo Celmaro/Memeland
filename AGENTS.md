@@ -10,7 +10,9 @@ reasons. LLMs draft thesis cards and critiques — never the verdict itself.
   Entry: src/index.ts. Chain scope: sol / bsc / base / eth via ONE multi-chain meme agent
   (chain = runtime parameter in collectCandidates, not a per-chain agent class). Robinhood #4663
   retained as the existing EVM execution venue, not a screening target.
-- Module changes in flight: lp-robinhood (Krystal) and nft (OpenSea) domains REMOVED;
+- Module removals complete: lp-robinhood (Krystal) and nft (OpenSea) domains REMOVED
+  (adapters, agents, strategies, position-scanner, LP/NFT position state, and all
+  Discord/Telegram/CLI/API/tool-registry wiring);
   alpha-robinhood redesigned as the Sentiment voter; whale-eth demoted to the Whale/Smart-Money
   exit monitor + macro risk-off feed (no standalone domain).
 

@@ -76,8 +76,6 @@ export const slashCommands = [
             .setRequired(false)
             .addChoices(
               { name: 'Robinhood Meme Agent', value: 'meme-robinhood' },
-              { name: 'Robinhood LP Agent', value: 'lp-robinhood' },
-              { name: 'NFT Sniping Agent', value: 'nft' },
               { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' },
               { name: 'ETH Whale Tracker', value: 'whale-eth' }
             )
@@ -92,8 +90,6 @@ export const slashCommands = [
             .setRequired(false)
             .addChoices(
               { name: 'Robinhood Meme Agent', value: 'meme-robinhood' },
-              { name: 'Robinhood LP Agent', value: 'lp-robinhood' },
-              { name: 'NFT Sniping Agent', value: 'nft' },
               { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' },
               { name: 'ETH Whale Tracker', value: 'whale-eth' }
             )
@@ -101,19 +97,17 @@ export const slashCommands = [
     )
     .addSubcommand(sub =>
       sub.setName('status')
-        .setDescription('View real-time status of all 5 sub-agents (active / paused)')
+        .setDescription('View real-time status of all 3 sub-agents (active / paused)')
     )
     .addSubcommand(sub =>
       sub.setName('trigger')
         .setDescription('Run an immediate on-demand screening pass for an agent')
         .addStringOption(opt =>
           opt.setName('agent')
-            .setDescription('Domain agent to trigger (e.g. meme-robinhood, lp-robinhood, nft, alpha-robinhood, whale-eth)')
+            .setDescription('Domain agent to trigger (e.g. meme-robinhood, alpha-robinhood, whale-eth)')
             .setRequired(true)
             .addChoices(
               { name: 'Robinhood Meme Agent', value: 'meme-robinhood' },
-              { name: 'Robinhood LP Agent', value: 'lp-robinhood' },
-              { name: 'NFT Sniping Agent', value: 'nft' },
               { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' },
               { name: 'ETH Whale Tracker', value: 'whale-eth' }
             )
@@ -154,7 +148,7 @@ export const slashCommands = [
     .addSubcommand(sub =>
       sub.setName('view')
         .setDescription('View a strategy module source code')
-        .addStringOption(opt => opt.setName('name').setDescription('Strategy file name without extension (e.g. nft-default)').setRequired(true))
+        .addStringOption(opt => opt.setName('name').setDescription('Strategy file name without extension (e.g. meme-robinhood-default)').setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName('activate')
@@ -162,7 +156,7 @@ export const slashCommands = [
         .addStringOption(opt => opt.setName('strategy').setDescription('Strategy id').setRequired(true))
         .addStringOption(opt =>
           opt.setName('domain')
-            .setDescription('Screening domain (e.g. meme-robinhood, lp-robinhood, nft)')
+            .setDescription('Screening domain (e.g. meme-robinhood, alpha-robinhood, whale-eth)')
             .setRequired(true)
         )
     )

@@ -84,8 +84,6 @@ export class TelegramService {
       'opencatz-control-room',
       'audit-on-demand',
       'call-meme-robinhood',
-      'call-lp-robinhood',
-      'call-nft-robinhood',
       'call-alpha-robinhood',
       'call-whale-eth',
     ];
@@ -183,8 +181,6 @@ ${dexUrl ? `📊 [View Chart on DexScreener](${dexUrl})` : ''}
 
 🤖 *Active Sub-Agents Status:*
 • 🌸 Robinhood Meme (\`meme-robinhood\`): ${getStatus('meme-robinhood')}
-• 🌊 Robinhood LP (\`lp-robinhood\`): ${getStatus('lp-robinhood')}
-• 🔮 NFT Sniping (\`nft\`): ${getStatus('nft')}
 
 Use buttons below to toggle agents, view wallet status, or execute withdrawals:`;
 
@@ -192,10 +188,6 @@ Use buttons below to toggle agents, view wallet status, or execute withdrawals:`
       inline_keyboard: [
         [
           { text: '▶️ Toggle Robinhood Meme', callback_data: 'toggle_meme-robinhood' },
-          { text: '▶️ Toggle Robinhood LP', callback_data: 'toggle_lp-robinhood' },
-        ],
-        [
-          { text: '▶️ Toggle NFT', callback_data: 'toggle_nft' },
         ],
         [
           { text: '⚡ Start All', callback_data: 'start_all' },
@@ -256,10 +248,10 @@ Use buttons below to toggle agents, view wallet status, or execute withdrawals:`
         hub.toggleChannelScreening('telegram-forum', domain, !active);
         await this.sendMessage(`⚡ Sub-agent domain \`${domain}\` is now **${!active ? 'ACTIVE' : 'PAUSED'}** on Telegram!`, 'Markdown', undefined, threadId);
       } else if (data === 'start_all') {
-        ['meme-robinhood', 'lp-robinhood', 'nft'].forEach(d => hub.toggleChannelScreening('telegram-forum', d, true));
+      ['meme-robinhood'].forEach(d => hub.toggleChannelScreening('telegram-forum', d, true));
         await this.sendMessage('⚡ **GLOBAL MASTER SCREENING ACTIVATED!** All 3 Sub-Agents are active on Telegram.', 'Markdown', undefined, threadId);
       } else if (data === 'pause_all') {
-        ['meme-robinhood', 'lp-robinhood', 'nft'].forEach(d => hub.toggleChannelScreening('telegram-forum', d, false));
+      ['meme-robinhood'].forEach(d => hub.toggleChannelScreening('telegram-forum', d, false));
         await this.sendMessage('⏸️ **GLOBAL MASTER SCREENING PAUSED!** All 3 Sub-Agents are paused on Telegram.', 'Markdown', undefined, threadId);
       } else if (data === 'balances') {
         const isDryRun = isDryRunMode();

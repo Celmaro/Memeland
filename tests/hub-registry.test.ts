@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { OpenCatzHub } from '../src/orchestrator/hub.js';
 import type { AgentReport, ScreeningAgent } from '../src/agents/shared/agent-contract.js';
-import type { KrystalCloudAdapter, KrystalPoolSignal } from '../src/adapters/krystal-cloud-adapter.js';
 import type { GMGNAdapter, GMGNSecurityAudit } from '../src/adapters/gmgn-adapter.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
@@ -17,35 +16,6 @@ const mkStubAgent = (domain: string, reports: AgentReport[] = []) => ({
   domain,
   runScreeningPass: vi.fn(async () => reports),
 } as unknown as ScreeningAgent);
-
-const mkKrystalPool = (over: Partial<KrystalPoolSignal> = {}): KrystalPoolSignal => ({
-  poolAddress: '0xpool1',
-  pairName: 'WETH-USDC',
-  feeTier: 3000,
-  tvlUsd: 150000,
-  activeTvlUsd: 3000,
-  volume1hUsd: 5000,
-  fee1hUsd: 20,
-  volume24hUsd: 120000,
-  fee24hUsd: 360,
-  feesToTvlRatio24h: 0.0024,
-  volumeToTvlRatio1h: 0.033,
-  volumeToActiveTvlRatio1h: 1.67,
-  feeAprPercentage: 87.6,
-  apr24h: 28.4,
-  farmApr24h: 0,
-  token0Symbol: 'WETH',
-  token1Symbol: 'USDC',
-  token0Address: '0xweth',
-  token1Address: '0xusdc',
-  aiRecommendation: 'Live Uniswap V3 pool WETH-USDC (Robinhood Chain)',
-  ...over,
-});
-
-const mkKrystalStub = (pools: KrystalPoolSignal[]) => ({
-  fetchTopRobinhoodPools: vi.fn(async () => pools),
-  filterHighYieldPools: vi.fn((p: KrystalPoolSignal[]) => p),
-} as unknown as KrystalCloudAdapter);
 
 /** Default GMGN security audit (safe — passes fail-closed gate). */
 const mkSafeAudit = (over: Partial<GMGNSecurityAudit> = {}): GMGNSecurityAudit => ({

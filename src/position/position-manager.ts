@@ -17,31 +17,6 @@ export interface OpenPosition {
   stopLossPct?: number;
 }
 
-export interface ActiveLPPosition {
-  id: string; // poolAddress
-  poolAddress: string;
-  pairName: string;
-  network: 'Robinhood';
-  isOutOfRange: boolean;
-  currentVolumeToActiveTvl4h: number;
-  currentVolumeToTvl4h?: number;
-  currentFeesToTvlRatio4h: number;
-  currentOrganicVolumeScore4h: number;
-}
-
-export interface ActiveNFTPosition {
-  id: string; // collectionSlug_tokenId
-  collectionSlug: string;
-  collectionName: string;
-  tokenId: string;
-  entryFloorEth: number;
-  currentFloorEth: number;
-  highestFloorEth: number;
-  salesVelocity1h: number;
-  tp30Triggered?: boolean;
-  tp50Triggered?: boolean;
-}
-
 /**
  * PR12.c (SRC-209 vegapunk): graceful-exit helpers — a TP scale-out ladder and
  * a refined stop-loss that tightens as the high-water mark rises but never
@@ -299,8 +274,6 @@ export class PositionManager {
 
   // In-memory mirrors for fast access (loaded from StateStore on init)
   private activePositions: Map<string, OpenPosition> = new Map();
-  private activeLpPositions: Map<string, ActiveLPPosition> = new Map();
-  private activeNftPositions: Map<string, ActiveNFTPosition> = new Map();
 
   /**
    * Attach persistent StateStore. Call this after StateStore is initialized.
@@ -313,16 +286,9 @@ export class PositionManager {
     for (const pos of store.getAllPositions()) {
       this.activePositions.set(pos.id, pos);
     }
-    for (const lp of store.getAllLpPositions()) {
-      this.activeLpPositions.set(lp.id, lp);
-    }
-    for (const nft of store.getAllNftPositions()) {
-      this.activeNftPositions.set(nft.id, nft);
-    }
-
-    const total = this.activePositions.size + this.activeLpPositions.size + this.activeNftPositions.size;
+    const total = this.activePositions.size;
     if (total > 0) {
-      console.log(`[POSITION MANAGER] Restored ${this.activePositions.size} spot, ${this.activeLpPositions.size} LP, ${this.activeNftPositions.size} NFT positions from persistent state.`);
+      console.log(`[POSITION MANAGER] Restored ${this.activePositions.size} spot positions from persistent state.`);
     }
   }
 
@@ -462,145 +428,4 @@ export class PositionManager {
     return { triggerAlert: false, type: 'NONE' };
   }
 
-  // ==========================================
-  // CONCENTRATED LP POSITION TRACKING
-  // ==========================================
-
-  public addLpPosition(position: ActiveLPPosition) {
-    this.activeLpPositions.set(position.id, position);
-    this.stateStore?.setLpPosition(position);
-  }
-
-  public getActiveLpPositions(): ActiveLPPosition[] {
-    return Array.from(this.activeLpPositions.values());
-  }
-
-  public removeLpPosition(id: string): void {
-    this.activeLpPositions.delete(id);
-    this.stateStore?.removeLpPosition(id);
-  }
-
-  public checkLpPositionAlert(positionId: string): { triggerAlert: boolean; reason?: string } {
-    const pos = this.activeLpPositions.get(positionId);
-    if (!pos) return { triggerAlert: false };
-
-    if (pos.isOutOfRange) {
-      return {
-        triggerAlert: true,
-        reason: `🚨 **Out of Range Alert:** Price has moved outside of your active LP bins for ${pos.pairName}. Fees are no longer accumulating! Time to re-range or exit.`,
-      };
-    }
-
-    if (pos.currentOrganicVolumeScore4h < 65) {
-      return {
-        triggerAlert: true,
-        reason: `🎣 **Organic Volume Warning:** Organic activity score on ${pos.pairName} dropped to **${pos.currentOrganicVolumeScore4h}/100**. Suspicious wash-trading or liquidity pull detected.`,
-      };
-    }
-
-    if (pos.currentFeesToTvlRatio4h < 0.05) {
-      return {
-        triggerAlert: true,
-        reason: `💸 **Yield Velocity Warning:** LP fee yield on ${pos.pairName} dropped to **${(pos.currentFeesToTvlRatio4h * 100).toFixed(2)}%** per 4h (below the 5.0% Trade+LP target). Consider withdrawing LP!`,
-      };
-    }
-
-    if (pos.currentVolumeToTvl4h !== undefined && pos.currentVolumeToTvl4h < 1.5) {
-      return {
-        triggerAlert: true,
-        reason: `📉 **Volume Turnover Alert:** Total pool volume turnover on ${pos.pairName} fell to **${(pos.currentVolumeToTvl4h * 100).toFixed(0)}%** (below 150% 4h target). Trading momentum is fading!`,
-      };
-    }
-
-    if (pos.currentVolumeToActiveTvl4h < 6.0) {
-      return {
-        triggerAlert: true,
-        reason: `⚡ **Active Velocity Alert:** Capital turnover in active LP range for ${pos.pairName} fell to **${pos.currentVolumeToActiveTvl4h.toFixed(1)}x** (below 6.0x target). Active bin volume slowing down.`,
-      };
-    }
-
-    return { triggerAlert: false };
-  }
-
-  // ==========================================
-  // ACTIVE NFT POSITION TRACKING & ALERTS
-  // ==========================================
-
-  public addNftPosition(position: ActiveNFTPosition) {
-    this.activeNftPositions.set(position.id, position);
-    this.stateStore?.setNftPosition(position);
-  }
-
-  public getActiveNftPositions(): ActiveNFTPosition[] {
-    return Array.from(this.activeNftPositions.values());
-  }
-
-  public removeNftPosition(id: string): void {
-    this.activeNftPositions.delete(id);
-    this.stateStore?.removeNftPosition(id);
-  }
-
-  /**
-   * Updates & checks active NFT position for TP milestones (+30%, +50%), floor drops (-20%), or volume momentum dry-up
-   */
-  public updateNftPosition(
-    positionId: string,
-    currentFloorEth: number,
-    salesVelocity1h: number
-  ): { triggerAlert: boolean; type: 'MILESTONE' | 'WARNING' | 'CRITICAL' | 'NONE'; reason?: string } {
-    const pos = this.activeNftPositions.get(positionId);
-    if (!pos) return { triggerAlert: false, type: 'NONE' };
-
-    pos.currentFloorEth = currentFloorEth;
-    pos.salesVelocity1h = salesVelocity1h;
-    if (currentFloorEth > pos.highestFloorEth) {
-      pos.highestFloorEth = currentFloorEth;
-    }
-
-    const floorChangePct = ((currentFloorEth - pos.entryFloorEth) / pos.entryFloorEth) * 100;
-
-    // 1. Take Profit Milestones (+50% and +30%)
-    if (floorChangePct >= 50 && !pos.tp50Triggered) {
-      pos.tp50Triggered = true;
-      this.stateStore?.setNftPosition(pos);
-      return {
-        triggerAlert: true,
-        type: 'MILESTONE',
-        reason: `🟢 **NFT TP2 MILESTONE (+50%):** Floor price for **${pos.collectionName} #${pos.tokenId}** surged +50%! (Entry: \`${pos.entryFloorEth} ETH\` ➡️ Current Floor: \`${currentFloorEth} ETH\`). High-profit taking recommended!`,
-      };
-    }
-
-    if (floorChangePct >= 30 && !pos.tp30Triggered) {
-      pos.tp30Triggered = true;
-      this.stateStore?.setNftPosition(pos);
-      return {
-        triggerAlert: true,
-        type: 'MILESTONE',
-        reason: `🟢 **NFT TP1 MILESTONE (+30%):** Floor price for **${pos.collectionName} #${pos.tokenId}** surged +30%! (Entry: \`${pos.entryFloorEth} ETH\` ➡️ Current Floor: \`${currentFloorEth} ETH\`). Consider listing at floor to secure profits!`,
-      };
-    }
-
-    // 2. Critical Floor Drop (-20%)
-    if (floorChangePct <= -20) {
-      this.stateStore?.setNftPosition(pos);
-      return {
-        triggerAlert: true,
-        type: 'CRITICAL',
-        reason: `🚨 **NFT FLOOR DROP WARNING (-20%):** Floor price for **${pos.collectionName} #${pos.tokenId}** dropped -20% below your entry! (Entry: \`${pos.entryFloorEth} ETH\` ➡️ Current Floor: \`${currentFloorEth} ETH\`). Cut-loss recommended!`,
-      };
-    }
-
-    // 3. Sales Velocity Dry-up Alert (Sales velocity < 5 sales/hour)
-    if (salesVelocity1h < 5) {
-      this.stateStore?.setNftPosition(pos);
-      return {
-        triggerAlert: true,
-        type: 'WARNING',
-        reason: `⚠️ **NFT MOMENTUM FADING:** Sales velocity for **${pos.collectionName}** dropped to \`${salesVelocity1h} sales/hour\` (below 5 sales/h threshold). Trading volume momentum is fading!`,
-      };
-    }
-
-    this.stateStore?.setNftPosition(pos);
-    return { triggerAlert: false, type: 'NONE' };
-  }
 }

@@ -16,7 +16,6 @@ export interface DashboardEmbedOptions {
 }
 
 export function createDashboardComponents(hub: OpenCatzHub, opts: DashboardEmbedOptions = {}) {
-  const isOpenSeaSet = Boolean(process.env.OPENSEA_API_KEY);
   const isLlmSet = Boolean(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY);
 
   const getStatusBadge = (domain: string) => (hub.isAgentActive(domain) ? '`🟢 RUNNING`' : '`🔴 PAUSED`');
@@ -50,15 +49,12 @@ export function createDashboardComponents(hub: OpenCatzHub, opts: DashboardEmbed
         name: '🤖 24/7 Robinhood Chain Specialist Sub-Agents Status (PAUSED by Default)',
         value:
           `• 🌸 **Robinhood Meme Agent:** ${getStatusBadge('meme-robinhood')}\n` +
-          `• 🌊 **Robinhood LP Velocity Agent:** ${getStatusBadge('lp-robinhood')}\n` +
-          `• 🔮 **NFT Sniping Agent:** ${getStatusBadge('nft')}\n` +
           `• ☀️ **Alpha Scraper & X-Search Agent:** ${getStatusBadge('alpha-robinhood')}`,
         inline: false,
       },
       {
         name: '🌐 Connected API Keys & Security Status',
         value:
-          `• 🖼️ **OpenSea API (NFT Data):** ${isOpenSeaSet ? '`🟢 CONFIGURED`' : '`⚪ NOT CONFIGURED (fail-closed)`'}\n` +
           `• 🐦 **X (Twitter) API v2:** ${Boolean(process.env.X_API_BEARER_TOKEN) ? '`🟢 CONFIGURED`' : '`⚪ NOT CONFIGURED (optional)`'}\n` +
           `• 🧠 **LLM AI Reasoning API:** ${isLlmSet ? '`🟢 CONFIGURED`' : '`⚪ NOT CONFIGURED`'}`,
         inline: false,
@@ -75,7 +71,7 @@ export function createDashboardComponents(hub: OpenCatzHub, opts: DashboardEmbed
 
   // Dropdown Select Menu to Toggle Agents
   const CATEGORY_EMOJI: Record<string, string> = {
-    MEME: '🌸', LP: '🌊', NFT: '🔮', ALPHA: '☀️',
+    MEME: '🌸', ALPHA: '☀️',
   };
   const agentSelect = new StringSelectMenuBuilder()
     .setCustomId('select_toggle_agent')

@@ -2,9 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
 import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { GMGNRawToken } from '../src/adapters/gmgn-adapter.js';
-import { NFTScreeningAgent } from '../src/agents/nft/nft-screening-agent.js';
 import { PriceAlertService } from '../src/services/price-alert-service.js';
-import { PositionManager } from '../src/position/position-manager.js';
 
 describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
   it('1. Swarm Consensus Engine: Should pass high confidence signals (>= 80%)', () => {
@@ -68,17 +66,6 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
     expect(reports.length).toBe(0);
   });
 
-  it('5. EVM NFT Agent: Should evaluate NFT Momentum & Whale Sweeps', async () => {
-    const agent = new NFTScreeningAgent();
-    const reports = await agent.runScreeningPass();
-    expect(Array.isArray(reports)).toBe(true);
-    if (reports.length > 0) {
-      expect(reports[0].confidence).toBeGreaterThanOrEqual(80);
-      expect(reports[0].signal.isFloorSurge).toBe(true);
-      expect(reports[0].payload?.domain).toBe('NFT');
-    }
-  });
-
   it('7. Price Alert Service: Should parse natural language alert expressions', () => {
     const alertService = new PriceAlertService();
     const parsed = alertService.parseNaturalLanguageAlert('opencatz alert if BTC 70000', 'test_user', 'test_chan');
@@ -86,57 +73,6 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
     expect(parsed?.symbol).toBe('BTC');
     expect(parsed?.targetPriceUsd).toBe(70000);
     expect(parsed?.direction).toBe('ABOVE');
-  });
-
-  it('8. Position Manager: Should trigger TP milestones (+30%, +50%) and Floor Drop (-20%) for NFT positions', () => {
-    const manager = new PositionManager();
-    manager.addNftPosition({
-      id: 'nft_pudgy_1234',
-      collectionSlug: 'pudgypenguins',
-      collectionName: 'Pudgy Penguins',
-      tokenId: '1234',
-      entryFloorEth: 10.0,
-      currentFloorEth: 10.0,
-      highestFloorEth: 10.0,
-      salesVelocity1h: 20,
-    });
-
-    // Test +30% TP1 Milestone
-    const tp1Res = manager.updateNftPosition('nft_pudgy_1234', 13.5, 25);
-    expect(tp1Res.triggerAlert).toBe(true);
-    expect(tp1Res.type).toBe('MILESTONE');
-    expect(tp1Res.reason).toContain('TP1 MILESTONE (+30%)');
-
-    // Test -20% Floor Drop Warning
-    manager.addNftPosition({
-      id: 'nft_azuki_5678',
-      collectionSlug: 'azuki',
-      collectionName: 'Azuki',
-      tokenId: '5678',
-      entryFloorEth: 10.0,
-      currentFloorEth: 10.0,
-      highestFloorEth: 10.0,
-      salesVelocity1h: 20,
-    });
-  });
-
-  it('19. OpenSea Adapter: Should provide OpenCatz Agent Tools manifest & quote', async () => {
-    const { OpenSeaAdapter } = await import('../src/adapters/opensea-adapter.js');
-    const adapter = new OpenSeaAdapter('mock_key');
-    const quote = await adapter.getSwapQuote({
-      chain: 'robinhood',
-      fromToken: 'ETH',
-      toToken: 'USDC',
-      amount: 0.5,
-    });
-    expect(quote.success).toBe(true);
-    expect(quote.chainId).toBe(4663);
-    expect(quote.expectedAmountOut).toBeGreaterThan(0);
-    expect(quote.openseaSwapUrl).toContain('opensea.io/swap');
-
-    const manifest = adapter.getAgentToolsManifest();
-    expect(manifest.name).toBe('OpenCatz OpenSea Agent Tools');
-    expect(Array.isArray(manifest.capabilities)).toBe(true);
   });
 
   it('20. Tool Registry & Hub Control: Should execute sub-agent pause, resume, and risk limit tools', async () => {
@@ -243,15 +179,16 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
     const { ToolRegistry } = await import('../src/orchestrator/tool-registry.js');
 
     process.env.AI_API_KEY = 'test_ai_key_123';
+    process.env.GMGN_API_KEY = 'test_gmgn_key_123';
     const guard = new ApiKeyGuardService();
     const registry = new ToolRegistry();
 
-    const toolRes = await registry.executeToolCall('set_api_key', { keyName: 'OPENSEA_API_KEY', keyValue: 'test_opensea_key_123' });
+    const toolRes = await registry.executeToolCall('set_api_key', { keyName: 'GMGN_API_KEY', keyValue: 'test_gmgn_key_123' });
     expect(toolRes.success).toBe(true);
 
-    const res = guard.checkDomainKeys('nft');
+    const res = guard.checkDomainKeys('meme-robinhood');
     expect(res.ready).toBe(true);
-    expect(process.env.OPENSEA_API_KEY).toBe('test_opensea_key_123');
+    expect(process.env.GMGN_API_KEY).toBe('test_gmgn_key_123');
   });
 
   it('27. Auto-execute: hub state reflects enablement', async () => {

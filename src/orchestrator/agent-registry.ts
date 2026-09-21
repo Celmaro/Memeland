@@ -1,11 +1,9 @@
 export type AgentDomainId =
   | 'meme-robinhood'
-  | 'lp-robinhood'
-  | 'nft'
   | 'alpha-robinhood'
   | 'whale-eth';
 
-export type AgentCategory = 'MEME' | 'LP' | 'NFT' | 'ALPHA' | 'WHALE';
+export type AgentCategory = 'MEME' | 'ALPHA' | 'WHALE';
 
 export interface AgentDomainInfo {
   id: AgentDomainId;

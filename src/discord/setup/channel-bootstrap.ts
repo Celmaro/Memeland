@@ -4,8 +4,6 @@ export interface ChannelSetupResult {
   controlRoomId: string;
   auditOnDemandId: string;
   memeEvmId: string;
-  lpEvmId: string;
-  nftId: string;
   alphaEvmId: string;
   whaleEthId: string;
 }
@@ -61,16 +59,6 @@ export async function bootstrapDiscordChannels(guild: Guild): Promise<ChannelSet
     '🌸 High-Confidence Robinhood Chain Meme Signal Calls (Robinhood Chain L2 DEX)'
   );
 
-  const lpEvmId = await getOrCreateChannel(
-    'call-lp-robinhood',
-    '🌊 High-Yield Robinhood Chain Concentrated Liquidity Calls (Uniswap V3 / Aerodrome)'
-  );
-
-  const nftId = await getOrCreateChannel(
-    'call-nft-robinhood',
-    '🔮 NFT Floor Price & Rarity Sniping Alerts (OpenCatz 24x24 & OpenSea EVM)'
-  );
-
   const alphaEvmId = await getOrCreateChannel(
     'call-alpha-robinhood',
     '☀️ 1-Hour Robinhood Chain Alpha Scraper & X (Twitter) Social Sentiment Calls'
@@ -87,8 +75,6 @@ export async function bootstrapDiscordChannels(guild: Guild): Promise<ChannelSet
     controlRoomId,
     auditOnDemandId,
     memeEvmId,
-    lpEvmId,
-    nftId,
     alphaEvmId,
     whaleEthId,
   };

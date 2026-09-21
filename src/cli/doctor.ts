@@ -38,8 +38,6 @@ ${C.cyan}Autonomous Multi-Agent Health Audit & Diagnostics${C.reset}
   const envKeyDefs = [
     { name: 'AI_API_KEY', aliases: ['AI_API_KEYS', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'], required: true },
     { name: 'GMGN_API_KEY', aliases: ['GMGN_API_KEY_ROBINHOOD'], required: false },
-    { name: 'KRYSTAL_CLOUD_API_KEY', aliases: [], required: false },
-    { name: 'OPENSEA_API_KEY', aliases: [], required: false },
     { name: 'GOPLUS_API_KEY', aliases: [], required: false },
     { name: 'UNISWAP_API_KEY', aliases: [], required: false },
     { name: 'X_API_BEARER_TOKEN', aliases: [], required: false },

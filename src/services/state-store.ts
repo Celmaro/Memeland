@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
-import { OpenPosition, ActiveLPPosition, ActiveNFTPosition } from '../position/position-manager.js';
+import { OpenPosition } from '../position/position-manager.js';
 import { PriceAlert } from './price-alert-service.js';
 import { TradeJournalEntry } from './trade-journal-service.js';
 
@@ -81,8 +81,6 @@ export interface TrackedToken {
 export interface OpenCatzPersistedState {
   // Core position tracking
   openPositions: Record<string, OpenPosition>;
-  activeLpPositions: Record<string, ActiveLPPosition>;
-  activeNftPositions: Record<string, ActiveNFTPosition>;
 
   // Services state
   priceAlerts: Record<string, PriceAlert>;
@@ -104,9 +102,6 @@ export interface OpenCatzPersistedState {
 
   // Wallet auto-tracking targets (survives restarts)
   trackedTokens: TrackedToken[];
-
-  // NFT collections to monitor for user positions (survives restarts)
-  trackedNftCollections: string[];
 
   // Per-domain runtime screening config overrides (set via chat tool; merged
   // over agent defaults at startup). Plain JSON-safe key/value — validation
@@ -170,8 +165,6 @@ export class StateStore {
   private createEmptyState(): OpenCatzPersistedState {
     return {
       openPositions: {},
-      activeLpPositions: {},
-      activeNftPositions: {},
       priceAlerts: {},
       tradeJournalEntries: {},
       walletKeys: {},
@@ -179,7 +172,6 @@ export class StateStore {
       signalLedger: [],
       dedupEntries: {},
       trackedTokens: [],
-      trackedNftCollections: [],
       screeningConfigs: {},
       funnels: {},
       scorecard: [],
@@ -230,8 +222,6 @@ export class StateStore {
 
       return {
         openPositions: data.openPositions || {},
-        activeLpPositions: data.activeLpPositions || {},
-        activeNftPositions: data.activeNftPositions || {},
         priceAlerts: data.priceAlerts || {},
         tradeJournalEntries: data.tradeJournalEntries || {},
         walletKeys: data.walletKeys || {},
@@ -239,7 +229,6 @@ export class StateStore {
         signalLedger: Array.isArray(data.signalLedger) ? data.signalLedger : [],
         dedupEntries: data.dedupEntries || {},
         trackedTokens: Array.isArray(data.trackedTokens) ? data.trackedTokens : [],
-        trackedNftCollections: Array.isArray(data.trackedNftCollections) ? data.trackedNftCollections : [],
         screeningConfigs: data.screeningConfigs || {},
         funnels: data.funnels || {},
         scorecard: Array.isArray(data.scorecard) ? data.scorecard : [],
@@ -303,46 +292,6 @@ export class StateStore {
 
   public getAllPositions(): OpenPosition[] {
     return Object.values(this.state.openPositions);
-  }
-
-  // ==========================================
-  // LP POSITIONS
-  // ==========================================
-
-  public setLpPosition(pos: ActiveLPPosition): void {
-    this.state.activeLpPositions[pos.id] = pos;
-    this.scheduleSave();
-  }
-
-  public removeLpPosition(id: string): boolean {
-    const existed = id in this.state.activeLpPositions;
-    delete this.state.activeLpPositions[id];
-    if (existed) this.scheduleSave();
-    return existed;
-  }
-
-  public getAllLpPositions(): ActiveLPPosition[] {
-    return Object.values(this.state.activeLpPositions);
-  }
-
-  // ==========================================
-  // NFT POSITIONS
-  // ==========================================
-
-  public setNftPosition(pos: ActiveNFTPosition): void {
-    this.state.activeNftPositions[pos.id] = pos;
-    this.scheduleSave();
-  }
-
-  public removeNftPosition(id: string): boolean {
-    const existed = id in this.state.activeNftPositions;
-    delete this.state.activeNftPositions[id];
-    if (existed) this.scheduleSave();
-    return existed;
-  }
-
-  public getAllNftPositions(): ActiveNFTPosition[] {
-    return Object.values(this.state.activeNftPositions);
   }
 
   // ==========================================
@@ -468,24 +417,6 @@ export class StateStore {
       this.state.trackedTokens.push(tok);
     }
     this.scheduleSave();
-  }
-
-  // ==========================================
-  // TRACKED NFT COLLECTIONS (Wallet Auto-Tracking)
-  // ==========================================
-
-  public getTrackedNftCollections(): string[] {
-    return this.state.trackedNftCollections || [];
-  }
-
-  /** Add a collection slug to NFT position tracking (deduped). */
-  public setTrackedNftCollection(slug: string): void {
-    if (!this.state.trackedNftCollections) this.state.trackedNftCollections = [];
-    const key = slug.toLowerCase();
-    if (!this.state.trackedNftCollections.some((s) => s.toLowerCase() === key)) {
-      this.state.trackedNftCollections.push(slug);
-      this.scheduleSave();
-    }
   }
 
   // ==========================================

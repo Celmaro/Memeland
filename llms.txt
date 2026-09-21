@@ -1,6 +1,6 @@
 # OpenCatz AI (Robinhood Chain Edition)
 
-> OpenCatz AI is an autonomous, open-source Agentic AI crypto intelligence system built exclusively for Robinhood Chain (EVM L2, Chain ID #4663, Native ETH), deploying 5 Specialist AI Scouts governed by a 3-Layer Collaborative Consensus Protocol (≥ 80% Confidence Gate) and the 9-Lives Automated Risk Engine.
+> OpenCatz AI is an autonomous, open-source Agentic AI crypto intelligence system built exclusively for Robinhood Chain (EVM L2, Chain ID #4663, Native ETH), deploying 3 Specialist AI Scouts governed by a 3-Layer Collaborative Consensus Protocol (≥ 80% Confidence Gate) and the 9-Lives Automated Risk Engine.
 
 ## Project Summary
 - Name: OpenCatz AI (Robinhood Chain Edition)
@@ -13,16 +13,12 @@
 - Web Portal: https://opencatz.xyz/robinhood-chain
 - Documentation: https://opencatz.xyz/docs
 
-## 5 Specialist AI Scouts (Robinhood Chain)
+## 3 Specialist AI Scouts (Robinhood Chain)
 1. Robinhood Meme Scout (#call-meme-robinhood):
    - Scope: Robinhood Chain EVM DEX tokens (GMGN + GoPlus Security)
-2. Robinhood LP Yield Scout (#call-lp-robinhood):
-   - Scope: Concentrated Liquidity velocity via Uniswap V3 & Krystal Cloud
-3. Robinhood NFT Scout (#call-nft-robinhood):
-   - Scope: OpenSea Robinhood Chain NFT floor surges & mint momentum
-4. Alpha & Sentiment Scout (#call-alpha-robinhood):
+2. Alpha & Sentiment Scout (#call-alpha-robinhood):
    - Scope: Robinhood Chain smart CT alpha & social sentiment signals
-5. Hyperliquid ETH Whale Scout (#call-whale-eth):
+3. Hyperliquid ETH Whale Scout (#call-whale-eth):
    - Scope: Institutional ETH perps positioning & spot order flow
 
 ## Consensus & Risk Safeguards

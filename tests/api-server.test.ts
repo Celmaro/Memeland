@@ -74,7 +74,7 @@ describe('OpenCatzRESTServer Test Suite', () => {
     expect(Array.isArray(data.calls)).toBe(true);
   });
 
-  it('GET /api/positions returns open tokens, LP, and NFT positions', async () => {
+  it('GET /api/positions returns open token positions', async () => {
     const res = await fetch(`http://localhost:${testPort}/api/positions`);
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -82,8 +82,6 @@ describe('OpenCatzRESTServer Test Suite', () => {
     expect(data.success).toBe(true);
     expect(data.summary).toBeDefined();
     expect(data.tokens).toBeDefined();
-    expect(data.lpPositions).toBeDefined();
-    expect(data.nftPositions).toBeDefined();
   });
 
   it('GET /api/executions returns trade journal summary & entries', async () => {

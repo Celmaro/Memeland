@@ -5,7 +5,7 @@ import type { AIService } from '../services/ai-service.js';
 
 const DEFAULT_STRATEGIES_DIR = path.join(process.cwd(), 'strategies');
 const PROMPT_FILE = 'custom-strategy-prompt.txt';
-const DOMAINS = ['meme-robinhood', 'lp-robinhood', 'nft', 'whale-eth'];
+const DOMAINS = ['meme-robinhood', 'whale-eth'];
 
 const STRATEGY_RULES = `
 You are writing an OpenCatzStrategy .mjs module for the Opencatz screening engine.
@@ -20,10 +20,6 @@ Export a default object: { id, name, version, description, params, evaluate(ctx)
     top_10_holder_rate, is_wash_trading, cto_flag, creator_close, dev_team_hold_rate, smart_degen_count,
     renowned_count, buys, sells, visiting_count, twitter_rename_count, twitter_del_post_token_count,
     twitter_create_token_count, total_fee, native_price_usd) + ctx.smartMoneyCount, ctx.securityAuditPassed.
-  - lp-robinhood: ctx.pool (tvlUsd, volume24hUsd, fee24hUsd, feesToTvlRatio24h, token0Symbol, token1Symbol,
-    marketCapUsd, feeTier, apr24h, farmApr24h, volumeToActiveTvlRatio1h) + ctx.securityAuditPassed.
-  - nft: ctx.floorPriceEth, ctx.priceEth, ctx.floorSurge1hPct, ctx.volumeSpike1hRatio, ctx.salesVelocity1h,
-    ctx.isWhaleSweep, ctx.isVerified.
   - whale-eth: ctx.whale (totalLongUsd, totalShortUsd, netUsd, longCount, shortCount, spotFlow).
 Return ONLY the .mjs code, no markdown fences, no commentary.
 `;

@@ -16,7 +16,7 @@ import {
 
 export interface SignalCandidate {
   symbol: string;
-  domain: 'MEME_ROBINHOOD' | 'NFT' | 'LP_ROBINHOOD';
+  domain: 'MEME_ROBINHOOD';
   contractAddress?: string;
   liquidityUsd: number;
   volume1hUsd: number;

@@ -165,8 +165,6 @@ export async function handleChatInput(
     // Channel to Agent mapping
     const channelDomainMap: Record<string, { agent: string; name: string }> = {
       'call-meme-robinhood': { agent: 'meme-robinhood', name: 'Robinhood Meme Agent' },
-      'call-lp-robinhood': { agent: 'lp-robinhood', name: 'Robinhood LP Agent' },
-      'call-nft-robinhood': { agent: 'nft', name: 'NFT Sniping Agent' },
       'call-alpha-robinhood': { agent: 'alpha-robinhood', name: 'Alpha Scraper Agent' },
       'call-whale-eth': { agent: 'whale-eth', name: 'ETH Whale Tracking Agent' },
     };
@@ -184,11 +182,11 @@ export async function handleChatInput(
           // Fall through — handled by the shared status block below
         } else if (subcommand === 'start') {
           Object.values(channelDomainMap).forEach(d => hub.toggleChannelScreening(interaction.channelId, d.agent, true));
-          await interaction.editReply('⚡ **Global Master Screening Activated!** All 5 Sub-Agent domains are now active.');
+          await interaction.editReply('⚡ **Global Master Screening Activated!** All 3 Sub-Agent domains are now active.');
           return;
         } else {
           Object.values(channelDomainMap).forEach(d => hub.toggleChannelScreening(interaction.channelId, d.agent, false));
-          await interaction.editReply('⏸️ **Global Master Screening Paused!** All 5 Sub-Agent domains are now paused.');
+          await interaction.editReply('⏸️ **Global Master Screening Paused!** All 3 Sub-Agent domains are now paused.');
           return;
         }
       } else {
@@ -219,8 +217,6 @@ export async function handleChatInput(
     } else if (subcommand === 'status') {
       const ALL_AGENTS: Array<{ id: string; label: string; emoji: string }> = [
         { id: 'meme-robinhood',  label: 'Robinhood Meme Agent',               emoji: '🌸' },
-        { id: 'lp-robinhood',    label: 'Robinhood LP Agent',                 emoji: '🌊' },
-        { id: 'nft',             label: 'NFT Sniping Agent (OpenSea)',        emoji: '🔮' },
         { id: 'alpha-robinhood', label: 'Alpha Scraper Agent (X API v2)',     emoji: '☀️' },
         { id: 'whale-eth',       label: 'ETH Whale Tracker (Hyperliquid)',   emoji: '🐋' },
       ];
@@ -278,7 +274,7 @@ export async function handleChatInput(
       const mode = getExecutionMode();
       const walletAddr = process.env.EVM_WALLET_ADDRESS || (walletService.hasWallet('evm') ? walletService.getEvmAddress() : 'None configured');
       const active = hub.getActiveDomains();
-      const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'KRYSTAL_CLOUD_API_KEY', 'OPENSEA_API_KEY', 'GOPLUS_API_KEY', 'UNISWAP_API_KEY', 'AI_API_KEY'];
+const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'UNISWAP_API_KEY', 'AI_API_KEY'];
       const keys = keyNames.map((k) => {
         const v = process.env[k];
         return `• \`${k}\`: ${v && !v.includes('YOUR_') && !v.includes('placeholder') && !v.includes('mock') ? '✅ SET' : '❌ not set'}`;

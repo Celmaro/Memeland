@@ -368,7 +368,7 @@ export class StrategyEngine {
 
   /**
    * Per-domain activation: each domain keeps its own active strategy, so
-   * activating meme-robinhood does NOT deactivate nft or lp-robinhood.
+   * activating meme-robinhood does NOT deactivate other domains.
    * Active map format: { [domainKey]: strategyId }.
    */
   public setActiveStrategy(domain: string, strategyId: string): { success: boolean; message: string } {

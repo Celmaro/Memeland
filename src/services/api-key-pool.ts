@@ -10,7 +10,7 @@ export interface ApiKeyPool {
 
 /** Options for {@link fetchWithKeyPool}. */
 export interface FetchWithKeyPoolOptions {
-  /** Log label prefix, e.g. `[OPENSEA]`. Used only for the rotation warning. */
+  /** Log label prefix. Used only for the rotation warning. */
   label: string;
   /** HTTP statuses that are treated as key-retryable (rotate + retry). Default `[401,402,403,429]`. */
   retryStatuses?: readonly number[];

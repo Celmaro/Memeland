@@ -7,10 +7,6 @@ import {
   StringSelectMenuInteraction,
   ButtonBuilder,
   ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  ActionRowBuilder,
 } from 'discord.js';
 import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
 import { createDashboardComponents } from '../embeds/dashboard-embed.js';
@@ -43,18 +39,6 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
       ephemeral: true,
     });
     return;
-  } else if (interaction.customId === 'api_setup_modal') {
-    const openseaKey = interaction.fields.getTextInputValue('opensea_key');
-
-    if (openseaKey) process.env.OPENSEA_API_KEY = openseaKey.trim();
-
-    await interaction.reply({
-      content:
-        `⚙️ **API Keys Successfully Configured!**\n` +
-        `• **OpenSea API:** ${openseaKey ? '`🟢 CONFIGURED`' : '`⚪ UNCHANGED`'}\n` +
-        `API configuration updated in runtime memory!`,
-      ephemeral: true,
-    });
   }
 }
 
@@ -72,25 +56,6 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction,
 
 export async function handleButtonPress(interaction: ButtonInteraction, hub: OpenCatzHub): Promise<void> {
   const customId = interaction.customId;
-
-  if (customId === 'btn_setup_api_keys') {
-    const modal = new ModalBuilder()
-      .setCustomId('api_setup_modal')
-      .setTitle('⚙️ OpenCatz API Key Setup');
-
-    const openseaInput = new TextInputBuilder()
-      .setCustomId('opensea_key')
-      .setLabel('OpenSea API Key (EVM NFT Data)')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Paste your OpenSea API Key...')
-      .setRequired(false);
-
-    const row1 = new ActionRowBuilder<TextInputBuilder>().addComponents(openseaInput);
-    modal.addComponents(row1);
-
-    await interaction.showModal(modal);
-    return;
-  }
 
   if (customId === 'btn_start_all_agents') {
     hub.setAllAgentsActive(true);

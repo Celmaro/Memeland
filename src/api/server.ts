@@ -130,7 +130,6 @@ export class OpenCatzRESTServer {
               subAgents,
               marketRegime: regime,
               connectedApiKeys: {
-                opensea: Boolean(process.env.OPENSEA_API_KEY),
                 xApiV2: Boolean(process.env.X_API_BEARER_TOKEN),
                 llm: Boolean(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY),
                 gmgn: Boolean(process.env.GMGN_API_KEY),
@@ -168,11 +167,7 @@ export class OpenCatzRESTServer {
           const ops = globalOperationalHealth.snapshot();
           const positions = {
             tokens: globalStateStore.getAllPositions().length,
-            lp: globalStateStore.getAllLpPositions().length,
-            nft: globalStateStore.getAllNftPositions().length,
-            total: globalStateStore.getAllPositions().length +
-              globalStateStore.getAllLpPositions().length +
-              globalStateStore.getAllNftPositions().length,
+            total: globalStateStore.getAllPositions().length,
           };
           res.statusCode = 200;
           res.end(
@@ -199,23 +194,16 @@ export class OpenCatzRESTServer {
         // 3. GET /api/positions (Open positions tracking)
         if (req.method === 'GET' && pathname === '/api/positions') {
           const openTokens = globalStateStore.getAllPositions();
-          const openLp = globalStateStore.getAllLpPositions();
-          const openNfts = globalStateStore.getAllNftPositions();
-          const totalCount = openTokens.length + openLp.length + openNfts.length;
           res.statusCode = 200;
           res.end(
             JSON.stringify({
               success: true,
               summary: {
-                totalPositions: totalCount,
+                totalPositions: openTokens.length,
                 tokensCount: openTokens.length,
-                lpCount: openLp.length,
-                nftCount: openNfts.length,
               },
               tokens: openTokens,
-              lpPositions: openLp,
-              nftPositions: openNfts,
-              totalCount,
+              totalCount: openTokens.length,
             })
           );
           return;

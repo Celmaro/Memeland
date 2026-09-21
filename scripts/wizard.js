@@ -235,25 +235,6 @@ const STRATEGY_DOMAINS = [
     ],
   },
   {
-    key: 'lp-robinhood',
-    label: 'Concentrated Liquidity pools (Uniswap v3 / Krystal)',
-    params: [
-      { name: 'minTvlUsd', label: 'Minimum Pool TVL (USD)', def: 10000, unit: 'USD', example: '50000 = $50k TVL' },
-      { name: 'minVol24hUsd', label: 'Minimum 24h Volume (USD)', def: 100000, unit: 'USD', example: '500000 = $500k/day' },
-      { name: 'minFeeTvlRatio24h', label: 'Minimum 24h Fee/TVL ratio (%)', def: 2, unit: '%', example: '4.0 = aggressive yield' },
-      { name: 'minMarketCapUsd', label: 'Minimum Meme-Token Market Cap (USD)', def: 100000, unit: 'USD', example: '500000 = $500k' },
-    ],
-  },
-  {
-    key: 'nft',
-    label: 'NFT collections (OpenSea)',
-    params: [
-      { name: 'minSurgePct', label: 'Minimum Floor Surge 1h (%)', def: 10, unit: '%', example: '25 = +25% in 1h' },
-      { name: 'minVolSpike', label: 'Minimum Volume Spike (x baseline)', def: 1.5, unit: 'x', example: '3.0 = 3x usual volume' },
-      { name: 'minVelocity1h', label: 'Minimum Sales Velocity (/hour)', def: 3, unit: '/h', example: '10 = 10 sales/h' },
-    ],
-  },
-  {
     key: 'whale-eth',
     label: 'ETH Whales & Smart Money (Hyperliquid)',
     params: [
@@ -280,9 +261,7 @@ async function askNumeric(promptText, def, unit, example) {
 // ctx contract (verified against the agents):
 //   meme: ctx.gmgn snake_case (volume_24h, liquidity, total_fee, native_price_usd, visiting_count)
 //         + flat ctx.volume24hUsd / ctx.liquidityUsd fallbacks
-//   nft:  ctx.nft block (floor_surge_1h_pct, volume_spike_1h_ratio, sales_velocity_1h)
-//         + flat ctx.floorSurge1hPct / ctx.volumeSpike1hRatio / ctx.salesVelocity1h fallbacks
-//   lp:   ctx.pool (tvlUsd, volume24hUsd, feesToTvlRatio24h, marketCapUsd)
+//   whale: ctx.whale / ctx.whaleReport (totalLongUsd, totalShortUsd, longCount, shortCount)
 const STRATEGY_EVALUATE_BODIES = {
   'meme-robinhood': `  evaluate(ctx) {
     const p = this.params;
@@ -298,34 +277,6 @@ const STRATEGY_EVALUATE_BODIES = {
     if (liquidity === null || liquidity < p.minLiquidityUsd) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Liquidity gate not met.' };
     if (p.minTotalFeeUsd > 0 && (totalFeeUsd === null || totalFeeUsd < p.minTotalFeeUsd)) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Total fee gate not met.' };
     if (visitingCount !== null && visitingCount < p.minVisitingCount) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Visiting count gate not met.' };
-    if (!ctx.securityAuditPassed) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Security audit failed.' };
-    return { confidence: 80, recommendedAction: 'BUY', reason: 'All custom numeric gates passed.' };
-  },`,
-  'lp-robinhood': `  evaluate(ctx) {
-    const p = this.params;
-    const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
-    const pool = ctx.pool || {};
-    const tvl = num(pool.tvlUsd ?? ctx.liquidityUsd);
-    const vol24h = num(pool.volume24hUsd ?? ctx.volume24hUsd);
-    const feeTvl = num(pool.feesToTvlRatio24h);
-    const mc = num(pool.marketCapUsd);
-    if (tvl === null || tvl < p.minTvlUsd) return { confidence: 0, recommendedAction: 'SKIP', reason: 'TVL gate not met.' };
-    if (vol24h === null || vol24h < p.minVol24hUsd) return { confidence: 0, recommendedAction: 'SKIP', reason: '24h volume gate not met.' };
-    if (feeTvl === null || feeTvl < p.minFeeTvlRatio24h) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Fee/TVL gate not met.' };
-    if (mc === null || mc < p.minMarketCapUsd) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Market cap gate not met.' };
-    if (!ctx.securityAuditPassed) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Security audit failed.' };
-    return { confidence: 80, recommendedAction: 'BUY', reason: 'All custom numeric gates passed.' };
-  },`,
-  nft: `  evaluate(ctx) {
-    const p = this.params;
-    const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
-    const n = ctx.nft || {};
-    const surge = num(n.floor_surge_1h_pct ?? ctx.floorSurge1hPct);
-    const volSpike = num(n.volume_spike_1h_ratio ?? ctx.volumeSpike1hRatio);
-    const velocity = num(n.sales_velocity_1h ?? ctx.salesVelocity1h);
-    if (surge === null || surge < p.minSurgePct) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Floor surge gate not met.' };
-    if (volSpike === null || volSpike < p.minVolSpike) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Volume spike gate not met.' };
-    if (velocity === null || velocity < p.minVelocity1h) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Sales velocity gate not met.' };
     if (!ctx.securityAuditPassed) return { confidence: 0, recommendedAction: 'SKIP', reason: 'Security audit failed.' };
     return { confidence: 80, recommendedAction: 'BUY', reason: 'All custom numeric gates passed.' };
   },`,
@@ -348,17 +299,14 @@ const STRATEGY_EVALUATE_BODIES = {
 function buildCustomStrategyModule(domainKey, params, label) {
   const lines = [];
   for (const p of params) {
-    // Fee/TVL is collected as a PERCENT (editor default 2 = 2%); strategies
-    // compare against a 0-1 ratio, so the entered percent is divided by 100.
-    const isFeeTvlPct = domainKey === 'lp-robinhood' && p.name === 'minFeeTvlRatio24h';
-    lines.push(`    ${p.name}: ${isFeeTvlPct ? `${p.value} / 100` : p.value},`);
+    lines.push(`    ${p.name}: ${p.value},`);
   }
   const evaluateBody = STRATEGY_EVALUATE_BODIES[domainKey] || STRATEGY_EVALUATE_BODIES['meme-robinhood'];
   return `export default {
   id: '${domainKey}-custom',
   name: '${label} (Custom)',
   version: '1.0.0',
-  description: 'Custom numeric strategy generated from the onboarding wizard (real GMGN/pool/nft ctx fields, fail-closed).',
+  description: 'Custom numeric strategy generated from the onboarding wizard (real GMGN/whale ctx fields, fail-closed).',
   params: {
     passThreshold: 80,
 ${lines.join('\n')}
@@ -381,20 +329,16 @@ async function askStrategyConfig() {
   console.log('   [2] Standard — strict thresholds (previous defaults)');
   console.log('   [3] Custom Prompt — describe your ideal screening strategy in plain English/Indonesian;');
   console.log('       OpenCatz writes the code after deploy (auto on first boot, re-runnable anytime via chat)');
-  console.log('   [4] Advanced — edit filter numbers per agent directly (Meme, LP, OpenSea NFT, Whale ETH)');
+  console.log('   [4] Advanced — edit filter numbers per agent directly (Meme, Whale ETH)');
   const choice = (await askQuestion('   Choice [Default 1]: ')) || '1';
 
   const activeMap = {};
   const domainDefaults = {
     'meme-robinhood': 'meme-robinhood-default',
-    'lp-robinhood': 'lp-robinhood-default',
-    nft: 'nft-default',
     'whale-eth': 'whale-eth-default',
   };
   const domainStandard = {
     'meme-robinhood': 'meme-robinhood-standard',
-    'lp-robinhood': 'lp-robinhood-standard',
-    nft: 'nft-standard',
     'whale-eth': 'whale-eth-standard',
   };
 
@@ -603,8 +547,6 @@ ${C.cyan}Robinhood Chain Multi-Agent Trading Swarm (EVM L2 #4663)${C.reset}
   console.log(` ${C.cyan}${C.bold}📊 STEP 5: MARKET DATA & SECURITY APIS${C.reset}`);
   const gmgn = await askKeyWithBackup('GMGN', 'GMGN_API_KEY (smart-money/rank/security)', existingEnv.GMGN_API_KEY || '', true);
   const gmgnRh = { value: (await askQuestion(`  GMGN_API_KEY_ROBINHOOD (optional — dedicated robinhood key) [Default: ${existingEnv.GMGN_API_KEY_ROBINHOOD ? 'set' : 'none'}]: `)).trim() || existingEnv.GMGN_API_KEY_ROBINHOOD || '' };
-  const krystal = await askKeyWithBackup('Krystal Cloud', 'KRYSTAL_CLOUD_API_KEY (LP pool data — mandatory for LP agent)', existingEnv.KRYSTAL_CLOUD_API_KEY || '', true);
-  const opensea = await askKeyWithBackup('OpenSea', 'OPENSEA_API_KEY (NFT floor & rarity — mandatory for NFT agent)', existingEnv.OPENSEA_API_KEY || '', true);
   const goplus = await askKeyWithBackup('GoPlus', 'GOPLUS_API_KEY (EVM security audit — mandatory for /audit)', existingEnv.GOPLUS_API_KEY || '', true);
   const uniswap = await askKeyWithBackup('Uniswap V3 API', 'UNISWAP_API_KEY (Uniswap V3 Developer API — required for real-market quotes in DRY_RUN & AUTO_EXECUTE)', existingEnv.UNISWAP_API_KEY || '', false);
 
@@ -698,10 +640,6 @@ ${C.cyan}Robinhood Chain Multi-Agent Trading Swarm (EVM L2 #4663)${C.reset}
     GMGN_API_KEY: gmgn.value.trim(),
     GMGN_API_KEY_ROBINHOOD: gmgnRh.value.trim(),
     GMGN_BACKUP_KEYS: gmgn.backups.join(','),
-    KRYSTAL_CLOUD_API_KEY: krystal.value.trim(),
-    KRYSTAL_CLOUD_BACKUP_KEYS: krystal.backups.join(','),
-    OPENSEA_API_KEY: opensea.value.trim(),
-    OPENSEA_BACKUP_KEYS: opensea.backups.join(','),
     GOPLUS_API_KEY: goplus.value.trim(),
     GOPLUS_BACKUP_KEYS: goplus.backups.join(','),
     UNISWAP_API_KEY: uniswap.value.trim(),
@@ -739,8 +677,6 @@ ${C.cyan}Robinhood Chain Multi-Agent Trading Swarm (EVM L2 #4663)${C.reset}
     ['AI Provider', `${provider} (${modelName})`],
     ['AI Keys', `${allKeys.length} total (${backupCfgEntries.length} backup)`],
     ['GMGN', gmgn.value ? `${C.green}✓${C.reset} +${gmgn.backups.length} backup` : `${C.red}✗${C.reset}`],
-    ['Krystal', krystal.value ? `${C.green}✓${C.reset} +${krystal.backups.length} backup` : `${C.red}✗${C.reset}`],
-    ['OpenSea', opensea.value ? `${C.green}✓${C.reset} +${opensea.backups.length} backup` : `${C.red}✗${C.reset}`],
     ['GoPlus', goplus.value ? `${C.green}✓${C.reset} +${goplus.backups.length} backup` : `${C.red}✗${C.reset}`],
     ['Uniswap', uniswap.value ? `${C.green}✓${C.reset} +${uniswap.backups.length} backup` : `${C.dim}–${C.reset} optional`],
     ['Robinhood RPC', evmRobinhoodRpcUrl],

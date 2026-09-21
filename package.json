@@ -37,7 +37,6 @@
   "homepage": "https://github.com/Celmaro/Memeland",
   "keywords": [
     "opencatz",
-    "nft-screening",
     "robinhood-chain",
     "robinhood-l2",
     "evm",
@@ -49,9 +48,7 @@
     "trading-bot",
     "uniswap-v3",
     "gmgn",
-    "krystal-cloud",
-    "goplus",
-    "nft-sniper"
+    "goplus"
   ],
   "author": "Celmaro",
   "license": "MIT",

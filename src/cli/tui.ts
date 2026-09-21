@@ -81,7 +81,7 @@ export async function launchTUI(): Promise<void> {
     console.log(`${C.lime}------------------------------------------------------------------------${C.reset}`);
     console.log(` ${C.green}[1]${C.reset} 🔑 Burner Wallet & Treasury Manager (View / Import PK / Withdraw)`);
     console.log(` ${C.green}[2]${C.reset} 🔍 On-Demand 3-Layer Swarm Token Audit (Paste Contract Address)`);
-    console.log(` ${C.green}[3]${C.reset} ⚡ Background Screening Control (Meme · LP · NFT · Alpha)`);
+    console.log(` ${C.green}[3]${C.reset} ⚡ Background Screening Control (Meme · Alpha · Whale)`);
     console.log(` ${C.green}[4]${C.reset} 🧠 Command Room Oracle Chat (Natural Language AI Agent Loop)`);
     console.log(` ${C.green}[5]${C.reset} ⚙️ Global Risk Management (9-Lives Shield · Drawdown Safeguards)`);
     console.log(` ${C.green}[6]${C.reset} 📊 Trade Journal & Analytics (Realized PnL · Win Rate)`);
@@ -89,7 +89,7 @@ export async function launchTUI(): Promise<void> {
     console.log(` ${C.green}[8]${C.reset} ▶️ Run Screening Pass (Trigger Instant On-Demand Pass)`);
     console.log(` ${C.green}[9]${C.reset} 🎯 Strategy Preset Selector & Custom Strategy Compiler`);
     console.log(` ${C.green}[A]${C.reset} 🔔 Price Alerts Manager (Custom Price Triggers)`);
-    console.log(` ${C.green}[P]${C.reset} 💼 Open Positions & Portfolio Scanner (Meme · LP · NFT)`);
+    console.log(` ${C.green}[P]${C.reset} 💼 Open Positions & Portfolio Scanner (Meme)`);
     console.log(` ${C.red}[0]${C.reset} ❌ Exit OpenCatz Command Center`);
     console.log(`${C.lime}------------------------------------------------------------------------${C.reset}`);
 
@@ -366,20 +366,10 @@ Current Operating Parameters:
         console.clear();
         console.log(`${C.cyan}=== 💼 OPEN POSITIONS & PORTFOLIO SCANNER ===${C.reset}`);
         const positions = stateStore.getAllPositions();
-        const lpPositions = stateStore.getAllLpPositions();
-        const nftPositions = stateStore.getAllNftPositions();
 
         console.log(`\n• 🌸 Meme Token Holdings (${positions.length}):`);
         if (positions.length === 0) console.log('   (No active meme token holdings)');
         else positions.forEach(p => console.log(`   - ${p.symbol}: Entry $${p.entryPriceUsd} | Current $${p.currentPriceUsd} | High $${p.highWaterMarkUsd}`));
-
-        console.log(`\n• 🌊 Active Concentrated LP Positions (${lpPositions.length}):`);
-        if (lpPositions.length === 0) console.log('   (No active LP positions)');
-        else lpPositions.forEach(lp => console.log(`   - ${lp.pairName} (${lp.poolAddress}): Fees/TVL ${lp.currentFeesToTvlRatio4h}% | OutOfRange: ${lp.isOutOfRange ? 'YES' : 'NO'}`));
-
-        console.log(`\n• 🔮 Active NFT Floor Trackers (${nftPositions.length}):`);
-        if (nftPositions.length === 0) console.log('   (No active NFT floor trackers)');
-        else nftPositions.forEach(nft => console.log(`   - ${nft.collectionName}: Entry ${nft.entryFloorEth} ETH | Current ${nft.currentFloorEth} ETH | Peak ${nft.highestFloorEth} ETH`));
 
         await prompt(`\n${C.yellow}Press Enter to return to OpenCatz Command Center...${C.reset}`);
         break;

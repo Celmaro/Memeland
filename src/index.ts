@@ -168,8 +168,6 @@ async function notifyControlRoom(client: any, key: string, content: string): Pro
 const positionManager = new PositionManager();
 positionManager.attachStateStore(stateStore);
 positionManager.attachOpportunityLedger(opportunityLedger);
-const { PositionScanner } = await import('./services/position-scanner.js');
-const positionScanner = new PositionScanner({ positionManager, walletService, stateStore });
 
 // Wallet auto-tracker: mirrors user's on-chain holdings into PositionManager lifecycle + exit alerts
 const walletTracker = new WalletTracker({ positionManager, stateStore, gmgn: new GMGNAdapter(), walletService, tradeJournal: tradeJournalService });
@@ -583,16 +581,13 @@ const runScreeningCycle = async () => {
     // Wallet Auto-Tracking: detect user's own positions + exit alerts
     try {
       const alerts = await walletTracker.syncPositions();
-      // PositionScanner: robinhood chain spot/LP positions (Robinhood Chain)
-      const scannerAlerts = await positionScanner.scanAll();
-      const allAlerts = [...alerts, ...scannerAlerts];
-      if (allAlerts.length > 0) {
-        for (const a of allAlerts) {
+      if (alerts.length > 0) {
+        for (const a of alerts) {
           globalOperationalHealth.recordAlert('POSITION_EXIT', `Position alert`, a.reason);
           await notifyControlRoom(activeClient, `position:${a.type}:${a.address}`, `🚨 **POSITION ALERT**\n${a.reason}`);
         }
       }
-      console.log(`[POSITION MONITOR] ${positionManager.getActivePositions().length} spot + ${positionManager.getActiveLpPositions().length} LP + ${positionManager.getActiveNftPositions().length} NFT positions tracked, ${allAlerts.length} alert(s) fired this cycle.`);
+      console.log(`[POSITION MONITOR] ${positionManager.getActivePositions().length} spot positions tracked, ${alerts.length} alert(s) fired this cycle.`);
     } catch (wtErr: any) {
       console.warn(`[POSITION MONITOR] sync failed this cycle: ${wtErr.message}`);
     }
@@ -600,9 +595,7 @@ const runScreeningCycle = async () => {
     const currentFunnelSnapshot = globalOperationalHealth.snapshot().funnel;
     const nextOperationalFunnel = mergeOperationalFunnel(currentFunnelSnapshot, cycleOperationalFunnel);
     nextOperationalFunnel.positionsMonitored =
-      positionManager.getActivePositions().length +
-      positionManager.getActiveLpPositions().length +
-      positionManager.getActiveNftPositions().length;
+      positionManager.getActivePositions().length;
     globalOperationalHealth.setFunnel(nextOperationalFunnel);
     globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: false, lastCompletedAt: Date.now() });
 

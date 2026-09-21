@@ -29,8 +29,6 @@ export function buildCallEmbed(payload: CallSignalPayload, options: { approvalOr
   // OpenCatz Master Color Palette
   const colorMap: Record<CallSignalPayload['domain'], number> = {
     MEME_ROBINHOOD: 0xffb7b2,  // Pastel Pink
-    NFT: 0xd6c7ff,             // Lavender Purple
-    LP_ROBINHOOD: 0x80deea,    // Retro Cyan
     ALPHA_ROBINHOOD: 0xfff59d, // Pastel Yellow
     WHALE_ETH: 0x4fc3f7,       // Whale Sky Blue
   };
@@ -100,130 +98,6 @@ export function buildCallEmbed(payload: CallSignalPayload, options: { approvalOr
         .setCustomId('pause_channel_whale-eth')
         .setLabel('⏸️ Pause Whale Tracking')
         .setStyle(ButtonStyle.Secondary)
-    );
-
-    return { embeds: [embed], components: [buttonsRow] };
-  }
-
-  // ==========================================
-  // DOMAIN: CONCENTRATED LIQUIDITY (LP_ROBINHOOD)
-  // ==========================================
-  if (payload.domain === 'LP_ROBINHOOD') {
-    embed.setTitle(`💧 OPENCATZ ROBINHOOD LP OPPORTUNITY: ${payload.title}`);
-
-    if (payload.contractAddress) {
-      embed.addFields({ name: '📍 Pool Address', value: `\`${payload.contractAddress}\``, inline: false });
-    }
-
-    embed.addFields(
-      { name: 'Network', value: payload.network, inline: true },
-      { name: 'Pool TVL', value: payload.marketCap || payload.liquidity || 'N/A', inline: true },
-      { name: 'Est. 24h Fee APR', value: payload.feeApr || 'N/A', inline: true }
-    );
-
-    const token0Line = payload.token0Address
-      ? `\`${payload.token0Address}\`\n🔗 [Chart DexScreener](${payload.token0ChartUrl ?? '#'})${payload.gmgnUrl ? ` • [GMGN](${payload.gmgnUrl})` : ''}`
-      : 'N/A';
-    const token1Line = payload.token1Address
-      ? `\`${payload.token1Address}\`\n🔗 [Chart DexScreener](${payload.token1ChartUrl ?? '#'})`
-      : 'N/A';
-    embed.addFields(
-      { name: `🪙 ${payload.token0Symbol || 'Token X'} (CA)`, value: token0Line, inline: false },
-      { name: `🪙 ${payload.token1Symbol || 'Token Y'} (CA)`, value: token1Line, inline: false }
-    );
-
-    const token0Detail: string[] = [];
-    if (payload.token0PriceUsd !== undefined) token0Detail.push(`💰 Price **$${payload.token0PriceUsd.toFixed(8)}**`);
-    if (payload.token0MarketCapUsd !== undefined) token0Detail.push(`📈 MC **$${(payload.token0MarketCapUsd / 1000).toFixed(1)}k**`);
-    if (payload.token0Volume24hUsd !== undefined) token0Detail.push(`💦 24h Vol **$${(payload.token0Volume24hUsd / 1000).toFixed(1)}k**`);
-    if (payload.token0Holders !== undefined) token0Detail.push(`👥 Holders **${payload.token0Holders.toLocaleString()}**`);
-    if (payload.token0AgeHours !== undefined) token0Detail.push(`🎂 Age **${payload.token0AgeHours.toFixed(1)}h**`);
-    if (payload.token0SmartDegenCount !== undefined && payload.token0SmartDegenCount > 0) token0Detail.push(`🧠 Smart+KOL **${payload.token0SmartDegenCount}**`);
-    if (token0Detail.length > 0) {
-      embed.addFields({ name: `📊 Detail ${payload.token0Symbol || 'Token X'}`, value: token0Detail.join(' • '), inline: false });
-    }
-
-    if (payload.securityScore) {
-      embed.addFields({ name: '🛡️ Token Security (GMGN)', value: sanitizeEmbedField(payload.securityScore, 250), inline: false });
-    }
-
-    if (payload.lpStrategy) {
-      embed.addFields({ name: '🎯 Recommended LP Range & Strategy', value: payload.lpStrategy, inline: false });
-    }
-
-    embed.addFields({ name: '💡 LP Yield AI Thesis', value: payload.aiThesis, inline: false });
-
-    buttonsRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId('pause_channel_lp-robinhood')
-        .setLabel('⏸️ Pause LP Screening')
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-    if (payload.poolUrl) {
-      buttonsRow.addComponents(
-        new ButtonBuilder()
-          .setLabel('🌐 View on Uniswap')
-          .setURL(payload.poolUrl)
-          .setStyle(ButtonStyle.Link)
-      );
-    }
-
-    if (payload.krystalUrl) {
-      buttonsRow.addComponents(
-        new ButtonBuilder()
-          .setLabel('🔍 View on Krystal')
-          .setURL(payload.krystalUrl)
-          .setStyle(ButtonStyle.Link)
-      );
-    }
-
-    if (payload.token0ChartUrl) {
-      buttonsRow.addComponents(
-        new ButtonBuilder()
-          .setLabel(`📊 Chart ${payload.token0Symbol || 'Token X'}`)
-          .setURL(payload.token0ChartUrl)
-          .setStyle(ButtonStyle.Link)
-      );
-    }
-
-    return { embeds: [embed], components: [buttonsRow] };
-  }
-
-  // ==========================================
-  // DOMAIN: NFT SNIPING (OPENSEA)
-  // ==========================================
-  if (payload.domain === 'NFT') {
-    embed.setTitle(`🖼️ OPENCATZ NFT SNIPE ALERT: ${sanitizeEmbedField(payload.title, 150)} • [${confidenceStr}]`);
-
-    const safeNftSymbol = sanitizeEmbedField(payload.symbol, 40);
-    const safeNetwork = sanitizeEmbedField(payload.network, 20) || 'N/A';
-    embed.addFields(
-      { name: 'Collection', value: safeNftSymbol || 'N/A', inline: true },
-      { name: '⛓️ Chain', value: safeNetwork, inline: true },
-      { name: 'Price & Floor', value: sanitizeEmbedField(payload.priceUsd, 40) || 'N/A', inline: true },
-      { name: 'Market Info', value: sanitizeEmbedField(payload.marketCap, 80) || 'N/A', inline: true },
-      { name: '💡 NFT Rarity & Floor AI Thesis', value: sanitizeEmbedField(payload.aiThesis, 500), inline: false }
-    );
-
-    if (payload.tokenVerified !== undefined) {
-      embed.addFields({
-        name: '✅ Verification Status',
-        value: payload.tokenVerified ? '✅ **Verified** (OpenSea blue check)' : '⚠️ **Unverified** — DYOR, higher risk',
-        inline: true,
-      });
-    }
-
-    const openseaUrl = payload.dexScreenerUrl || 'https://opensea.io';
-    buttonsRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId('pause_channel_nft')
-        .setLabel('⏸️ Pause NFT Screening')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setLabel('📊 View Collection on OpenSea')
-        .setURL(openseaUrl)
-        .setStyle(ButtonStyle.Link)
     );
 
     return { embeds: [embed], components: [buttonsRow] };

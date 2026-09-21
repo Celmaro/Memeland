@@ -1,4 +1,4 @@
-export type CallDomain = 'MEME_ROBINHOOD' | 'NFT' | 'LP_ROBINHOOD' | 'ALPHA_ROBINHOOD' | 'WHALE_ETH';
+export type CallDomain = 'MEME_ROBINHOOD' | 'ALPHA_ROBINHOOD' | 'WHALE_ETH';
 
 /** Whale tracking: a single open position >= threshold belonging to one smart trader. */
 export interface WhaleTraderEntry {
@@ -43,8 +43,6 @@ export interface CallCardPayload {
   volume1h?: string;
   volume24h?: string;
   txRatio?: string;
-  feeApr?: string;
-  lpStrategy?: string;
   top10Pct?: string;
   devHoldingPct?: string;
   sniperPct?: string;
@@ -59,7 +57,6 @@ export interface CallCardPayload {
   gmgnUrl?: string;
   goplusUrl?: string;
   poolUrl?: string;
-  krystalUrl?: string;
   token0Address?: string;
   token1Address?: string;
   token0Symbol?: string;

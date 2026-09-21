@@ -26,7 +26,7 @@ Autonomous Multi-Agent Crypto Intelligence & On-Chain Trading Engine
 
 **OpenCatz AI (Robinhood Chain Edition)** is an autonomous, open-source **Agentic AI Crypto Intelligence & Trading Ecosystem** built exclusively for **Robinhood Chain (EVM L2, Chain ID #4663, Native ETH)**.
 
-It coordinates **5 Specialist AI Scouts** across DEX tokens (Uniswap V3), concentrated liquidity pools (Krystal Cloud), NFTs (OpenSea), social sentiment (X API), and institutional ETH perps (Hyperliquid), governed by a **3-Layer Swarm Consensus Protocol (≥ 80% Confidence Gate)** and the **9-Lives Automated Risk Engine**.
+It coordinates **3 Specialist AI Scouts** across DEX tokens (Uniswap V3), social sentiment (X API), and institutional ETH perps (Hyperliquid), governed by a **3-Layer Swarm Consensus Protocol (≥ 80% Confidence Gate)** and the **9-Lives Automated Risk Engine**.
 
 [Robinhood Portal](https://opencatz.xyz/robinhood-chain) · [Global Web Portal](https://opencatz.xyz) · [Discord Community](https://discord.gg/5HMy95ZHuY) · [Twitter (@pxidentities)](https://x.com/pxidentities/) · [Docs](https://opencatz.xyz/docs)
 
@@ -60,7 +60,7 @@ bash setup.sh       # Linux / macOS
 The interactive wizard will guide you through:
 1. Setting up your **Discord Bot Token** and **Client ID**.
 2. Selecting your **AI LLM Provider** (OpenRouter, Claude, GPT-4, DeepSeek, Z.ai).
-3. Configuring Web3 API keys (GMGN, OpenSea, Krystal Cloud, Twitter API).
+3. Configuring Web3 API keys (GMGN, Twitter API, GoPlus, Uniswap).
 4. Auto-testing your connection to **Robinhood Chain RPC (`https://rpc.robinhood.com`)**.
 
 ### 3. Launch OpenCatz
@@ -94,21 +94,13 @@ opencatz deploy
     ┌───────────────────────────────┼───────────────────────────────┐
     ▼                               ▼                               ▼
 ┌─────────────────────────┐ ┌─────────────────────────┐ ┌─────────────────────────┐
-│  ROBINHOOD MEME SCOUT   │ │  ROBINHOOD LP YIELD     │ │  ROBINHOOD NFT SCOUT    │
-│  Uniswap V3 / GMGN      │ │  Krystal Cloud / Uniswap│ │  OpenSea Robinhood      │
-│  GoPlus Security Audit  │ │  Concentrated Liquidity │ │  Floor Surges & Mints   │
+│  ROBINHOOD MEME SCOUT   │ │  ALPHA & SENTIMENT      │ │  HYPERLIQUID ETH WHALE  │
+│  Uniswap V3 / GMGN      │ │  Twitter/X API v2       │ │  Institutional Perps &  │
+│  GoPlus Security Audit  │ │  Robinhood Smart Money  │ │  Spot Order Flow        │
 └───────────┬─────────────┘ └───────────┬─────────────┘ └───────────┬─────────────┘
             │                           │                           │
             └───────────────────────────┼───────────────────────────┘
                                         │
-    ┌───────────────────────────────────┴───────────────────────────────────┐
-    ▼                                                                       ▼
-┌─────────────────────────┐                             ┌─────────────────────────┐
-│  ALPHA & SENTIMENT      │                             │  HYPERLIQUID ETH WHALE  │
-│  Twitter/X API v2       │                             │  Institutional Perps &  │
-│  Robinhood Smart Money  │                             │  Spot Order Flow        │
-└───────────┬─────────────┘                             └───────────┬─────────────┘
-            └───────────────────────────┬───────────────────────────┘
                                         │ Candidate Opportunities
                                         ▼
                       ┌───────────────────────────────────┐
@@ -125,20 +117,18 @@ opencatz deploy
 ```
 
 - **Core Hub & Orchestrator:** Natural language chat, wallet balances, risk limits, and on-demand token audits.
-- **5 Specialist Scouts:** Autonomous agents monitoring DEX tokens, LP pools, NFTs, social sentiment, and ETH whale perps.
+- **3 Specialist Scouts:** Autonomous agents monitoring DEX tokens, social sentiment, and ETH whale perps.
 - **Collaborative Consensus:** 3-layer cross-verification demanding a **$\ge 80\%$ confidence score** before delivering call cards.
 - **9-Lives Risk Engine:** Dynamic capital protection (-20% stop-loss, 2x/3x take-profit ladder, trailing stops).
 - **Universal Multi-Key Pool:** Automatic rotation on HTTP 429/401/403 across unlimited backup keys.
 
 ---
 
-## 🤖 5 Specialist AI Scouts (Robinhood Chain)
+## 🤖 3 Specialist AI Scouts (Robinhood Chain)
 
 | Scout | Channel | Scope & Data Sources | Target Metrics |
 | :--- | :--- | :--- | :--- |
 | **🏹 Robinhood Meme Scout** | `#call-meme-robinhood` | Robinhood Chain DEX tokens via GMGN + GoPlus Security | 24h Vol $\ge \$25\text{k}$, Liq $\ge \$5\text{k}$, 0% Honeypot |
-| **💧 Robinhood LP Yield Scout** | `#call-lp-robinhood` | Uniswap V3 concentrated liquidity pools via Krystal Cloud | TVL $\ge \$10\text{k}$, 24h Fee/TVL $\ge 2\%$, Vol $\ge \$100\text{k}$ |
-| **🔮 Robinhood NFT Scout** | `#call-nft-robinhood` | OpenSea Robinhood Chain NFT collections & floor momentum | Floor surge $\ge +10\%/1\text{h}$, Vol spike $\ge 1.5\text{x}$, Sales $\ge 3/\text{h}$ |
 | **☀️ Alpha & Sentiment Scout** | `#call-alpha-robinhood` | Twitter/X API v2 smart CT alpha & social sentiment | Viral sentiment, influencer mentions, airdrop threads |
 | **🐋 Hyperliquid ETH Whale** | `#call-whale-eth` | Hyperliquid L1 institutional ETH perps & spot order flow | Perps $\ge \$500\text{k}$, Spot $\ge \$50\text{k}$, funding divergence |
 
@@ -173,7 +163,7 @@ opencatz deploy
 ### 🔎 Screening, Audits & Intelligence
 | Command | Subcommands / Options | Description |
 | :--- | :--- | :--- |
-| `/screening` | `start` / `stop` / `status` / `trigger` | Control 24/7 background AI scouts across all 5 specialist channels |
+| `/screening` | `start` / `stop` / `status` / `trigger` | Control 24/7 background AI scouts across all 3 specialist channels |
 | `/analyze` | `contract:<address>` | Forces an on-demand 12-point security, rug-check, and liquidity audit |
 | `/pump` | `contract:<address>` | Token bonding curve progress & Uniswap graduation tracker |
 | `/holders` | `contract:<address>` | Top token holders audit, cluster detection & insider ownership |
