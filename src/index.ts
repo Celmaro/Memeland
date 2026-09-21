@@ -5,6 +5,7 @@ import { buildCallEmbed } from './discord/embeds/call-embed.js';
 import { OpenCatzHub } from './orchestrator/hub.js';
 import { dispatchDomain } from './orchestrator/dispatch.js';
 import { SwarmConsensusEngine } from './orchestrator/swarm-consensus.js';
+import type { Regime } from './orchestrator/swarm-guards.js';
 import { StrategyEngine } from './orchestrator/strategy-engine.js';
 import { PositionManager } from './position/position-manager.js';
 import { AIService } from './services/ai-service.js';
@@ -82,6 +83,10 @@ SwarmConsensusEngine.setStrategyProvider((domain: string) => strategyEngine.getA
 hub.setStrategyProvider((domain: string) => strategyEngine.getActiveStrategy(domain));
 
 function gateSignal(payload: any): boolean {
+  // Kernel B — feed the prism-insight regime and azimuth sticky-conviction keys
+  // into the consensus guard so the regime floor and conviction hold live.
+  const regimeRaw = globalMarketRegimeFilter.getRegime().regime;
+  const regime: Regime = regimeRaw === 'SIDEWAYS_CHOP' ? 'CHOP' : (regimeRaw as Regime);
   const res = swarmEngine.evaluateSignal({
     symbol: payload.symbol || 'CUSTOM',
     domain: payload.domain || 'MEME_ROBINHOOD',
@@ -94,6 +99,8 @@ function gateSignal(payload: any): boolean {
     // Arch-3 7-voter swarm: when the agent attached per-voter scores, the gate
     // re-derives confidence from the weighted average (voters.ts).
     voterScores: payload.voterScores || undefined,
+    regime,
+    stickyKey: `${payload.domain || 'MEME_ROBINHOOD'}:${payload.network || 'chain'}:${payload.symbol || 'CUSTOM'}`.toUpperCase(),
   });
   if (!res.passed) {
     const refusal = res.decision && !res.decision.allowed ? ` [${res.decision.refusal}]` : '';
