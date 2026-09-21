@@ -1,4 +1,5 @@
 import { StateStore, type ApprovalOrder } from './state-store.js';
+import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
 
 export interface ApprovalOrderInput {
   domain: string;
@@ -32,12 +33,14 @@ export interface AutoGateResult {
  */
 export class ApprovalQueueService {
   private stateStore: StateStore | null = null;
+  private readonly ledger: DecisionLedger;
 
   /** Default floor for unlocking AUTO: N approved fills (Arch 5 / handoff §1). */
   private readonly minApprovedFills: number;
 
-  constructor(opts: { minApprovedFills?: number } = {}) {
+  constructor(opts: { minApprovedFills?: number; decisionLedger?: DecisionLedger } = {}) {
     this.minApprovedFills = opts.minApprovedFills ?? 50;
+    this.ledger = opts.decisionLedger ?? new DecisionLedger();
   }
 
   public attachStateStore(store: StateStore): void {
@@ -103,6 +106,18 @@ export class ApprovalQueueService {
     order.decidedBy = decidedBy;
     store.updateApprovalOrder(order);
     store.incrementFunnel(order.domain, 'approved');
+    const price = order.entryPriceUsd || 0;
+    const proposal: TradeProposal = {
+      agent: decidedBy || 'operator',
+      nonce: order.id,
+      symbol: order.symbol,
+      chain: order.chain,
+      side: 'BUY',
+      sizeEth: price > 0 ? order.suggestedSizeUsd / price : 0,
+      maxSizeEth: price > 0 ? order.suggestedSizeUsd / price : 0,
+      confidence: (order.confidence || 0) / 100,
+    };
+    this.ledger.recordProposed(proposal);
     return order;
   }
 

@@ -230,3 +230,6 @@ export class DecisionLedger {
     return broken ? 'HOLD' : 'BUY';
   }
 }
+
+/** Live-process audit ledger used by the shared execution/AUTO path. */
+export const globalDecisionLedger = new DecisionLedger();

@@ -4,6 +4,7 @@ import path from 'path';
 import { StateStore } from '../src/services/state-store.js';
 import { TradeJournalService } from '../src/services/trade-journal-service.js';
 import { executeMemeBuy } from '../src/services/approval-execution.js';
+import { DecisionLedger } from '../src/services/decision-ledger.js';
 import type { EVMTradeAdapter } from '../src/adapters/evm-adapter.js';
 import type { WalletService } from '../src/services/wallet-service.js';
 
@@ -70,6 +71,27 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     expect(entry.status).toBe('OPEN');
     expect(entry.strategyUsed).toBe('approval-approved');
     expect(entry.positionSizeUsd).toBeCloseTo(0.05); // 0.1 ETH * $0.5
+  });
+
+  it('records proposed and confirmed send events on the decision ledger', async () => {
+    const { journal, evm, wallet } = makeDeps();
+    const ledger = new DecisionLedger();
+    const res = await executeMemeBuy({
+      evm,
+      wallet,
+      journal,
+      onExecuted: vi.fn(),
+      ledger,
+      symbol: 'TEST',
+      contractAddress: '0xabc',
+      entryPriceUsd: 0.5,
+      amountEth: 0.1,
+      confidence: 85,
+      thesis: '',
+    });
+    expect(res.success).toBe(true);
+    expect(ledger.audit.some((e) => e.kind === 'proposed' && e.symbol === 'TEST')).toBe(true);
+    expect(ledger.audit.some((e) => e.kind === 'send' && e.outcome === 'confirmed')).toBe(true);
   });
 
   it('still journals and bumps the funnel even when the EVM fill reports failure (audit trail)', async () => {

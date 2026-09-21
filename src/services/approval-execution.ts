@@ -7,6 +7,7 @@
 import type { EVMTradeAdapter } from '../adapters/evm-adapter.js';
 import type { WalletService } from './wallet-service.js';
 import type { TradeJournalService } from './trade-journal-service.js';
+import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
 
 export interface ExecuteMemeBuyOptions {
   evm: EVMTradeAdapter;
@@ -40,6 +41,8 @@ export interface ExecuteMemeBuyOptions {
   governance?: { reserve(order: { nonce: string; payload: string }): { reserved: boolean; reason?: string }; issue(order: { nonce: string; payload: string }): { valid: boolean; reason?: string } };
   /** Q09 executor-DI. When provided, the buy is routed through this executor instead of the raw EVM adapter. */
   executor?: { submit(req: { token: string; chainId: number; side: 'buy'; amountUsd: number; timeoutMs?: number }): Promise<{ outcome: 'confirmed' | 'failed' | 'timed_out'; txHash?: string; reason?: string; at: number }> };
+  /** Decision ledger audit hook: proposal + send reconciliation for the shared fill path. */
+  ledger?: DecisionLedger;
 }
 
 export interface ExecuteMemeBuyResult {
@@ -79,6 +82,19 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
       error: `no execution adapter for chain '${chain}' — fail-closed (robinhood only)`,
     };
   }
+
+  const nonce = `${opts.contractAddress}:${opts.symbol}:${Date.now()}`;
+  const proposal: TradeProposal = {
+    agent: opts.strategyUsed || 'auto-execute',
+    nonce,
+    symbol: opts.symbol,
+    chain,
+    side: 'BUY',
+    sizeEth: opts.amountEth,
+    maxSizeEth: opts.amountEth,
+    confidence: (opts.confidence || 0) / 100,
+  };
+  opts.ledger?.recordProposed(proposal);
 
   // ── Q15 fail-closed safety gate ─────────────────────────────────────────
   // When a safe-config registry is injected, an explicit-safe config must be
@@ -129,7 +145,6 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
 
   // ── Q11 execution governance (idempotent reservation + hash-locked receipt) ──
   if (opts.governance) {
-    const nonce = `${opts.contractAddress}:${opts.symbol}:${Date.now()}`;
     const payload = JSON.stringify({ chain, token: opts.contractAddress, amountUsd: desiredUsd });
     const reserved = opts.governance.reserve({ nonce, payload });
     if (!reserved.reserved) {
@@ -188,6 +203,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     });
 
     opts.onExecuted();
+    opts.ledger?.recordSend(nonce, execRes.success ? 'confirmed' : 'failed');
     return {
       success: execRes.success,
       simulated: execRes.simulated,

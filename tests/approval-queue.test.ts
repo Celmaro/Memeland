@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { StateStore } from '../src/services/state-store.js';
 import { ApprovalQueueService } from '../src/services/approval-queue-service.js';
+import { DecisionLedger } from '../src/services/decision-ledger.js';
 
 const dbPaths: string[] = [];
 const stores: StateStore[] = [];
@@ -86,6 +87,16 @@ describe('ApprovalQueueService', () => {
     expect(approved?.decidedAtIso).toBeTruthy();
     expect(svc.getStats().approved).toBe(1);
     expect(store.getFunnelStats()['meme-robinhood']?.approved).toBe(1);
+  });
+
+  it('approve records a proposed decision ledger event for the approved order', () => {
+    const store = newStore();
+    const ledger = new DecisionLedger();
+    const svc = new ApprovalQueueService({ decisionLedger: ledger });
+    svc.attachStateStore(store);
+    const order = svc.enqueue(input);
+    svc.approve(order.id, 'operator-1');
+    expect(ledger.audit.some((e) => e.kind === 'proposed' && e.nonce === order.id)).toBe(true);
   });
 
   it('reject transitions PENDING -> REJECTED and bumps the rejected funnel', () => {

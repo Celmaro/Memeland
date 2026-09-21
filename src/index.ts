@@ -25,6 +25,7 @@ import { StateStore } from './services/state-store.js';
 import { OpportunityLedger } from './services/opportunity-ledger.js';
 import { OpportunityStrategist } from './services/opportunity-strategist.js';
 import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
+import { globalDecisionLedger } from './services/decision-ledger.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
@@ -468,6 +469,7 @@ const runScreeningCycle = async () => {
                   fillSim: gateFillSim(),
                   costGate: gateCostGate(),
                   governance: gateGovernance(),
+                  ledger: globalDecisionLedger,
                 });
                 console.log(`[AUTO-EXECUTE] meme-robinhood ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
               }
