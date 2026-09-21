@@ -2,6 +2,7 @@ import type { WalletService } from '../services/wallet-service.js';
 import { isDryRun as isDryRunMode } from '../config/config.js';
 import { loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 import { clampSize, type AdapterError, type Result } from './result.js';
+import { callWithRetry } from '../io/call-policy.js';
 
 export interface EVMTradeRequest {
   chain: string;
@@ -151,22 +152,28 @@ export class EVMTradeAdapter {
       const chainId = this.parseChainId(request.chain);
       const userAddr = walletService.getEvmAddress();
 
-      const response = await fetch('https://api.relay.link/quote/v2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user: userAddr,
-          originChainId: chainId,
-          destinationChainId: chainId,
-          originCurrency: '0x0000000000000000000000000000000000000000',
-          destinationCurrency: request.tokenAddress,
-          amount: BigInt(Math.round(request.amountEth * 1e18)).toString(),
-        }),
-      });
+      // Idempotent quote: retry transient HTTP failures via the shared call policy.
+      const response = await callWithRetry(async () => {
+        const res = await fetch('https://api.relay.link/quote/v2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user: userAddr,
+            originChainId: chainId,
+            destinationChainId: chainId,
+            originCurrency: '0x0000000000000000000000000000000000000000',
+            destinationCurrency: request.tokenAddress,
+            amount: BigInt(Math.round(request.amountEth * 1e18)).toString(),
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Relay Swap quote error: ${await response.text()}`);
-      }
+        if (!res.ok) {
+          const err = new Error(`Relay Swap quote error: ${await res.text()}`) as Error & { status?: number };
+          err.status = res.status;
+          throw err;
+        }
+        return res;
+      });
 
       const quoteData = await response.json() as Record<string, unknown>;
       const steps = quoteData.steps as Array<Record<string, unknown>> | undefined;
@@ -294,22 +301,28 @@ export class EVMTradeAdapter {
 
       // Live Relay step execution: Request quote with calldata step, sign via viem, broadcast
       const userAddr = walletService.getEvmAddress();
-      const response = await fetch('https://api.relay.link/quote/v2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user: userAddr,
-          originChainId: chainId,
-          destinationChainId: chainId,
-          originCurrency: request.fromToken,
-          destinationCurrency: request.toToken,
-          amount: (request.amountEth * 1e18).toString(),
-        }),
-      });
+      // Idempotent quote: retry transient HTTP failures via the shared call policy.
+      const response = await callWithRetry(async () => {
+        const res = await fetch('https://api.relay.link/quote/v2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user: userAddr,
+            originChainId: chainId,
+            destinationChainId: chainId,
+            originCurrency: request.fromToken,
+            destinationCurrency: request.toToken,
+            amount: (request.amountEth * 1e18).toString(),
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Relay API quote error: ${await response.text()}`);
-      }
+        if (!res.ok) {
+          const err = new Error(`Relay API quote error: ${await res.text()}`) as Error & { status?: number };
+          err.status = res.status;
+          throw err;
+        }
+        return res;
+      });
 
       const quoteData = await response.json() as Record<string, unknown>;
       const steps = quoteData.steps as Array<Record<string, unknown>> | undefined;
