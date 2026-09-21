@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
+import { isAllowed } from '../src/decision/decision-result.js';
+import { RefusalCode } from '../src/decision/refusal-code.js';
 
 describe('Swarm Consensus gate-only path (agent-computed confidence)', () => {
   afterEach(() => {
@@ -56,5 +58,49 @@ describe('Swarm Consensus gate-only path (agent-computed confidence)', () => {
     });
     expect(res.passed).toBe(true);
     expect(res.confidenceScore).toBeGreaterThanOrEqual(80);
+  });
+
+  it('exposes a shared allowDecision result on a passed signal', () => {
+    const swarm = new SwarmConsensusEngine();
+    const res = swarm.evaluateSignal({
+      symbol: 'DECISION_PASS',
+      domain: 'MEME_ROBINHOOD',
+      contractAddress: 'decision-pass',
+      liquidityUsd: 0,
+      volume1hUsd: 0,
+      securityAuditPassed: true,
+      socialHypeScore: 0,
+      confidence: 85,
+    });
+    expect(res.decision).toBeDefined();
+    expect(isAllowed(res.decision!)).toBe(true);
+    if (res.decision?.allowed) {
+      expect(res.decision.value).toBe(res.confidenceScore);
+      expect(res.decision.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'confidence', passed: true }),
+      ]));
+    }
+  });
+
+  it('exposes a shared CONSENSUS refusal result on a rejected signal', () => {
+    const swarm = new SwarmConsensusEngine();
+    const res = swarm.evaluateSignal({
+      symbol: 'DECISION_REJECT',
+      domain: 'MEME_ROBINHOOD',
+      contractAddress: 'decision-reject',
+      liquidityUsd: 0,
+      volume1hUsd: 0,
+      securityAuditPassed: true,
+      socialHypeScore: 0,
+      confidence: 50,
+    });
+    expect(res.decision).toBeDefined();
+    expect(res.decision?.allowed).toBe(false);
+    if (!res.decision?.allowed) {
+      expect(res.decision.refusal).toBe(RefusalCode.CONSENSUS);
+      expect(res.decision.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'confidence', passed: false }),
+      ]));
+    }
   });
 });

@@ -91,7 +91,8 @@ function gateSignal(payload: any): boolean {
     voterScores: payload.voterScores || undefined,
   });
   if (!res.passed) {
-    console.warn(`[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected (confidence ${res.confidenceScore}%) — not posting.`);
+    const refusal = res.decision && !res.decision.allowed ? ` [${res.decision.refusal}]` : '';
+    console.warn(`[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected (confidence ${res.confidenceScore}%)${refusal} — not posting.`);
   }
   return res.passed;
 }

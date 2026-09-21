@@ -1,4 +1,6 @@
 import { StateStore, SignalLedgerEntry } from '../services/state-store.js';
+import { allowDecision, refuseDecision, type DecisionResult } from '../decision/decision-result.js';
+import { RefusalCode } from '../decision/refusal-code.js';
 import { aggregateVoterScores } from './voters.js';
 import { globalSwarmLearning } from './swarm-learning.js';
 
@@ -18,6 +20,8 @@ export interface SignalCandidate {
 export interface ConsensusResult {
   passed: boolean;
   confidenceScore: number; // 0 - 100
+  /** Shared decision-result envelope so callers can consume a stable refusal code. */
+  decision?: DecisionResult<number>;
   breakdown: {
     quantScore: number;
     catalystScore: number;
@@ -71,6 +75,12 @@ export class SwarmConsensusEngine {
         return {
           passed: false,
           confidenceScore: 0,
+          decision: refuseDecision(
+            `CONSENSUS_${candidate.domain}_${symbolKey}_VETO`,
+            RefusalCode.CONSENSUS,
+            `Cross-agent veto blocked ${symbolKey} (active ${existingIntent.direction} intent from ${existingIntent.domain}).`,
+            [{ id: 'crossAgentVeto', passed: false }],
+          ),
           breakdown: { quantScore: 0, catalystScore: 0, securityScore: 0, reputationMultiplier: 1.0 },
           reason: `🛑 **Cross-Agent Veto Block:** Opposing intent detected! ${existingIntent.domain} has an active ${existingIntent.direction} intent on $${symbolKey}, conflicting with incoming ${candidate.domain} ${incomingDir}. Order blocked to prevent hedging self-destruction.`,
         };
@@ -164,6 +174,19 @@ export class SwarmConsensusEngine {
 
     const passed = confidenceScore >= 80 && candidate.securityAuditPassed;
 
+    const checks = [
+      { id: 'confidence', passed: confidenceScore >= 80, reason: `${confidenceScore}% confidence` },
+      { id: 'security', passed: candidate.securityAuditPassed, reason: candidate.securityAuditPassed ? 'audit passed' : 'audit failed' },
+    ];
+    const decision: DecisionResult<number> = passed
+      ? allowDecision(confidenceScore, `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`, checks)
+      : refuseDecision(
+          `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          RefusalCode.CONSENSUS,
+          `Signal rejected (${confidenceScore}% confidence below 80% threshold or security failed).`,
+          checks,
+        );
+
     const result: ConsensusResult = {
       passed,
       confidenceScore,
@@ -184,6 +207,8 @@ export class SwarmConsensusEngine {
               : `Signal passed Multi-Agent Consensus with ${confidenceScore}% confidence (Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
         : `Signal rejected (${confidenceScore}% confidence below 80% threshold or security failed).`,
     };
+
+    result.decision = decision;
 
     // Append to immutable signal audit ledger
     if (this.stateStore) {
