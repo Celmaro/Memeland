@@ -2,6 +2,7 @@ import { OpenSeaAdapter, OpenSeaNFTSignal, OpenSeaWhaleInfo } from '../../adapte
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import type { StrategyContext } from '../../orchestrator/strategy-types.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
+import { groundednessGate, type GroundednessGateResult, type GroundednessOptions } from '../../services/groundedness-gate.js';
 
 export interface NFTSnipingReport {
   collectionSlug: string;
@@ -280,4 +281,26 @@ export class NFTScreeningAgent implements ScreeningAgent<NFTSnipingReport> {
       },
     };
   }
+}
+
+export interface GroundedNftSignalResult {
+  report: NFTSnipingReport;
+  groundedness: GroundednessGateResult;
+}
+
+/**
+ * NFT-agent wrapper around the PR12.g groundedness gate. The report claim is
+ * accepted only when the supplied evidence contains the observable tape facts
+ * (floor motion, volume, velocity, whale sweep). Fail-closed with no evidence.
+ */
+export function groundNftSignal(
+  report: NFTSnipingReport,
+  evidence: string[],
+  options: GroundednessOptions = {},
+): GroundedNftSignalResult {
+  const claim = `${report.collectionName} ${report.isWhaleSweep ? 'whale sweep' : 'floor pump'} floor ${report.floorSurge1hPct.toFixed(1)} volume ${report.volumeSpike1hRatio.toFixed(1)} velocity ${report.salesVelocity1h.toFixed(1)}`;
+  return {
+    report,
+    groundedness: groundednessGate(claim, evidence, options),
+  };
 }

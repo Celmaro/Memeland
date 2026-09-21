@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { NFTScreeningAgent } from '../src/agents/nft/nft-screening-agent.js';
+import { NFTScreeningAgent, groundNftSignal } from '../src/agents/nft/nft-screening-agent.js';
 import type { OpenSeaAdapter, OpenSeaNFTSignal } from '../src/adapters/opensea-adapter.js';
 
 const requireEsm = createRequire(import.meta.url);
@@ -260,5 +260,29 @@ describe('nft-default strategy', () => {
   it('SKIP when security audit failed', () => {
     const ev = strat.evaluate({ ...healthy, securityAuditPassed: false });
     expect(ev.recommendedAction).toBe('SKIP');
+  });
+});
+
+describe('groundNftSignal (groundedness-gate wiring)', () => {
+  it('accepts a report claim when evidence supports the observed tape', () => {
+    const agent = new NFTScreeningAgent(mkFakeAdapter([]));
+    const report = agent.evaluateListing(mkSignal())!;
+    const result = groundNftSignal(report, [
+      'Pudgy Penguins floor surge 35.0',
+      'volume spike 3.5',
+      'velocity 6 sales per hour',
+      'whale sweep 4 items',
+    ]);
+
+    expect(result.groundedness.accepted).toBe(true);
+    expect(result.groundedness.grounded).toBe(true);
+    expect(result.report.collectionName).toBe('Pudgy Penguins');
+  });
+
+  it('fails closed when there is no evidence to ground the claim', () => {
+    const agent = new NFTScreeningAgent(mkFakeAdapter([]));
+    const report = agent.evaluateListing(mkSignal())!;
+    const result = groundNftSignal(report, []);
+    expect(result.groundedness.accepted).toBe(false);
   });
 });
