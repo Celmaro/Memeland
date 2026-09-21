@@ -6,6 +6,9 @@
  * closed on any non-OK rule so UNKNOWN never auto-approves.
  */
 
+import { volTargetSize } from '../services/garch-vol.js';
+import type { DecisionCache } from '../services/decision-cache.js';
+
 export interface SizeConstraints {
   /** Hard notional ceiling for a single entry (RH default $2,000). */
   maxNotionalUsd?: number;
@@ -342,4 +345,18 @@ export function riskBucket(varPct: number): RiskBucket {
   if (varPct < 10) return 'MEDIUM';
   if (varPct < 20) return 'HIGH';
   return 'CRITICAL';
+}
+
+/**
+ * Cache-aware vol-target sizing (GARCH walk-forward cache). Fail-closed: when
+ * no vol target can be read from the cache the notional is 0, never scaled up.
+ */
+export async function volTargetSizedPosition(
+  cache: DecisionCache,
+  token: string,
+  baseUsd: number,
+  targetVolPct = 20
+): Promise<number> {
+  const forecastVolPct = await cache.getVolTarget(token);
+  return volTargetSize(baseUsd, forecastVolPct ?? 0, targetVolPct);
 }

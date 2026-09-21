@@ -18,6 +18,7 @@ import type { GMGNRawToken } from '../adapters/gmgn-adapter.js';
 import { walletScore, type WalletScoreInput } from '../services/wallet-scoring.js';
 import { flowConvergenceScore, type BuyEvent, type FlowConvergenceConfig } from '../services/flow-convergence.js';
 import { securityMetricFactors, computeRubric } from '../services/risk-rubric.js';
+import type { DecisionCache } from '../services/decision-cache.js';
 
 export type VoterId = 'quant' | 'ml' | 'security' | 'sentiment' | 'whale' | 'regime' | 'critic' | 'wallet' | 'convergence' | 'rubric';
 
@@ -290,4 +291,68 @@ export function rubricVote(ctx: VoterContext): VoterOpinion {
     score: rubric.overall,
     reasons: rubric.factors.map((f) => `${f.name}: ${f.score01.toFixed(2)}`),
   };
+}
+
+export interface StickyQuantVoteOptions {
+  key: string;
+  reasons?: string[];
+  priceMovePct?: number;
+  ttlMs?: number;
+  price?: number;
+}
+
+/** Cache-aware quant voter (A16 sticky conviction): keeps the last 0-100 conviction until TTL / price move expires it. */
+export async function stickyQuantVote(
+  cache: DecisionCache,
+  signalConfidence: number,
+  opts: StickyQuantVoteOptions
+): Promise<VoterOpinion> {
+  const sticky = await cache.getSticky<number>(
+    opts.key,
+    () => Math.max(0, Math.min(100, signalConfidence)),
+    { priceMovePct: opts.priceMovePct, ttlMs: opts.ttlMs, price: opts.price },
+  );
+  return quantVote(sticky ?? Math.max(0, Math.min(100, signalConfidence)), opts.reasons ?? []);
+}
+
+export interface ImmutableSecurityVoteOptions {
+  key: string;
+  ttlMs: number;
+  penalties?: string[];
+  botRisk?: number;
+}
+
+/**
+ * Cache-aware security voter (Million one-way door): the first successfully
+ * resolved audit/DNA fact is kept forever even if a later check disagrees.
+ */
+export async function immutableSecurityVote(
+  cache: DecisionCache,
+  validator: () => Promise<boolean>,
+  opts: ImmutableSecurityVoteOptions
+): Promise<VoterOpinion> {
+  const auditPassed = await cache.getImmutable<boolean>(opts.key, validator, opts.ttlMs);
+  return securityVote(auditPassed === true, opts.penalties ?? [], opts.botRisk ?? 0);
+}
+
+/** Cache-aware convergence voter (Million owner-id dedup): one actor's N wallets count as one confirmation. */
+export async function ownerDedupedConvergenceVote(
+  cache: DecisionCache,
+  ctx: VoterContext
+): Promise<VoterOpinion> {
+  const data = ctx.convergence;
+  if (!data || !Array.isArray(data.buys) || data.buys.length === 0) return convergenceVote(ctx);
+
+  const seen = new Set<string>();
+  const deduped: BuyEvent[] = [];
+  for (const buy of data.buys) {
+    const owners = await cache.dedupByOwner([buy.wallet]);
+    const owner = owners[0] ?? buy.wallet;
+    const key = owner.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push({ ...buy, wallet: owner });
+  }
+
+  return convergenceVote({ ...ctx, convergence: { ...data, buys: deduped } });
 }

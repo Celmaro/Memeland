@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { sizePosition, RuleGate, cooldownGate } from '../src/orchestrator/position-sizing.js';
+import { describe, it, expect, vi } from 'vitest';
+import { sizePosition, RuleGate, cooldownGate, volTargetSizedPosition } from '../src/orchestrator/position-sizing.js';
+import { DecisionCache } from '../src/services/decision-cache.js';
 
 describe('sizePosition (Q07)', () => {
   it('collapses to the most restrictive constraint', () => {
@@ -62,5 +63,26 @@ describe('RuleGate (Q07)', () => {
     expect((await passed.evaluate()).allowed).toBe(true);
     const idle = new RuleGate([{ name: 'cool', check: cooldownGate(null, 5000, now) }]);
     expect((await idle.evaluate()).allowed).toBe(true);
+  });
+});
+
+describe('DecisionCache vol-target wiring (Kernel F)', () => {
+  it('reduces notional as the cached forecast vol rises', async () => {
+    const dc = new DecisionCache({
+      fetchVolTarget: vi.fn().mockResolvedValue(80),
+    });
+    await expect(volTargetSizedPosition(dc, '0xTOKEN', 1000, 20)).resolves.toBe(250);
+  });
+
+  it('uses the same cached vol target without refetching', async () => {
+    const fetch = vi.fn().mockResolvedValue(80);
+    const dc = new DecisionCache({ fetchVolTarget: fetch });
+    await volTargetSizedPosition(dc, '0xTOKEN', 1000, 20);
+    await volTargetSizedPosition(dc, '0xTOKEN', 1000, 20);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when no vol target is available', async () => {
+    await expect(volTargetSizedPosition(new DecisionCache(), '0xTOKEN', 1000, 20)).resolves.toBe(0);
   });
 });

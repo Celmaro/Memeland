@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   aggregateVoterScores,
   DEFAULT_VOTER_WEIGHTS,
+  immutableSecurityVote,
+  ownerDedupedConvergenceVote,
   securityVote,
+  stickyQuantVote,
   whaleVote,
   regimeVote,
   scoresFromOpinions,
@@ -10,6 +13,7 @@ import {
 import { predictUpMomentum, rsi, fetchKlinesWithGeckoFallback, geckoNetworkIdFor, type KlineLike } from '../src/agents/shared/ml-predictor.js';
 import { CriticVoter } from '../src/agents/shared/critic-voter.js';
 import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
+import { DecisionCache } from '../src/services/decision-cache.js';
 
 // ── voters.ts ──────────────────────────────────────────────────────────────
 
@@ -91,6 +95,91 @@ describe('7-voter swarm aggregation', () => {
       { voter: 'ml', score: 40, reasons: ['b'] },
     ]);
     expect(map).toEqual({ quant: 90, ml: 40 });
+  });
+});
+
+describe('DecisionCache wiring (Kernel F)', () => {
+  it('stickyQuantVote holds a quant conviction until TTL expires', async () => {
+    const dc = new DecisionCache();
+    await expect(stickyQuantVote(dc, 80, { key: 'MEME', ttlMs: 60_000 })).resolves.toMatchObject({
+      voter: 'quant',
+      score: 80,
+    });
+    // A second call inside the TTL keeps the earlier score even if the caller moves to 95.
+    await expect(stickyQuantVote(dc, 95, { key: 'MEME', ttlMs: 60_000 })).resolves.toMatchObject({
+      voter: 'quant',
+      score: 80,
+    });
+  });
+
+  it('stickyQuantVote re-evaluates when the price moves past priceMovePct', async () => {
+    const dc = new DecisionCache();
+    await stickyQuantVote(dc, 80, { key: 'MEME', ttlMs: 60_000, priceMovePct: 5, price: 1.0 });
+    await expect(
+      stickyQuantVote(dc, 95, { key: 'MEME', ttlMs: 60_000, priceMovePct: 5, price: 1.1 })
+    ).resolves.toMatchObject({ voter: 'quant', score: 95 });
+  });
+
+  it('immutableSecurityVote keeps the first audit outcome as a one-way door', async () => {
+    const dc = new DecisionCache();
+    const validator = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    const first = await immutableSecurityVote(dc, validator, { key: 'MEME-AUDIT', ttlMs: 3_600_000 });
+    const second = await immutableSecurityVote(dc, validator, { key: 'MEME-AUDIT', ttlMs: 3_600_000 });
+    expect(first.score).toBe(100);
+    expect(second.score).toBe(100);
+    expect(validator).toHaveBeenCalledTimes(1);
+  });
+
+  it('ownerDedupedConvergenceVote collapses owner wallets before scoring convergence', async () => {
+    const now = Date.now();
+    const dc = new DecisionCache({
+      resolveOwner: (wallet: string) => (wallet.startsWith('0xM') ? 'million-owner' : wallet),
+    });
+    const ctx = {
+      token: {} as any,
+      chain: 'sol',
+      nativePriceUsd: 1,
+      securityAuditPassed: true,
+      signalConfidence: 50,
+      convergence: {
+        buys: [
+          { wallet: '0xM1', amountUsd: 5000, timestamp: now - 1000 },
+          { wallet: '0xM2', amountUsd: 4000, timestamp: now - 2000 },
+          { wallet: '0xM3', amountUsd: 3000, timestamp: now - 3000 },
+        ],
+        config: { minWallets: 3, windowMs: 60_000, maxWalletShare: 0.5 },
+        now,
+      },
+    } as any;
+
+    const opinion = await ownerDedupedConvergenceVote(dc, ctx);
+    // Three wallets all controlled by one actor collapse to a single confirmation,
+    // below minWallets, so convergence stays neutral (never a false positive).
+    expect(opinion.score).toBe(50);
+  });
+
+  it('ownerDedupedConvergenceVote keeps distinct owners as real convergence', async () => {
+    const now = Date.now();
+    const dc = new DecisionCache();
+    const ctx = {
+      token: {} as any,
+      chain: 'sol',
+      nativePriceUsd: 1,
+      securityAuditPassed: true,
+      signalConfidence: 50,
+      convergence: {
+        buys: [1, 2, 3, 4, 5].map((n) => ({
+          wallet: `0xP${n}`,
+          amountUsd: 20_000 / n,
+          timestamp: now - n * 1000,
+        })),
+        config: { minWallets: 3, windowMs: 60_000, maxWalletShare: 0.5 },
+        now,
+      },
+    } as any;
+
+    const opinion = await ownerDedupedConvergenceVote(dc, ctx);
+    expect(opinion.score).toBeGreaterThan(50);
   });
 });
 
