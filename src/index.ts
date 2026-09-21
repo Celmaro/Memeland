@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
-import path from 'path';
-import { isDryRun as isDryRunMode, getExecutionMode, isAutoExecute, isSignalOnly } from './config/config.js';
-import { Client, GatewayIntentBits, REST, Routes, ChannelType, Events } from 'discord.js';
+import { isDryRun as isDryRunMode, isAutoExecute, isSignalOnly } from './config/config.js';
+import { Client, GatewayIntentBits, ChannelType, Events } from 'discord.js';
 import { buildCallEmbed } from './discord/embeds/call-embed.js';
 import { OpenCatzHub } from './orchestrator/hub.js';
 import { dispatchDomain } from './orchestrator/dispatch.js';
@@ -9,14 +8,10 @@ import { SwarmConsensusEngine } from './orchestrator/swarm-consensus.js';
 import { StrategyEngine } from './orchestrator/strategy-engine.js';
 import { PositionManager } from './position/position-manager.js';
 import { AIService } from './services/ai-service.js';
-import { slashCommands } from './discord/commands/index.js';
 import { handleInteraction } from './discord/handlers/interaction-handler.js';
 import { handleControlRoomMessage } from './discord/handlers/message-handler.js';
 import { globalHealthWatcher } from './services/health-watcher.js';
 import { globalMarketRegimeFilter, computeWhaleRiskOff } from './services/market-regime.js';
-import { MarketSentinel, marketSentinelProbe } from './services/market-sentinel.js';
-import { globalBotRiskWindow } from './services/bot-detection.js';
-import { bootstrapDiscordChannels } from './discord/setup/channel-bootstrap.js';
 import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
 import { GMGNAdapter } from './adapters/gmgn-adapter.js';
@@ -35,27 +30,20 @@ import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from './services/execution-gates.js';
-import { assertStartupConfig } from './config/startup-validation.js';
-import { startScreeningScheduler } from './startup/screening-scheduler.js';
+import { bootstrapStartupConfig, printStartupBanner } from './startup/bootstrap.js';
+import { registerGracefulShutdown } from './startup/shutdown.js';
+import { createMarketRiskMonitor, startRuntimeMonitoring } from './startup/risk.js';
+import { runDiscordStartupIntegrations, isControlRoomChannel } from './startup/integrations.js';
+import { globalOperationalHealth } from './services/operational-health.js';
+import { createOperationalFunnel, mergeOperationalFunnel, funnelCountersFromState } from './services/operational-funnel.js';
 
 dotenv.config();
 
-try {
-  assertStartupConfig();
-} catch (err: any) {
-  console.error(`[CONFIG] REFUSING TO START: ${err.message}`);
-  process.exit(1);
-}
+bootstrapStartupConfig();
+printStartupBanner();
 
 const telegramService = new TelegramService();
 const apiKeyGuard = new ApiKeyGuardService();
-
-console.log('----------------------------------------------------');
-console.log('🐾 OPENCATZ MULTI-AGENT CRYPTO SYSTEM INITIALIZING...');
-console.log('----------------------------------------------------');
-
-const execMode = getExecutionMode();
-console.log(`[CONFIG] OpenCatz Execution Mode: ${execMode} (Primary Swap Venue: Uniswap V3 on Robinhood Chain #4663)`);
 
 // Live-trading safety gate: refuse to start in live execution unless every
 // independent safeguard is explicitly acknowledged. This is the enforcement of
@@ -64,6 +52,7 @@ console.log(`[CONFIG] OpenCatz Execution Mode: ${execMode} (Primary Swap Venue: 
 // deliberate decision. Fail startup rather than trade unacknowledged.
 // Initialize persistent StateStore (survives bot restarts)
 const stateStore = new StateStore();
+globalOperationalHealth.setFunnel(funnelCountersFromState(stateStore.getFunnelStats()));
 
 const hub = new OpenCatzHub();
 const swarmEngine = new SwarmConsensusEngine();
@@ -221,6 +210,7 @@ console.log(`[AI SERVICE] Configured with provider: ${aiService.getConfig().prov
 
 const discordToken = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
+let runtimeStop: (() => void) | null = null;
 
 if (discordToken && clientId) {
   const client = new Client({
@@ -238,68 +228,18 @@ if (discordToken && clientId) {
 
   client.once(Events.ClientReady, async () => {
     console.log(`[DISCORD BOT] Logged in as ${client.user?.tag}!`);
-
-    // Post-update report: if a self-update just ran (fire-and-forget killed the
-    // old process before it could reply), forward the saved report to the
-    // control room so the user sees the update result after restart.
-    try {
-      const fs = await import('fs');
-      const reportPath = path.join(process.cwd(), 'database', 'last_update_report.json');
-      if (fs.existsSync(reportPath)) {
-        const report = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
-        fs.unlinkSync(reportPath); // one-shot: remove after reading
-        const stepLines = (report.steps || []).map((s: { label: string; ok: boolean }) => `• **${s.label}:** ${s.ok ? '✅' : '❌'}`).join('\n');
-        const restartLine = report.restartOk
-          ? '🔄 **PM2 agent restarted — new code is live.**'
-          : '⚠ **PM2 restart failed** — run `opencatz deploy` manually.';
-        const controlRoomId = process.env.DISCORD_CHANNEL_CONTROL_ROOM;
-        const channel = controlRoomId
-          ? client.channels.cache.get(controlRoomId)
-          : client.channels.cache.find((c: any) => c.name === 'opencatz-control-room' || c.name === 'opencat-control-room');
-        if (channel && 'send' in channel) {
-          await channel.send(
-            `${report.ok ? '✅' : '❌'} **OpenCatz Self-Update ${report.ok ? 'Complete' : 'FAILED'}**\n\n` +
-            `${stepLines}\n${restartLine}`
-          );
-          console.log('[UPDATE REPORT] Update report sent to control room.');
-        }
-      }
-    } catch (reportErr: any) {
-      console.warn(`[UPDATE REPORT] Failed to send report: ${reportErr.message}`);
-    }
-
-    // Auto-Bootstrap Discord Category & Channels if bot is in a server
-    const firstGuild = client.guilds.cache.first();
-    if (firstGuild) {
-      try {
-        await bootstrapDiscordChannels(firstGuild);
-      } catch (err) {
-        console.error('[DISCORD BOOTSTRAP] Channel auto-creation error:', err);
-      }
-    }
-
-    // Register Slash Commands
-    try {
-      const rest = new REST({ version: '10' }).setToken(discordToken);
-      console.log('[DISCORD REST] Registering Slash Commands...');
-      await rest.put(Routes.applicationCommands(clientId), {
-        body: slashCommands.map(cmd => cmd.toJSON()),
-      });
-      console.log('[DISCORD REST] Slash Commands registered successfully!');
-    } catch (error) {
-      console.error('[DISCORD REST] Error registering Slash Commands:', error);
-    }
-
-    // Auto-Bootstrap Telegram Sub-Channels (Topics) & Broadcast Control Menu on startup if Telegram configured
+    globalOperationalHealth.setDelivery({ discord: true, telegram: telegramService.isEnabled(), lastDiscordAt: Date.now() });
+    await runDiscordStartupIntegrations({
+      client,
+      discordToken,
+      clientId,
+      telegramService,
+      hub,
+      walletService,
+      aiService,
+    });
     if (telegramService.isEnabled()) {
-      console.log('[TELEGRAM SERVICE] Telegram Notification Bridge Connected! Provisioning Topics & broadcasting control menu...');
-      try {
-        await telegramService.bootstrapTelegramTopics();
-        await telegramService.broadcastInteractiveMenu(hub, walletService);
-        telegramService.startPolling(hub, walletService, aiService);
-      } catch (tgErr: any) {
-        console.error('[TELEGRAM SERVICE] Startup broadcast error:', tgErr.message);
-      }
+      globalOperationalHealth.setDelivery({ telegram: true, lastTelegramAt: Date.now() });
     }
 
     // Start Price Alert Checking Interval Loop (Every 60s)
@@ -339,6 +279,9 @@ if (discordToken && clientId) {
 
     // Start 24/7 Sub-Agents Background Screening Interval Loop (Immediate pass on boot + Every 5 minutes)
     const runScreeningCycle = async () => {
+      const cycleOperationalFunnel = createOperationalFunnel();
+      globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: true, lastStartedAt: Date.now() });
+      globalOperationalHealth.recordProviderRequest('screening-pass', true);
       console.log('[SUB-AGENTS LOOP] Checking active sub-agent domains...');
       try {
         // Register heartbeats AT THE START of each pass so agents are marked alive while the
@@ -414,6 +357,12 @@ if (discordToken && clientId) {
         const postGateCount = dispatchedPayloads.length;
         stateStore.incrementFunnel('meme-robinhood', 'scanned', robinhoodScreeningAgent.getLastFunnelStats().scanned);
         stateStore.incrementFunnel('meme-robinhood', 'consensus', postGateCount);
+        cycleOperationalFunnel.sourcesQueried += Math.max(1, hub.getActiveDomains().length);
+        cycleOperationalFunnel.candidatesDiscovered += robinhoodScreeningAgent.getLastFunnelStats().scanned;
+        cycleOperationalFunnel.candidatesNormalized += robinhoodScreeningAgent.getLastFunnelStats().prefiltered;
+        cycleOperationalFunnel.candidatesEnriched += preGateCount;
+        cycleOperationalFunnel.candidatesRejectedByGate += Math.max(0, preGateCount - postGateCount);
+        cycleOperationalFunnel.signalsEmitted += postGateCount;
         console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
 
         // Register real heartbeats for every active agent that ran this pass
@@ -446,6 +395,11 @@ if (discordToken && clientId) {
           }
           recentSignals.set(dedupKey, now);
           stateStore.setDedupEntry(dedupKey, now);
+          globalOperationalHealth.recordAlert(
+            'CONSENSUS_PASS',
+            `Consensus pass: ${item.payload.symbol}`,
+            `${item.channelName} confidence ${Number(item.payload.confidenceScore) || 0}%`
+          );
 
           // Opportunity ledger: ingest every fired signal so the Strategist can
           // re-score/re-admit it over time. Never gates anything (fail-soft).
@@ -504,6 +458,7 @@ if (discordToken && clientId) {
             );
             approvalOrderId = order.id;
             console.log(`[APPROVAL] Queued PENDING order ${order.id} for ${item.payload.symbol} (scorecard ${scorecardId || 'n/a'})`);
+            globalOperationalHealth.recordAlert('APPROVAL_REQUIRED', `Approval required: ${item.payload.symbol}`, `order ${order.id}`);
           }
 
           // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates with real market quotes, SIGNAL_ONLY skips trade execution.
@@ -527,11 +482,14 @@ if (discordToken && clientId) {
                   const riskCheck = hub.getRiskManager().isTradeAllowed(autoExec.maxTradeAmount || 0.1);
                   if (!riskCheck.allowed) {
                     console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by risk gate — ${riskCheck.reason}`);
+                    globalOperationalHealth.recordAlert('RISK_WARNING', `Risk gate blocked ${item.payload.symbol}`, riskCheck.reason);
                     await notifyControlRoom(client, `risk:${autoExecDomain}`, `🚫 **RISK GATE BLOCKED** auto-execute ${autoExecDomain} ${item.payload.symbol}: ${riskCheck.reason}`);
                     break;
                   }
                   if (globalRiskEngineV2.checkKillSwitchStatus()) {
                     console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED — emergency kill-switch active.`);
+                    globalOperationalHealth.setKillSwitch(true, Date.now());
+                    globalOperationalHealth.recordAlert('RISK_WARNING', `Kill-switch active`, `${autoExecDomain} ${item.payload.symbol} blocked`);
                     await notifyControlRoom(client, 'risk:killswitch', `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`);
                     break;
                   }
@@ -656,6 +614,7 @@ if (discordToken && clientId) {
           const allAlerts = [...alerts, ...scannerAlerts];
           if (allAlerts.length > 0) {
             for (const a of allAlerts) {
+              globalOperationalHealth.recordAlert('POSITION_EXIT', `Position alert`, a.reason);
               await notifyControlRoom(client, `position:${a.type}:${a.address}`, `🚨 **POSITION ALERT**\n${a.reason}`);
             }
           }
@@ -663,6 +622,15 @@ if (discordToken && clientId) {
         } catch (wtErr: any) {
           console.warn(`[POSITION MONITOR] sync failed this cycle: ${wtErr.message}`);
         }
+
+        const currentFunnelSnapshot = globalOperationalHealth.snapshot().funnel;
+        const nextOperationalFunnel = mergeOperationalFunnel(currentFunnelSnapshot, cycleOperationalFunnel);
+        nextOperationalFunnel.positionsMonitored =
+          positionManager.getActivePositions().length +
+          positionManager.getActiveLpPositions().length +
+          positionManager.getActiveNftPositions().length;
+        globalOperationalHealth.setFunnel(nextOperationalFunnel);
+        globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: false, lastCompletedAt: Date.now() });
 
         // Phase-1 scorecard mark-to-market: refresh OPEN entries each cycle and flip TP/SL.
         try {
@@ -692,15 +660,19 @@ if (discordToken && clientId) {
         }
       } catch (err: any) {
         console.error('[SUB-AGENTS LOOP ERROR]', err.message);
+        globalOperationalHealth.recordWorkerFailure('screening', err instanceof Error ? err.message : String(err));
+        globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: false, lastError: err instanceof Error ? err.message : String(err), lastCompletedAt: Date.now() });
         notifyControlRoom(client, 'loop-error', `⚠️ **SCREENING LOOP ERROR**\n\`${err.message}\``);
       }
     };
 
     // Scheduler and the independent market-risk monitor are owned by the startup module.
-    const marketSentinel = new MarketSentinel(
-      marketSentinelProbe(globalBotRiskWindow, globalMarketRegimeFilter)
-    );
-    startScreeningScheduler({ runCycle: runScreeningCycle, marketSentinel });
+    const marketSentinel = createMarketRiskMonitor();
+    const runtime = startRuntimeMonitoring({ runCycle: runScreeningCycle, marketSentinel });
+    runtimeStop = runtime;
+    for (const status of runtime.statuses()) {
+      globalOperationalHealth.setSchedulerStatus(status);
+    }
   });
 
   client.on('interactionCreate', (interaction) => {
@@ -725,14 +697,6 @@ if (discordToken && clientId) {
   console.log('[DISCORD BOT] DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID not set in .env. Running standalone engine.');
 }
 
-function isControlRoomChannel(configuredId: string | undefined, message: any): boolean {
-  if (configuredId && configuredId !== '000000000000000000') {
-    return message.channelId === configuredId;
-  }
-  const chName = (message.channel?.name || '').toLowerCase();
-  return chName === 'opencatz-control-room' || chName === 'opencat-control-room';
-}
-
 console.log('[SYSTEM] Setup complete. All OpenCatz modules ready.');
 console.log('[STATE STORE] Persistent state engine active — positions, alerts, and journal survive restarts.');
 
@@ -741,13 +705,19 @@ import { OpenCatzRESTServer } from './api/server.js';
 const apiServer = new OpenCatzRESTServer();
 apiServer.start(hub);
 
-// Graceful Shutdown: flush pending state writes to disk before exit
-const gracefulShutdown = (signal: string) => {
-  console.log(`\n[SHUTDOWN] Received ${signal}. Flushing state to disk...`);
-  stateStore.flushToDisk();
-  console.log('[SHUTDOWN] State saved. Goodbye!');
-  process.exit(0);
-};
-
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+// Graceful Shutdown: stop the runtime schedulers, flush pending state writes to
+// disk, then close the REST API before exiting.
+registerGracefulShutdown('SIGINT', {
+  flush: () => stateStore.flushToDisk(),
+  stop: async () => {
+    runtimeStop?.();
+    await apiServer.stop();
+  },
+});
+registerGracefulShutdown('SIGTERM', {
+  flush: () => stateStore.flushToDisk(),
+  stop: async () => {
+    runtimeStop?.();
+    await apiServer.stop();
+  },
+});

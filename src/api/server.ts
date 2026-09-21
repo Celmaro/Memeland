@@ -8,6 +8,8 @@ import { globalStateStore } from '../services/state-store.js';
 import { getExecutionMode } from '../config/config.js';
 import { AGENT_DOMAINS } from '../orchestrator/agent-registry.js';
 import { ToolRegistry } from '../orchestrator/tool-registry.js';
+import { globalOperationalHealth } from '../services/operational-health.js';
+import { funnelCountersFromState } from '../services/operational-funnel.js';
 
 export class OpenCatzRESTServer {
   private server: http.Server | null = null;
@@ -107,6 +109,7 @@ export class OpenCatzRESTServer {
           const health = globalHealthWatcher.auditSystemHealth();
           const regime = globalMarketRegimeFilter.getRegime();
           const isKillSwitch = globalRiskEngineV2.checkKillSwitchStatus();
+          const ops = globalOperationalHealth.snapshot();
 
           const subAgents = AGENT_DOMAINS.map((d) => ({
             id: d.id,
@@ -133,7 +136,51 @@ export class OpenCatzRESTServer {
                 gmgn: Boolean(process.env.GMGN_API_KEY),
               },
               subAgentsReport: health.report,
+              operational: ops,
               timestamp: new Date().toISOString(),
+            })
+          );
+          return;
+        }
+
+        // 1.5 GET /api/ops/health (unified monitor-the-monitor view)
+        if (req.method === 'GET' && pathname === '/api/ops/health') {
+          const ops = globalOperationalHealth.snapshot();
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify({
+              success: true,
+              health: ops,
+              providers: ops.providers,
+              scheduler: ops.scheduler,
+              workerFailures: ops.workerFailures,
+              delivery: ops.delivery,
+              killSwitch: ops.killSwitch,
+              funnel: ops.funnel,
+              alerts: ops.alerts,
+            })
+          );
+          return;
+        }
+
+        // 1.6 GET /api/ops/funnel (seven-stage operational funnel counters)
+        if (req.method === 'GET' && pathname === '/api/ops/funnel') {
+          const ops = globalOperationalHealth.snapshot();
+          const positions = {
+            tokens: globalStateStore.getAllPositions().length,
+            lp: globalStateStore.getAllLpPositions().length,
+            nft: globalStateStore.getAllNftPositions().length,
+            total: globalStateStore.getAllPositions().length +
+              globalStateStore.getAllLpPositions().length +
+              globalStateStore.getAllNftPositions().length,
+          };
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify({
+              success: true,
+              counters: ops.funnel,
+              derivedFromState: funnelCountersFromState(globalStateStore.getFunnelStats()),
+              positions,
             })
           );
           return;

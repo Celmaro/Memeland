@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { OpenCatzRESTServer, OpenCatRESTServer } from '../src/api/server.js';
 import { OpenCatzHub, OpenCatHub } from '../src/orchestrator/hub.js';
+import { globalOperationalHealth } from '../src/services/operational-health.js';
 
 describe('OpenCatzRESTServer Test Suite', () => {
   let server: OpenCatzRESTServer;
@@ -13,6 +14,7 @@ describe('OpenCatzRESTServer Test Suite', () => {
     process.env.API_PORT = String(testPort);
     hub = new OpenCatzHub();
     server = new OpenCatzRESTServer(testPort);
+    globalOperationalHealth.reset();
     server.start(hub);
     // Give server a moment to bind
     await new Promise((r) => setTimeout(r, 100));
@@ -35,6 +37,33 @@ describe('OpenCatzRESTServer Test Suite', () => {
       expect(data.subAgents.length).toBe(2);
       expect(data.connectedApiKeys).toBeDefined();
     });
+
+  it('GET /api/ops/health returns the unified monitor-the-monitor surface', async () => {
+    globalOperationalHealth.recordProviderRequest('gmgn', true, { rateLimit: { remaining: 3 } });
+    globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: false, lastCompletedAt: 1 });
+    globalOperationalHealth.setDelivery({ discord: true, telegram: true });
+    globalOperationalHealth.setKillSwitch(false);
+    const res = await fetch(`http://localhost:${testPort}/api/ops/health`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.health).toBeDefined();
+    expect(data.providers.some((p: any) => p.name === 'gmgn')).toBe(true);
+    expect(data.scheduler).toEqual([{ name: 'screening', running: false, lastCompletedAt: 1 }]);
+    expect(data.delivery).toEqual({ discord: true, telegram: true });
+  });
+
+  it('GET /api/ops/funnel returns seven-stage counters plus derived state', async () => {
+    globalOperationalHealth.mergeFunnel({ candidatesDiscovered: 4, signalsEmitted: 1 });
+    const res = await fetch(`http://localhost:${testPort}/api/ops/funnel`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.counters.candidatesDiscovered).toBe(4);
+    expect(data.counters.signalsEmitted).toBe(1);
+    expect(data.positions.total).toBeDefined();
+    expect(data.derivedFromState).toBeDefined();
+  });
 
   it('GET /api/calls returns signal call ledger items', async () => {
     const res = await fetch(`http://localhost:${testPort}/api/calls`);

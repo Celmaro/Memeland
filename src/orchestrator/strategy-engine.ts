@@ -144,24 +144,35 @@ export class StrategyEngine {
   }
 
   /**
-   * Run a user-authored strategy/indicator call. Two-stage execution:
-   * 1) Try an out-of-process worker (defense in depth — a malicious module
-   *    cannot directly read process secrets from the parent).
-   * 2) On worker-runtime failure (e.g. nested sandbox / CSPRNG abort under
-   *    vitest forks on Windows), fall back to in-process empty-env execution
-   *    via the legacy env sandbox so the bot never silently regresses.
-   */
-  private runModuleInWorker(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
-    try {
-      return this.runModuleInWorkerChild(filePath, kind, arg);
-    } catch (err: any) {
-      const msg = String(err?.message || err);
-      const isWorkerCrash = /status=(13\d|null)/.test(msg) || /EINVAL/.test(msg) || /CSPRNG/.test(msg);
-      if (!isWorkerCrash) throw err;
-      console.warn(`[STRATEGY ENGINE] worker unavailable (${msg.slice(0, 200)}) — falling back to in-process empty-env execution.`);
-      return this.runModuleInProcess(filePath, kind, arg);
+     * Worker-lifecycle state. After one CSPRNG/EBUSY crash we skip future
+     * worker attempts in the same process and fall back straight to in-process
+     * execution — every retry costs ~5s on Windows and exceeds the test
+     * timeout budget once several strategies activate in sequence.
+     */
+    private workerUsable = true;
+
+    /**
+     * Run a user-authored strategy/indicator call. Two-stage execution:
+     * 1) Try an out-of-process worker (defense in depth — a malicious module
+     *    cannot directly read process secrets from the parent).
+     * 2) On worker-runtime failure (e.g. nested sandbox / CSPRNG abort under
+     *    vitest forks on Windows), fall back to in-process empty-env execution
+     *    via the legacy env sandbox so the bot never silently regresses.
+     */
+    private runModuleInWorker(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
+      if (!this.workerUsable) return this.runModuleInProcess(filePath, kind, arg);
+      try {
+        const out = this.runModuleInWorkerChild(filePath, kind, arg);
+        return out;
+      } catch (err: any) {
+        const msg = String(err?.message || err);
+        const isWorkerCrash = /status=(13\d|null)/.test(msg) || /EINVAL/.test(msg) || /CSPRNG/.test(msg);
+        if (!isWorkerCrash) throw err;
+        this.workerUsable = false;
+        console.warn(`[STRATEGY ENGINE] worker unavailable (${msg.slice(0, 200)}) — falling back to in-process empty-env execution (and never retrying in this process).`);
+        return this.runModuleInProcess(filePath, kind, arg);
+      }
     }
-  }
 
   private runModuleInWorkerChild(filePath: string, kind: 'evaluate' | 'calculate', arg: unknown): unknown {
     const script = `
