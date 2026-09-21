@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 import type { SellTrade } from '../services/sellability/sellability-simulator.js';
-import { chainIdFor, type MarketToken } from './market-data-provider.js';
+import { chainIdFor, type MarketDataProvider, type MarketDiscoveryOptions, type MarketToken } from './market-data-provider.js';
 
 /** All chains GMGN OpenAPI serves for market/token/track routes (multi-chain expansion, 2026-09-18). */
 export type Chain = 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood';
@@ -163,9 +163,14 @@ export type GMGNTokenSignal = GMGNRawToken & {
   devHoldingPercentage: number;
 };
 
-export class GMGNAdapter {
+export class GMGNAdapter implements MarketDataProvider {
+  readonly id = 'gmgn';
   private baseUrl = 'https://openapi.gmgn.ai';
   private keyPool: ApiKeyPool;
+
+  /** MarketDataProvider.discover cache — per chain, module-independent, TTL 30s. */
+  private static readonly DISCOVERY_TTL_MS = 30 * 1000;
+  private readonly discoveryCache = new Map<string, { at: number; data: MarketToken[] }>();
 
   /** Security audit cache — module-level, shared across ALL adapter instances. */
   private static securityCache = new Map<string, { audit: GMGNSecurityAudit; at: number }>();
@@ -701,6 +706,58 @@ export class GMGNAdapter {
   /** Map GMGN-normalized tokens onto the shared {@link MarketToken} discovery shape. */
   toMarketTokens(tokens: GMGNRawToken[]): MarketToken[] {
     return tokens.map(gmgnTokenToMarketToken).filter((t): t is MarketToken => t !== undefined);
+  }
+
+  /**
+   * MarketDataProvider.discover — aggregates trending tokens (rank) across the
+   * GMGN chains that map onto the shared discovery chain set (robinhood/sol/
+   * bsc/base), normalizes them to {@link MarketToken}, and applies the standard
+   * chain/liquidity/sort/limit options. Per-chain results are TTL-cached so
+   * repeated discovery within the window does not re-hit the API.
+   */
+  async discover(options: MarketDiscoveryOptions = {}): Promise<MarketToken[]> {
+    const merged = new Map<string, MarketToken>();
+    for (const chain of this.chainsFor(options.chainIds)) {
+      for (const t of await this.rankTokens(chain)) {
+        merged.set(`${t.chainId}:${t.address.toLowerCase()}`, t);
+      }
+    }
+    return this.applyMarketOptions([...merged.values()], options);
+  }
+
+  /** Map requested chain ids to GMGN chains; default to all discovery chains. */
+  private chainsFor(chainIds?: number[]): Chain[] {
+    const byId: Record<number, Chain> = { 4663: 'robinhood', 56: 'bsc', 8453: 'base', 101: 'sol' };
+    if (chainIds && chainIds.length > 0) {
+      const names = chainIds.map((id) => byId[id]).filter((c): c is Chain => c !== undefined);
+      return [...new Set(names)];
+    }
+    return ['robinhood', 'sol', 'bsc', 'base'];
+  }
+
+  /** TTL-cached, normalized rank tokens for one chain. */
+  private async rankTokens(chain: Chain): Promise<MarketToken[]> {
+    const hit = this.discoveryCache.get(chain);
+    if (hit && Date.now() - hit.at <= GMGNAdapter.DISCOVERY_TTL_MS) return hit.data;
+    // 24h window so the bare `volume` field lands in volume24hUsd (the schema's
+    // primary sort key), keeping sort-by-volume meaningful.
+    const tokens = this.toMarketTokens(await this.fetchRank(chain, { interval: '24h' }));
+    this.discoveryCache.set(chain, { at: Date.now(), data: tokens });
+    return tokens;
+  }
+
+  private applyMarketOptions(base: MarketToken[], options: MarketDiscoveryOptions): MarketToken[] {
+    let out = base;
+    const minLiquidity = options.minLiquidityUsd;
+    if (minLiquidity !== undefined) {
+      out = out.filter((t) => t.liquidityUsd >= minLiquidity);
+    }
+    const sort = options.sort;
+    if (sort) {
+      out = [...out].sort((a, b) => (b[sort] ?? 0) - (a[sort] ?? 0));
+    }
+    if (options.limit !== undefined && options.limit > 0) out = out.slice(0, options.limit);
+    return out;
   }
 
   /**
