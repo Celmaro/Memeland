@@ -7,6 +7,7 @@ import { TradeJournalService } from '../services/trade-journal-service.js';
 import { GMGNAdapter, type GMGNTrackTrade } from '../adapters/gmgn-adapter.js';
 import { PaperBroker, sizeCopyPosition, type PaperFill } from './solana-copy-trade.js';
 import { HesitationMemory, type HesitationBrief, type MemoryKind, type MemoryStatus } from './hesitation-memory.js';
+import { TimeOnCurveFilter, type TimeOnCurveResult, type TimeOnCurveAssessOptions } from './time-on-curve.js';
 
 export type EvmBalanceReader = (chain: string, token: string, owner: string) => Promise<bigint | null>;
 
@@ -461,6 +462,27 @@ export async function sizeCopyTradeGuarded(
   }
   const res = await sizeAndPaperCopyTrade(tokenAddress, leaderMultiplier, midPriceUsd, cfg);
   return { ...res, status: guard.status };
+}
+
+export interface SolanaTimeOnCurveOptions {
+  chains?: readonly string[];
+  minAgeHours?: number;
+}
+
+/** Solana-only time-on-curve filter wired into the tracker path. */
+export function assessSolanaTimeOnCurve(
+  token: string,
+  graduatedAtMs: number,
+  loader: TimeOnCurveAssessOptions['loader'],
+  opts: SolanaTimeOnCurveOptions = {}
+): Promise<TimeOnCurveResult> {
+  return new TimeOnCurveFilter({ chains: opts.chains }).assess({
+    token,
+    chain: 'sol',
+    graduatedAtMs,
+    loader,
+    minAgeHours: opts.minAgeHours,
+  });
 }
 
 export interface ConcentrationResult {

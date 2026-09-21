@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   rankTradersByRealizedPnl,
   traderConcentration,
@@ -9,6 +9,7 @@ import {
   CopyTradeHesitation,
   sizeAndPaperCopyTrade,
   sizeCopyTradeGuarded,
+  assessSolanaTimeOnCurve,
   type WalletTradeRecord,
 } from '../src/services/wallet-tracker.js';
 
@@ -106,6 +107,55 @@ describe('CopyTradeHesitation + sizeCopyTradeGuarded (SRC-155 memory wiring)', (
     expect(hesitation.brief('STALETOK').status).toBe('NO_MEMORY');
     expect(result.status).toBe('NO_MEMORY');
     expect(result.accepted).toBe(true);
+  });
+});
+
+describe('assessSolanaTimeOnCurve (SRC-106 SOL-only wiring)', () => {
+  afterEach(() => {
+    delete process.env.MULTICHAIN_CHAINS;
+  });
+
+  it('runs the time-on-curve filter with the wallet-tracker loader contract', async () => {
+    const graduatedAtMs = 100_000;
+    const loader = async (cursor: string | null) => {
+      if (cursor !== null) return { signatures: [], nextCursor: null, truncated: false };
+      return {
+        signatures: [{ blockTimeMs: graduatedAtMs - 3 * 60 * 60 * 1000 }],
+        nextCursor: null,
+        truncated: false,
+      };
+    };
+
+    const result = await assessSolanaTimeOnCurve('SOLTOK', graduatedAtMs, loader, {
+      chains: ['sol'],
+    });
+    expect(result.enabled).toBe(true);
+    expect(result.organic).toBe(true);
+    expect(result.timeOnCurveHours).toBeCloseTo(3, 6);
+  });
+
+  it('respects the MULTICHAIN_CHAINS gate when sol is not configured', async () => {
+    process.env.MULTICHAIN_CHAINS = 'bsc';
+    const result = await assessSolanaTimeOnCurve(
+      'SOLTOK',
+      100_000,
+      async () => ({ signatures: [], nextCursor: null, truncated: false }),
+    );
+    expect(result.enabled).toBe(false);
+    expect(result.organic).toBe(false);
+    expect(result.evidence.some((e) => e.includes('MULTICHAIN_CHAINS'))).toBe(true);
+  });
+
+  it('fails closed when the first transaction history is unreadable', async () => {
+    const result = await assessSolanaTimeOnCurve(
+      'GHOST',
+      100_000,
+      async () => ({ signatures: [], nextCursor: null, truncated: false }),
+      { chains: ['sol'] },
+    );
+    expect(result.enabled).toBe(true);
+    expect(result.organic).toBe(false);
+    expect(result.evidence.some((e) => e.includes('unreadable'))).toBe(true);
   });
 });
 
