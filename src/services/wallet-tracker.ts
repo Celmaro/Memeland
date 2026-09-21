@@ -6,6 +6,7 @@ import { WalletService } from '../services/wallet-service.js';
 import { TradeJournalService } from '../services/trade-journal-service.js';
 import { GMGNAdapter, type GMGNTrackTrade } from '../adapters/gmgn-adapter.js';
 import { PaperBroker, sizeCopyPosition, type PaperFill } from './solana-copy-trade.js';
+import { HesitationMemory, type HesitationBrief, type MemoryKind, type MemoryStatus } from './hesitation-memory.js';
 
 export type EvmBalanceReader = (chain: string, token: string, owner: string) => Promise<bigint | null>;
 
@@ -366,6 +367,100 @@ export async function sizeAndPaperCopyTrade(
     slippagePct: 0,
   });
   return { suggestedUsd, accepted: res.accepted, fill: res.fill, reason: res.reason };
+}
+
+export interface CopyTradeHesitationEntryOptions {
+  agent?: string;
+  claim?: string;
+  ttlMs?: number;
+  weight?: number;
+  createdAt?: number;
+}
+
+const DEFAULT_HESITATION_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Wallet-tracker wrapper around the SRC-155 hesitation memory kernel. Keys by
+ * token address so a flag from security blocks the copy path until a later
+ * clear (or expiry) lets it through again.
+ */
+export class CopyTradeHesitation {
+  private readonly memory: HesitationMemory;
+
+  constructor(now: () => number = Date.now) {
+    this.memory = new HesitationMemory(now);
+  }
+
+  public flag(tokenAddress: string, opts: CopyTradeHesitationEntryOptions = {}): void {
+    this.remember('flag', tokenAddress, opts);
+  }
+
+  public clear(tokenAddress: string, opts: CopyTradeHesitationEntryOptions = {}): void {
+    this.remember('clear', tokenAddress, opts);
+  }
+
+  public brief(tokenAddress: string): HesitationBrief {
+    return this.memory.brief(this.keyFor(tokenAddress));
+  }
+
+  public shouldCopy(tokenAddress: string): { ok: boolean; status: MemoryStatus; reason?: string } {
+    const brief = this.brief(tokenAddress);
+    if (brief.status === 'FLAGGED') {
+      return {
+        ok: false,
+        status: brief.status,
+        reason: `copy blocked by hesitation flag for ${tokenAddress}`,
+      };
+    }
+    return { ok: true, status: brief.status };
+  }
+
+  private keyFor(tokenAddress: string): string {
+    return `copy-trade:${String(tokenAddress || '').toLowerCase()}`;
+  }
+
+  private remember(kind: MemoryKind, tokenAddress: string, opts: CopyTradeHesitationEntryOptions): void {
+    const createdAt = opts.createdAt ?? Date.now();
+    this.memory.remember({
+      id: `${kind}:${this.keyFor(tokenAddress)}:${createdAt}`,
+      key: this.keyFor(tokenAddress),
+      agent: opts.agent ?? 'wallet-tracker',
+      kind,
+      claim: opts.claim ?? (kind === 'flag' ? 'flagged copy target' : 'cleared copy target'),
+      createdAt,
+      ttlMs: opts.ttlMs ?? DEFAULT_HESITATION_TTL_MS,
+      weight: opts.weight ?? 1,
+    });
+  }
+}
+
+export interface GuardedCopyTradeResult {
+  suggestedUsd: number;
+  accepted: boolean;
+  fill?: PaperFill;
+  reason?: string;
+  status: MemoryStatus;
+}
+
+/** Copy sizing gated by the hesitation memory ledger before any paper fill. */
+export async function sizeCopyTradeGuarded(
+  tokenAddress: string,
+  leaderMultiplier: number,
+  midPriceUsd: number,
+  hesitation: CopyTradeHesitation,
+  cfg: CopyTradeSizingConfig = {}
+): Promise<GuardedCopyTradeResult> {
+  const guard = hesitation.shouldCopy(tokenAddress);
+  if (!guard.ok) {
+    return {
+      suggestedUsd: 0,
+      accepted: false,
+      reason: `${guard.reason} (${guard.status})`,
+      status: guard.status,
+    };
+  }
+  const res = await sizeAndPaperCopyTrade(tokenAddress, leaderMultiplier, midPriceUsd, cfg);
+  return { ...res, status: guard.status };
 }
 
 export interface ConcentrationResult {

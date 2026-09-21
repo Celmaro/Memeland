@@ -6,7 +6,9 @@ import {
   BalanceBatchReader,
   retryWithBackoff,
   dedupMerge,
+  CopyTradeHesitation,
   sizeAndPaperCopyTrade,
+  sizeCopyTradeGuarded,
   type WalletTradeRecord,
 } from '../src/services/wallet-tracker.js';
 
@@ -57,6 +59,53 @@ describe('sizeAndPaperCopyTrade (SRC-108 copy-trade wiring)', () => {
     expect(result.accepted).toBe(false);
     expect(result.fill).toBeUndefined();
     expect(result.reason).toContain('invalid');
+  });
+});
+
+describe('CopyTradeHesitation + sizeCopyTradeGuarded (SRC-155 memory wiring)', () => {
+  it('flags a copy target until a later clear resolves the contradiction', async () => {
+    let now = 1_000;
+    const hesitation = new CopyTradeHesitation(() => now);
+    hesitation.flag('HESITOK', { agent: 'security', claim: 'honeypot suspicion', createdAt: now, weight: 0.9 });
+    now = 2_000;
+    hesitation.clear('HESITOK', { agent: 'auditor', claim: 'confirmed safe', createdAt: now, weight: 0.95 });
+
+    const brief = hesitation.brief('HESITOK');
+    expect(brief.status).toBe('CLEARED');
+    expect(brief.conflicts).toHaveLength(1);
+    expect(brief.conflicts[0].winnerId).toContain('clear');
+
+    const result = await sizeCopyTradeGuarded('HESITOK', 2, 0.5, hesitation, {
+      baseNotionalUsd: 100,
+      maxNotionalUsd: 500,
+      minNotionalUsd: 10,
+    });
+    expect(result.status).toBe('CLEARED');
+    expect(result.accepted).toBe(true);
+    expect(result.suggestedUsd).toBe(200);
+  });
+
+  it('blocks the copy before paper-filling when the target is flagged', async () => {
+    const hesitation = new CopyTradeHesitation(() => 0);
+    hesitation.flag('BLOCKEDTOK', { createdAt: 0, claim: 'flagged copy target' });
+
+    const result = await sizeCopyTradeGuarded('BLOCKEDTOK', 2, 0.5, hesitation);
+    expect(result.status).toBe('FLAGGED');
+    expect(result.accepted).toBe(false);
+    expect(result.fill).toBeUndefined();
+    expect(result.reason).toContain('FLAGGED');
+  });
+
+  it('expires stale hesitation entries so the copy proceeds again', async () => {
+    let now = 0;
+    const hesitation = new CopyTradeHesitation(() => now);
+    hesitation.flag('STALETOK', { createdAt: 0, ttlMs: 5_000, claim: 'old flag' });
+    now = 6_000;
+
+    const result = await sizeCopyTradeGuarded('STALETOK', 2, 0.5, hesitation);
+    expect(hesitation.brief('STALETOK').status).toBe('NO_MEMORY');
+    expect(result.status).toBe('NO_MEMORY');
+    expect(result.accepted).toBe(true);
   });
 });
 
