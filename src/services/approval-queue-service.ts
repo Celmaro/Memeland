@@ -1,5 +1,6 @@
 import { StateStore, type ApprovalOrder } from './state-store.js';
 import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
+import { ApprovalOrderStateMachine } from '../lifecycle/state-machine.js';
 
 export interface ApprovalOrderInput {
   domain: string;
@@ -100,8 +101,11 @@ export class ApprovalQueueService {
   public approve(id: string, decidedBy?: string): ApprovalOrder | null {
     const store = this.requireStore();
     const order = store.getApprovalOrder(id);
-    if (!order || order.status !== 'PENDING') return null;
-    order.status = 'APPROVED';
+    if (!order) return null;
+    // State machine owns the PENDING -> APPROVED/REJECTED edge (state-machine.ts).
+    const sm = new ApprovalOrderStateMachine(order.status);
+    if (!sm.canTransitionTo('APPROVED')) return null;
+    order.status = sm.transitionTo('APPROVED');
     order.decidedAtIso = new Date().toISOString();
     order.decidedBy = decidedBy;
     store.updateApprovalOrder(order);
@@ -125,8 +129,11 @@ export class ApprovalQueueService {
   public reject(id: string, decidedBy?: string): ApprovalOrder | null {
     const store = this.requireStore();
     const order = store.getApprovalOrder(id);
-    if (!order || order.status !== 'PENDING') return null;
-    order.status = 'REJECTED';
+    if (!order) return null;
+    // State machine owns the PENDING -> APPROVED/REJECTED edge (state-machine.ts).
+    const sm = new ApprovalOrderStateMachine(order.status);
+    if (!sm.canTransitionTo('REJECTED')) return null;
+    order.status = sm.transitionTo('REJECTED');
     order.decidedAtIso = new Date().toISOString();
     order.decidedBy = decidedBy;
     store.updateApprovalOrder(order);

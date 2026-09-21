@@ -117,6 +117,22 @@ describe('ApprovalQueueService', () => {
     expect(svc.reject('does-not-exist', 'op')).toBeNull();
   });
 
+  it('state machine (state-machine.ts) governs the approval lifecycle edges', () => {
+    const { svc } = newService();
+
+    // PENDING -> REJECTED then REJECTED is terminal (can't flip to APPROVED).
+    const a = svc.enqueue(input);
+    expect(svc.reject(a.id, 'op')?.status).toBe('REJECTED');
+    expect(svc.approve(a.id, 'op')).toBeNull();
+    expect(svc.getById(a.id)?.status).toBe('REJECTED');
+
+    // PENDING -> APPROVED then APPROVED is terminal (can't reject).
+    const b = svc.enqueue(input);
+    expect(svc.approve(b.id, 'op')?.status).toBe('APPROVED');
+    expect(svc.reject(b.id, 'op')).toBeNull();
+    expect(svc.getById(b.id)?.status).toBe('APPROVED');
+  });
+
   it('getApprovedFills counts only APPROVED orders and feeds the AUTO unlock', () => {
     const { svc } = newService();
     const a = svc.enqueue(input);
