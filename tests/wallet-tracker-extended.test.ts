@@ -10,6 +10,7 @@ import {
   sizeAndPaperCopyTrade,
   sizeCopyTradeGuarded,
   assessSolanaTimeOnCurve,
+  sizeCopyByGarchVol,
   type WalletTradeRecord,
 } from '../src/services/wallet-tracker.js';
 
@@ -156,6 +157,33 @@ describe('assessSolanaTimeOnCurve (SRC-106 SOL-only wiring)', () => {
     expect(result.enabled).toBe(true);
     expect(result.organic).toBe(false);
     expect(result.evidence.some((e) => e.includes('unreadable'))).toBe(true);
+  });
+});
+
+describe('sizeCopyByGarchVol (Q14 GARCH walk-forward wiring)', () => {
+  const garchParams = { omega: 0.01, alpha: 0.15, beta: 0.8 };
+
+  it('sizes a copy by an honestly validated walk-forward vol forecast', () => {
+    const lowVol = Array.from({ length: 40 }, (_, i) => Math.sin(i * 0.7) * 0.02);
+    const highVol = Array.from({ length: 40 }, (_, i) => Math.sin(i * 0.7) * 0.8);
+
+    const low = sizeCopyByGarchVol(lowVol, garchParams, 1000, 20);
+    const high = sizeCopyByGarchVol(highVol, garchParams, 1000, 20);
+
+    expect(low.validated).toBe(true);
+    expect(low.forecastVolPct).not.toBeNull();
+    expect(low.suggestedUsd).toBeGreaterThan(0);
+    expect(high.validated).toBe(true);
+    expect(high.forecastVolPct).not.toBeNull();
+    expect(high.suggestedUsd).toBeLessThanOrEqual(low.suggestedUsd);
+    expect(high.suggestedUsd).toBeLessThan(1000);
+  });
+
+  it('fails closed before sizing when the vol estimate cannot be validated', () => {
+    const result = sizeCopyByGarchVol([0.1, 0.2], garchParams, 1000, 20);
+    expect(result.validated).toBe(false);
+    expect(result.suggestedUsd).toBe(0);
+    expect(result.reason).toContain('too few returns');
   });
 });
 

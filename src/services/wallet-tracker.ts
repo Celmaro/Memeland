@@ -8,6 +8,7 @@ import { GMGNAdapter, type GMGNTrackTrade } from '../adapters/gmgn-adapter.js';
 import { PaperBroker, sizeCopyPosition, type PaperFill } from './solana-copy-trade.js';
 import { HesitationMemory, type HesitationBrief, type MemoryKind, type MemoryStatus } from './hesitation-memory.js';
 import { TimeOnCurveFilter, type TimeOnCurveResult, type TimeOnCurveAssessOptions } from './time-on-curve.js';
+import { garchHarnessValidation, garchWalkForward, volTargetSize, type GarchParams } from './garch-vol.js';
 
 export type EvmBalanceReader = (chain: string, token: string, owner: string) => Promise<bigint | null>;
 
@@ -483,6 +484,64 @@ export function assessSolanaTimeOnCurve(
     loader,
     minAgeHours: opts.minAgeHours,
   });
+}
+
+export interface GarchVolSizedCopy {
+  suggestedUsd: number;
+  forecastVolPct: number | null;
+  validated: boolean;
+  reason: string;
+}
+
+/**
+ * Wallet-tracker copy-sizing wrapper around the Q14 GARCH walk-forward kernel.
+ * Sizes are only accepted after the honest-harness gate proves the vol estimate,
+ * then scaled down as forecast vol rises. Fail-closed: anything short or invalid
+ * returns 0 suggested size.
+ */
+export function sizeCopyByGarchVol(
+  returns: number[],
+  params: GarchParams,
+  baseUsd: number,
+  targetVolPct: number,
+): GarchVolSizedCopy {
+  const list = Array.isArray(returns) ? returns : [];
+  if (list.length < 8) {
+    return {
+      suggestedUsd: 0,
+      forecastVolPct: null,
+      validated: false,
+      reason: 'too few returns to validate honestly',
+    };
+  }
+
+  const harness = garchHarnessValidation(list, params);
+  if (!harness.valid) {
+    return {
+      suggestedUsd: 0,
+      forecastVolPct: null,
+      validated: false,
+      reason: harness.reason,
+    };
+  }
+
+  const forecast = garchWalkForward(list, params);
+  if (forecast.vols.length === 0 || !Number.isFinite(forecast.nextVol)) {
+    return {
+      suggestedUsd: 0,
+      forecastVolPct: null,
+      validated: false,
+      reason: 'degenerate or non-finite GARCH forecast',
+    };
+  }
+
+  const forecastVolPct = forecast.nextVol * 100;
+  return {
+    suggestedUsd: volTargetSize(baseUsd, forecastVolPct, targetVolPct),
+    forecastVolPct,
+    validated: true,
+    reason: harness.reason,
+  };
 }
 
 export interface ConcentrationResult {
