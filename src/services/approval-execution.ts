@@ -8,6 +8,7 @@ import type { EVMTradeAdapter } from '../adapters/evm-adapter.js';
 import type { WalletService } from './wallet-service.js';
 import type { TradeJournalService } from './trade-journal-service.js';
 import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
+import { confidenceToFraction } from './confidence.js';
 
 export interface ExecuteMemeBuyOptions {
   evm: EVMTradeAdapter;
@@ -92,7 +93,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     side: 'BUY',
     sizeEth: opts.amountEth,
     maxSizeEth: opts.amountEth,
-    confidence: (opts.confidence || 0) / 100,
+    confidence: confidenceToFraction(opts.confidence || 0),
   };
   opts.ledger?.recordProposed(proposal);
 

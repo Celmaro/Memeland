@@ -1,6 +1,7 @@
 import { StateStore, type ApprovalOrder } from './state-store.js';
 import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
 import { ApprovalOrderStateMachine } from '../lifecycle/state-machine.js';
+import { confidenceToFraction } from './confidence.js';
 
 export interface ApprovalOrderInput {
   domain: string;
@@ -119,7 +120,7 @@ export class ApprovalQueueService {
       side: 'BUY',
       sizeEth: price > 0 ? order.suggestedSizeUsd / price : 0,
       maxSizeEth: price > 0 ? order.suggestedSizeUsd / price : 0,
-      confidence: (order.confidence || 0) / 100,
+      confidence: confidenceToFraction(order.confidence || 0),
     };
     this.ledger.recordProposed(proposal);
     return order;

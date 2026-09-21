@@ -8,6 +8,7 @@
 
 import { volTargetSize } from '../services/garch-vol.js';
 import type { DecisionCache } from '../services/decision-cache.js';
+import { confidenceToFraction } from '../services/confidence.js';
 
 export interface SizeConstraints {
   /** Hard notional ceiling for a single entry (RH default $2,000). */
@@ -100,8 +101,7 @@ export function maxPositionCapSize(desiredUsd: number, maxPositionUsd: number): 
 /** Confidence-scaled sizing: maps 0-100 confidence (or 0-1) linearly. */
 export function confidenceScaledSize(baseUsd: number, confidence: number, minScale = 0.5, maxScale = 1.5): number {
   if (!Number.isFinite(baseUsd) || baseUsd <= 0) return 0;
-  if (!Number.isFinite(confidence)) return 0;
-  const normalized = confidence > 1 ? Math.max(0, Math.min(100, confidence)) / 100 : Math.max(0, Math.min(1, confidence));
+  const normalized = confidenceToFraction(confidence);
   const floor = Math.max(0.1, Math.min(minScale, maxScale));
   const ceil = Math.max(floor, maxScale);
   return Math.round(baseUsd * (floor + (ceil - floor) * normalized));
