@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { RhFillTapeReader, FillTapeWindow } from '../src/adapters/rh-fill-tape.js';
 import type { MarketDataProvider } from '../src/adapters/market-data-provider.js';
+import { DexScreenerFeed } from '../src/adapters/dexscreener-feed.js';
 
 /**
  * The GMGN rank endpoint must return a candidate whose volume is too low to pass
@@ -108,5 +109,22 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
     expect(Array.isArray(reports)).toBe(true);
     // Both sources failed open → only the single rank candidate scanned.
     expect(agent.getLastFunnelStats().scanned).toBe(1);
+  });
+
+  it('(d) real DexScreenerFeed injected into the agent yields normalized candidates (composition-root wire)', async () => {
+    process.env.DEXSCREENER_FEED_ENABLED = 'true';
+    const feed = new DexScreenerFeed({
+      fetch: (async () => ({
+        ok: true,
+        json: async () => ({
+          tokenProfiles: [{ chainId: 'robinhood', tokenAddress: '0xREAL', symbol: 'REAL' }],
+        }),
+      })) as never,
+    });
+    const agent = new RobinhoodScreeningAgent(undefined, undefined, { dexscreener: feed });
+    const candidates = await agent.collectDexscreenerCandidates('robinhood');
+    expect(candidates.length).toBe(1);
+    expect(candidates[0]!.address).toBe('0xREAL');
+    expect(candidates[0]!.source).toBe('dexscreener');
   });
 });

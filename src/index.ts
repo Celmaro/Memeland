@@ -17,6 +17,7 @@ import { EVMTradeAdapter } from './adapters/evm-adapter.js';
 import { GMGNAdapter } from './adapters/gmgn-adapter.js';
 import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
+import { DexScreenerFeed } from './adapters/dexscreener-feed.js';
 import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
@@ -191,6 +192,8 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
   {
     voterSwarm: process.env.VOTER_SWARM_ENABLED !== 'false',
     critic: new CriticVoter(aiService),
+    // Q06 keyless DexScreener booster feed. Inert unless DEXSCREENER_FEED_ENABLED=true.
+    dexscreener: new DexScreenerFeed(),
   },
 );
 const hyperliquidAdapter = new HyperliquidAdapter();
