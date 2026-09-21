@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { OpenCatzHub, OpenCatHub } from '../orchestrator/hub.js';
+import { atomicWriteJsonSync, readJsonFileSafe } from '../storage/atomic-file-store.js';
 
 export interface ScheduledTask {
   id: string;
@@ -41,14 +42,13 @@ export class CronSchedulerService {
       fs.mkdirSync(dir, { recursive: true });
     }
     if (!fs.existsSync(this.dbPath)) {
-      fs.writeFileSync(this.dbPath, JSON.stringify([], null, 2), 'utf-8');
+      atomicWriteJsonSync(this.dbPath, []);
     }
   }
 
   private loadSchedules(): void {
     try {
-      const raw = fs.readFileSync(this.dbPath, 'utf-8');
-      const list: ScheduledTask[] = JSON.parse(raw);
+      const list = readJsonFileSafe<ScheduledTask[]>(this.dbPath, []);
       for (const t of list) {
         this.tasks.set(t.id, t);
         if (t.enabled) {
@@ -64,7 +64,7 @@ export class CronSchedulerService {
   private saveSchedules(): void {
     try {
       const list = Array.from(this.tasks.values());
-      fs.writeFileSync(this.dbPath, JSON.stringify(list, null, 2), 'utf-8');
+      atomicWriteJsonSync(this.dbPath, list);
     } catch (err: any) {
       console.error(`[CRON SCHEDULER ERROR] Failed saving schedules: ${err.message}`);
     }
