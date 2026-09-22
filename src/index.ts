@@ -28,6 +28,7 @@ import { priceAlertService, tradeJournalService, walletService, priceFeedService
 import { TelegramService } from './telegram/telegram-service.js';
 import { StateStore } from './services/state-store.js';
 import { OpportunityLedger } from './services/opportunity-ledger.js';
+import { ChatNotifier, discordChannelSink } from './notifications/chat-notifier.js';
 import { OpportunityStrategist } from './services/opportunity-strategist.js';
 import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
 import { globalDecisionLedger } from './services/decision-ledger.js';
@@ -126,9 +127,21 @@ function strategistSightingFrom(item: { payload: import('./agents/shared/agent-c
   };
 }
 
-// Rate-limited Discord notification to #opencatz-control-room (never spam)
-const controlRoomNotifyCooldown = new Map<string, number>();
+// KC5 — ChatNotifier replaces the legacy controlRoomNotifyCooldown Map +
+// notifyControlRoom helper. The notifier owns the per-key cooldown and the
+// Discord-channel-finder sink, with the standalone-engine stdout fallback
+// built-in. The discordChannelSink is bound lazily via bindDiscordClient().
 const CONTROL_ROOM_NOTIFY_MS = 10 * 60 * 1000; // max 1 notif per key per 10 minutes
+const controlRoomNotifier = new ChatNotifier({
+  cooldownMs: CONTROL_ROOM_NOTIFY_MS,
+  sink: (key, content) => console.log(`[NOTIFY/standalone] ${key}: ${content}`),
+});
+function bindDiscordClient(client: any): void {
+  // Replace the stdout fallback sink with the discord channel-finder so
+  // notifications route to Discord whenever a client is available.
+  (controlRoomNotifier as unknown as { sink: (k: string, c: string) => Promise<void> }).sink =
+    discordChannelSink(client);
+}
 
 const SCREENING_TIMEOUT_MS = Math.max(1000, Number(process.env.SCREENING_TIMEOUT_MS) || 60000);
 function withScreeningTimeout<T>(promise: Promise<T>, domain: string): Promise<T> {
@@ -144,27 +157,12 @@ function withScreeningTimeout<T>(promise: Promise<T>, domain: string): Promise<T
   });
 }
 
+// Legacy wrapper — keeps the 5 existing call sites intact. Internally routes
+// through ChatNotifier, which owns the cooldown + sink. The client argument
+// is now ignored — bindDiscordClient() rebinds the sink for live routing.
 async function notifyControlRoom(client: any, key: string, content: string): Promise<void> {
-  const now = Date.now();
-  const last = controlRoomNotifyCooldown.get(key);
-  if (last && now - last < CONTROL_ROOM_NOTIFY_MS) return;
-  controlRoomNotifyCooldown.set(key, now);
-  if (!client) {
-    // No Discord client (standalone engine): emit to stdout so the operator
-    // sees the same notification that would have been posted to #control-room.
-    console.log(`[NOTIFY/standalone] ${key}: ${content}`);
-    return;
-  }
-  try {
-    const channel = client.channels.cache.find(
-      (c: any) => c.type === ChannelType.GuildText && (c.name === 'opencatz-control-room' || c.name === 'opencat-control-room')
-    );
-    if (channel && 'send' in channel) {
-      await channel.send(content);
-    }
-  } catch (err: any) {
-    console.warn(`[NOTIFY] Control room notification failed (${key}): ${err.message}`);
-  }
+  void client;
+  await controlRoomNotifier.post(key, content);
 }
 
 const positionManager = new PositionManager();
@@ -735,6 +733,8 @@ if (discordToken && clientId) {
   client.login(discordToken).catch((err) => {
     console.warn(`[DISCORD BOT] Login skipped or failed: ${err.message}. Running in offline simulation mode.`);
   });
+  // KC5 — rebind the notifier sink to use the live Discord client.
+  bindDiscordClient(client);
 } else {
   console.log('[DISCORD BOT] DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID not set in .env. Running standalone engine.');
 }
