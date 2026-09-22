@@ -3,6 +3,7 @@ import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/a
 import type { SellTrade } from '../services/sellability/sellability-simulator.js';
 import { chainIdFor, type MarketDataProvider, type MarketDiscoveryOptions, type MarketToken } from './market-data-provider.js';
 import { TtlCache } from '../cache/ttl-cache.js';
+import { PacedHttpClient } from '../io/paced-http-client.js';
 
 /** All chains GMGN OpenAPI serves for market/token/track routes (multi-chain expansion, 2026-09-18). */
 export type Chain = 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood';
@@ -188,27 +189,27 @@ export class GMGNAdapter implements MarketDataProvider {
    * a leaky bucket rate=20/capacity=20 per key — with this spacing, bursts
    * (e.g. 30 simultaneous LP enrich requests) spread out automatically.
    */
-  private static requestQueue: Promise<void> = Promise.resolve();
-  private static lastRequestAt = 0;
-  private readonly requestSpacingMs = Math.max(
-    100,
-    Number(process.env.GMGN_REQUEST_SPACING_MS || 300)
-  );
+    private static requestQueue: Promise<void> = Promise.resolve();
+    private static lastRequestAt = 0;
+    private readonly requestSpacingMs = Math.max(
+      100,
+      Number(process.env.GMGN_REQUEST_SPACING_MS || 300)
+    );
 
-  private async paced<T>(fn: () => Promise<T>): Promise<T> {
-    const prev = GMGNAdapter.requestQueue;
-    let release!: () => void;
-    GMGNAdapter.requestQueue = new Promise((r) => { release = r; });
-    await prev;
-    try {
-      const wait = Math.max(0, GMGNAdapter.lastRequestAt + this.requestSpacingMs - Date.now());
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      GMGNAdapter.lastRequestAt = Date.now();
-      return await fn();
-    } finally {
-      release();
+    private async paced<T>(fn: () => Promise<T>): Promise<T> {
+      const prev = GMGNAdapter.requestQueue;
+      let release!: () => void;
+      GMGNAdapter.requestQueue = new Promise((r) => { release = r; });
+      await prev;
+      try {
+        const wait = Math.max(0, GMGNAdapter.lastRequestAt + this.requestSpacingMs - Date.now());
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        GMGNAdapter.lastRequestAt = Date.now();
+        return await fn();
+      } finally {
+        release();
+      }
     }
-  }
 
   constructor(apiKey?: string) {
     // Per-chain key pools: GMGN_API_KEY_SOL / GMGN_API_KEY_BSC / GMGN_API_KEY_BASE /
