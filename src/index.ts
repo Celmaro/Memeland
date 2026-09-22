@@ -29,6 +29,7 @@ import { TelegramService } from './telegram/telegram-service.js';
 import { StateStore } from './services/state-store.js';
 import { OpportunityLedger } from './services/opportunity-ledger.js';
 import { ChatNotifier, discordChannelSink } from './notifications/chat-notifier.js';
+import { withScreeningTimeout } from './runtime/screening-runner.js';
 import { OpportunityStrategist } from './services/opportunity-strategist.js';
 import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
 import { globalDecisionLedger } from './services/decision-ledger.js';
@@ -144,18 +145,9 @@ function bindDiscordClient(client: any): void {
 }
 
 const SCREENING_TIMEOUT_MS = Math.max(1000, Number(process.env.SCREENING_TIMEOUT_MS) || 60000);
-function withScreeningTimeout<T>(promise: Promise<T>, domain: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      console.warn(`[SCREENING TIMEOUT] ${domain.toUpperCase()} pass exceeded ${SCREENING_TIMEOUT_MS}ms — discarded, no signals emitted (fail-closed).`);
-      resolve([] as unknown as T);
-    }, SCREENING_TIMEOUT_MS);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); }
-    );
-  });
-}
+// withScreeningTimeout imported from src/runtime/screening-runner.js (KC6).
+// Semantics identical to the legacy inline helper: fail-closed, resolves []
+// when a pass exceeds SCREENING_TIMEOUT_MS, timer cleared on settle.
 
 // Legacy wrapper — keeps the 5 existing call sites intact. Internally routes
 // through ChatNotifier, which owns the cooldown + sink. The client argument
@@ -296,7 +288,7 @@ const runScreeningCycle = async () => {
               domain: 'meme-robinhood',
               channelName: 'call-meme-robinhood',
               isActive: () => hub.isAgentActive('meme-robinhood'),
-              runPass: () => withScreeningTimeout(robinhoodScreeningAgent.runScreeningPass(), 'meme-robinhood'),
+              runPass: () => withScreeningTimeout(robinhoodScreeningAgent.runScreeningPass(), 'meme-robinhood', SCREENING_TIMEOUT_MS),
               keyReady: () => apiKeyGuard.checkDomainKeys('meme-robinhood'),
             });
             dispatchedPayloads.push(...robinhoodDispatched);
@@ -305,7 +297,7 @@ const runScreeningCycle = async () => {
               domain: 'whale-eth',
               channelName: 'call-whale-eth',
               isActive: () => hub.isAgentActive('whale-eth'),
-              runPass: () => withScreeningTimeout(whaleScreeningAgent.runScreeningPass(), 'whale-eth'),
+              runPass: () => withScreeningTimeout(whaleScreeningAgent.runScreeningPass(), 'whale-eth', SCREENING_TIMEOUT_MS),
               keyReady: () => apiKeyGuard.checkDomainKeys('whale-eth'),
             });
             dispatchedPayloads.push(...whaleDispatched);
