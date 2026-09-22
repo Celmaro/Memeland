@@ -20,6 +20,9 @@ import path from 'path';
 import { SafeConfigRegistry, type SafeConfigIO } from './safety-registry.js';
 import { CapabilityRBAC } from './exec-governance.js';
 import { TxLock } from './rh-execution-core.js';
+import { assessSellability } from './rh-execution-core.js';
+import { EvmAdapter } from '../adapters/evm-adapter.js';
+import { evmAdapterToQuoterCall } from '../adapters/quoter-call-adapter.js';
 import { sizePosition } from '../orchestrator/position-sizing.js';
 import { CostGate } from './cost-gating.js';
 import { simulateFill } from './fill-simulation.js';
@@ -82,18 +85,59 @@ export function gateTxLock() {
   return executionTxLock;
 }
 
+const SELLABILITY_QUOTER_ADDRESS = () => process.env.SELLABILITY_QUOTER_ADDRESS?.trim() || '';
+const SELLABILITY_QUOTER_RPC_URL = () => process.env.SELLABILITY_QUOTER_RPC_URL?.trim() || '';
+
 /**
- * Quoter-honeypot sellability gate — returns a transport-gated check. Until a real
- * eth_call Quoter transport is configured this reports "not configured" (DO NOT pass
- * to executeMemeBuy in that case; keep it a no-op hook).
+ * Quoter-honeypot sellability gate. Returns a real transport-backed check when a
+ * Quoter eth_call transport is configured (SELLABILITY_QUOTER_ADDRESS +
+ * SELLABILITY_QUOTER_RPC_URL); otherwise it reports "not configured" and the gate
+ * FAILS CLOSED (sellable: false) so execution is refused rather than silently
+ * passing on an unenforceable claim. The call site decides whether to pass the
+ * gate at all (see sellabilityConfigured()).
  */
 export function gateSellability() {
+  const quoterAddress = SELLABILITY_QUOTER_ADDRESS();
+  const rpcUrl = SELLABILITY_QUOTER_RPC_URL();
+  const transportConfigured = quoterAddress.length > 0 && rpcUrl.length > 0;
   return {
-    check: async (tokenAddress: string): Promise<{ sellable: boolean; reason: string }> => ({
-      sellable: true,
-      reason: `sellability check not configured — not enforced (token ${tokenAddress})`,
-    }),
+    check: transportConfigured
+      ? async (tokenAddress: string): Promise<{ sellable: boolean; reason: string }> => {
+          const adapter = new EvmAdapter({
+            hosts: [{ url: rpcUrl }],
+          });
+          const call = evmAdapterToQuoterCall(adapter, { to: quoterAddress, chain: 4663 });
+          // Quoter payload: quoteExactInputSingle((tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96)).
+          // tokenIn = native USDC placeholder on robinhood; callers override via env when they have
+          // the real pool that the token trades against. If the call fails or returns empty,
+          // assessSellability fails closed (cannot sell).
+          return assessSellability(call, quoteSinglePayload(tokenAddress));
+        }
+      : async (tokenAddress: string): Promise<{ sellable: boolean; reason: string }> => ({
+          sellable: false,
+          reason: `sellability check not configured — fail-closed (token ${tokenAddress}). Set SELLABILITY_QUOTER_ADDRESS + SELLABILITY_QUOTER_RPC_URL to enforce.`,
+        }),
   };
+}
+
+/** True when a Quoter eth_call transport is configured (execution-gates can wire the gate). */
+export function sellabilityConfigured(): boolean {
+  return SELLABILITY_QUOTER_ADDRESS().length > 0 && SELLABILITY_QUOTER_RPC_URL().length > 0;
+}
+
+/**
+ * Minimal Uniswap V3 Quoter `quoteExactInputSingle` calldata:
+ * quoteExactInputSingle(address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)
+ * Selector verified against viem: 0x1296323f. Flat params, no head offset word.
+ * Stays dependency-free (manual ABI packing); the Quoter returns the output amount
+ * when the eth_call succeeds, which is what assessSellability requires.
+ */
+export function quoteSinglePayload(tokenOut: string, fee = 3000, amountIn = 1000000n, sqrtPriceLimitX96 = 0n): string {
+  const selector = '0x1296323f'; // keccak256("quoteExactInputSingle(address,address,uint256,uint24,uint160)")[0:4]
+  const tokenIn = process.env.SELLABILITY_QUOTER_TOKEN_IN?.trim() || '0x0000000000000000000000000000000000000000';
+  const p = (v: bigint) => v.toString(16).padStart(64, '0');
+  const addr = (a: string) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+  return `${selector}${addr(tokenIn)}${addr(tokenOut)}${p(amountIn)}${p(BigInt(fee))}${p(sqrtPriceLimitX96)}`;
 }
 
 // ── Q07/Q08/Q13/Q11 providers (wired into executeMemeBuy via the live call sites) ──

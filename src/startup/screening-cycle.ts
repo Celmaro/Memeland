@@ -16,6 +16,7 @@ import type { ChatNotifier } from '../notifications/chat-notifier.js';
 import { isAutoExecute, isSignalOnly } from '../config/config.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
 import { globalDecisionCache } from '../services/decision-cache.js';
+import { sellabilityConfigured } from '../services/execution-gates.js';
 
 /**
  * Dependency surface of the screening cycle. Typed `any` deliberately: the
@@ -292,22 +293,23 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
           const autoExec = hub.isAutoExecuteEnabled(autoExecDomain);
           if (autoExec.enabled) {
             try {
-              // ── RISK GATE (RiskEngineV2 / RiskManager) ──
-              // Never execute (even simulated) when risk limits are hit: global
-              // drawdown cap, per-trade size cap, or kill-switch active. This wires
-              // the previously-dead risk engine into the actual execution path.
-              const riskCheck = hub.getRiskManager().isTradeAllowed(autoExec.maxTradeAmount || 0.1);
-              if (!riskCheck.allowed) {
-                console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by risk gate — ${riskCheck.reason}`);
-                globalOperationalHealth.recordAlert('RISK_WARNING', `Risk gate blocked ${item.payload.symbol}`, riskCheck.reason);
-                await notifyControlRoom(getActiveClient(), `risk:${autoExecDomain}`, `🚫 **RISK GATE BLOCKED** auto-execute ${autoExecDomain} ${item.payload.symbol}: ${riskCheck.reason}`);
-                break;
-              }
-              if (globalRiskEngineV2.checkKillSwitchStatus()) {
-                console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED — emergency kill-switch active.`);
-                globalOperationalHealth.setKillSwitch(true, Date.now());
-                globalOperationalHealth.recordAlert('RISK_WARNING', `Kill-switch active`, `${autoExecDomain} ${item.payload.symbol} blocked`);
-                await notifyControlRoom(getActiveClient(), 'risk:killswitch', `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`);
+              // ── RISK GATE (single authority: RiskEngineV2 → RiskManager + kill-switch) ──
+              // Gemini G-3 fix: one gate consults the risk-manager limits AND the
+              // kill-switch, preserving the exact precedence of the two separate
+              // calls this replaces (risk-manager first, then kill-switch).
+              const riskGate = globalRiskEngineV2.checkExecutionAllowed(autoExec.maxTradeAmount || 0.1, hub.getRiskManager());
+              if (!riskGate.allowed) {
+                const isKill = riskGate.source === 'kill-switch';
+                console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by risk gate — ${riskGate.reason}`);
+                globalOperationalHealth.recordAlert('RISK_WARNING', isKill ? 'Kill-switch active' : `Risk gate blocked ${item.payload.symbol}`, riskGate.reason);
+                if (isKill) globalOperationalHealth.setKillSwitch(true, Date.now());
+                await notifyControlRoom(
+                  getActiveClient(),
+                  isKill ? 'risk:killswitch' : `risk:${autoExecDomain}`,
+                  isKill
+                    ? `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`
+                    : `🚫 **RISK GATE BLOCKED** auto-execute ${autoExecDomain} ${item.payload.symbol}: ${riskGate.reason}`,
+                );
                 break;
               }
               if (autoExecDomain && item.payload.contractAddress) {
@@ -328,7 +330,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
                   safety: { isSafe: gateSafety },
                   txLock: gateTxLock(),
                   sizer: gateSizer(),
-                  sellability: gateSellability(),
+                  sellability: sellabilityConfigured() ? gateSellability() : undefined,
                   fillSim: gateFillSim(),
                   costGate: gateCostGate(),
                   governance: gateGovernance(),

@@ -224,7 +224,10 @@ export class StateStore {
         openPositions: data.openPositions || {},
         priceAlerts: data.priceAlerts || {},
         tradeJournalEntries: data.tradeJournalEntries || {},
-        walletKeys: data.walletKeys || {},
+        // DuckAI P0-1: wallet keys are memory-only — never hydrate from disk.
+        // A legacy file may still contain them; ignore it so the key only ever
+        // enters via env (EVM_PRIVATE_KEY) or a runtime /wallet command.
+        walletKeys: {},
         agentStates: data.agentStates || {},
         signalLedger: Array.isArray(data.signalLedger) ? data.signalLedger : [],
         dedupEntries: data.dedupEntries || {},
@@ -245,7 +248,10 @@ export class StateStore {
   private saveToDiskSync(state: OpenCatPersistedState): void {
     try {
       state.lastUpdated = new Date().toISOString();
-      atomicWriteJsonSync(this.dbFilePath, state);
+      // DuckAI P0-1: never persist wallet keys. Strip before the atomic write so
+      // a runtime-set key (e.g. /wallet command) stays memory-only.
+      const { walletKeys: _stripped, ...safeState } = state;
+      atomicWriteJsonSync(this.dbFilePath, safeState);
     } catch (err: any) {
       console.error('[STATE STORE ERROR] Failed to save state:', err.message);
     }

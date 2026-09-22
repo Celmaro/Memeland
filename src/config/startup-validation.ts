@@ -63,8 +63,12 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): Sta
       errors.push({ key: 'OPERATOR_APPROVAL_REQUIRED', message: 'cannot be false for live auto-execution' });
     }
     if (!env.EVM_PRIVATE_KEY?.trim()) errors.push({ key: 'EVM_PRIVATE_KEY', message: 'is required for live auto-execution' });
+    // DuckAI P0-3: the safety registry must actually be enforced for live
+    // auto-execution — an opt-in gate that defaults to bypass is not a gate.
+    if (!(env.SAFETY_GATE_ENFORCED === 'true' || env.SAFETY_GATE_ENFORCED === '1')) {
+      errors.push({ key: 'SAFETY_GATE_ENFORCED', message: 'must be explicitly enabled for live auto-execution (opt-in bypass is not a safety gate)' });
+    }
   }
-
   // LI.FI is the ONLY execution layer. Live execution therefore also needs the
   // LI.FI integrator id, and any Solana chain in MULTICHAIN_CHAINS needs a
   // Solana keypair (EVM and Solana cannot share one address). Funding tokens are

@@ -21,7 +21,7 @@ Autonomous Multi-Agent Crypto Intelligence & On-Chain Trading Engine
   <a href="https://x.com/pxidentities"><img src="https://img.shields.io/badge/X-%40pxidentities-black.svg?style=flat-square&logo=x&logoColor=white" alt="X (Twitter)"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D22.12-green.svg?style=flat-square&logo=node.js&logoColor=white" alt="Node Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
-  <a href="https://vitest.dev/"><img src="https://img.shields.io/badge/Tests-35%20Passed%20(264%20tests)-brightgreen.svg?style=flat-square" alt="Tests"></a>
+  <a href="https://vitest.dev/"><img src="https://img.shields.io/badge/Tests-125%20Passed%20(914%20tests)-brightgreen.svg?style=flat-square" alt="Tests"></a>
 </p>
 
 **OpenCatz AI (Robinhood Chain Edition)** is an autonomous, open-source **Agentic AI Crypto Intelligence & Trading Ecosystem** built exclusively for **Robinhood Chain (EVM L2, Chain ID #4663, Native ETH)**.
@@ -113,14 +113,13 @@ opencatz deploy
                                         │ Approved Signals
                                         ▼
                           MULTI-CHANNEL SIGNAL DISPATCH
-                    (Take-Profit 2x/3x · Stop-Loss -20%)
+                    (Take-Profit 2x/3x · Stop-Loss -50%)
 ```
 
 - **Core Hub & Orchestrator:** Natural language chat, wallet balances, risk limits, and on-demand token audits.
 - **3 Specialist Scouts:** Autonomous agents monitoring DEX tokens, social sentiment, and ETH whale perps.
 - **Collaborative Consensus:** 3-layer cross-verification demanding a **$\ge 80\%$ confidence score** before delivering call cards.
-- **9-Lives Risk Engine:** Dynamic capital protection (-20% stop-loss, 2x/3x take-profit ladder, trailing stops).
-- **Universal Multi-Key Pool:** Automatic rotation on HTTP 429/401/403 across unlimited backup keys.
+- **9-Lives Risk Engine:** Dynamic capital protection (-50% stop-loss, 2x/3x take-profit ladder, trailing stops).
 
 ---
 
@@ -144,7 +143,7 @@ opencatz deploy
 | `opencatz deploy` | `pm2` | 🌐 Build & deploy 24/7 background daemon process via PM2 |
 | `opencatz doctor` | `check` | 🩺 Check API key pools, Robinhood RPC latency, & diagnostics |
 | `opencatz update` | - | 🔄 Pull latest updates from Git, rebuild, & hot-restart daemon |
-| `opencatz test` | - | 🧪 Run full automated test suite (Vitest, 35 test suites) |
+| `opencatz test` | - | 🧪 Run full automated test suite (Vitest, 125 test suites) |
 | `opencatz build` | - | ⚙️ Compile strict TypeScript codebase to production `/dist` |
 | `opencatz uninstall`| `purge`, `clean` | 🧹 Cleanly stop PM2 daemon, clear build artifacts, & reset DB |
 
@@ -194,7 +193,7 @@ opencatz deploy
 
 Every trade candidate is governed by the automated **9-Lives Risk Engine**:
 
-- **Hard Stop-Loss (`-20%`)**: Automated capital protection cutoff to eliminate catastrophic drawdowns.
+- **Hard Stop-Loss (`-50%`)**: Automated capital protection cutoff to eliminate catastrophic drawdowns (matches position-manager `stopLossPct ?? 0.5`).
 - **Tiered Take-Profit Ladder**: Automated partial profit locking at **`+100% (2x)`** and **`+200% (3x)`**.
 - **Dynamic Trailing Stop**: Activates once a position reaches `+50%` profit to protect unrealized gains.
 - **Fail-Closed Security**: If security checks (GoPlus/GMGN) encounter timeouts or warnings, candidate tokens are automatically discarded.
@@ -212,9 +211,9 @@ npm test
 ```
 
 ```
- Test Files  35 passed (35)
-      Tests  264 passed (264)
-   Duration  ~11s
+ Test Files  125 passed (125)
+      Tests  914 passed (914)
+   Duration  ~39s
 ```
 
 ---
