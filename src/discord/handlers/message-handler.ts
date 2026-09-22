@@ -213,8 +213,7 @@ export async function handleControlRoomMessage(
   // 1c. Detect if user is asking to Swap tokens
   const isSwapIntent = ['swap', 'exchange', 'convert'].some(kw => lowerQuery.includes(kw));
   if (isSwapIntent) {
-    const { RelayAdapter } = await import('../../adapters/relay-adapter.js');
-    const relayAdapter = new RelayAdapter();
+    const { globalLifiExecutor } = await import('../../adapters/lifi-executor.js');
 
     const chains = ['robinhood', 'ethereum', 'eth'];
     const foundChain = chains.find(c => lowerQuery.includes(c));
@@ -229,18 +228,18 @@ export async function handleControlRoomMessage(
     const numbers = userQuery.match(/\b\d+(\.\d+)?\b/g);
     const amount = numbers && numbers.length > 0 ? parseFloat(numbers[0]) : 0.1;
 
-    const result = await relayAdapter.executeSwap({ chain, fromToken, toToken, amount }, walletService);
+    const result = await globalLifiExecutor.swap({ chain, fromToken, toToken, amount });
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setLabel(`View on Explorer`)
         .setStyle(ButtonStyle.Link)
-        .setURL(result.explorerUrl || result.relayWebUrl)
+        .setURL(result.explorerUrl || result.webUrl)
     );
 
     await safeReply(message, {
       content:
-        `🔄 **OPENCATZ RELAY.LINK SWAP DIRECT EXECUTION**\n\n` +
+        `🔄 **OPENCATZ LI.FI / JUMPER SWAP DIRECT EXECUTION**\n\n` +
         `• **Swapping:** \`${result.amountIn} ${result.fromToken}\` ➡️ \`~${result.expectedAmountOut} ${result.toToken}\`\n` +
         `• **Chain:** **${result.chainName}**\n` +
         `• **Fee:** \`~$${result.feeUsd.toFixed(2)} USD\`\n` +
@@ -256,8 +255,7 @@ export async function handleControlRoomMessage(
   const isSendIntent = ['send', 'transfer'].some(kw => lowerQuery.includes(kw));
   const evmAddrMatch = userQuery.match(/\b0x[a-fA-F0-9]{40}\b/);
   if (isSendIntent && evmAddrMatch) {
-    const { RelayAdapter } = await import('../../adapters/relay-adapter.js');
-    const relayAdapter = new RelayAdapter();
+    const { globalLifiExecutor } = await import('../../adapters/lifi-executor.js');
 
     const recipientAddress = evmAddrMatch[0];
     const chain = 'robinhood';
@@ -270,19 +268,19 @@ export async function handleControlRoomMessage(
     const numbers = userQuery.match(/\b\d+(\.\d+)?\b/g);
     const amount = numbers && numbers.length > 0 ? parseFloat(numbers[0]) : 0.1;
 
-    const result = await relayAdapter.executeSend({ chain, token, amount, recipientAddress }, walletService);
+    const result = await globalLifiExecutor.send({ chain, token, amount, recipientAddress });
 
     const shortAddr = `${result.recipientAddress.substring(0, 6)}...${result.recipientAddress.substring(result.recipientAddress.length - 4)}`;
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setLabel(`View on Explorer`)
         .setStyle(ButtonStyle.Link)
-        .setURL(result.explorerUrl || result.relayWebUrl)
+        .setURL(result.explorerUrl || result.webUrl)
     );
 
     await safeReply(message, {
       content:
-        `📤 **OPENCATZ RELAY.LINK SEND DIRECT EXECUTION**\n\n` +
+        `📤 **OPENCATZ LI.FI / JUMPER SEND DIRECT EXECUTION**\n\n` +
         `• **Sending:** \`${result.amountIn} ${result.tokenSymbol}\` to \`${shortAddr}\`\n` +
         `• **Chain:** **${result.chainName}**\n` +
         `• **Recipient Receives:** \`~${result.expectedAmountOut} ${result.tokenSymbol}\`\n` +

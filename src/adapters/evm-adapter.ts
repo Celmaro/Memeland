@@ -2,7 +2,7 @@ import type { WalletService } from '../services/wallet-service.js';
 import { isDryRun as isDryRunMode } from '../config/config.js';
 import { fetchWithKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 import { clampSize, type AdapterError, type Result } from './result.js';
-import { callWithRetry } from '../io/call-policy.js';
+import { resolveExecutionChain } from '../config/execution-registry.js';
 
 export interface EVMTradeRequest {
   chain: string;
@@ -36,10 +36,6 @@ export interface EVMSwapRequest {
   amountEth: number;
 }
 
-const CHAIN_ID_MAP: Record<string, number> = {
-  robinhood: 4663, '4663': 4663,
-};
-
 export class EVMTradeAdapter {
   private isDryRun: boolean;
   private uniswapKeyPool: ApiKeyPool = loadApiKeyPool('UNISWAP_API_KEY');
@@ -49,8 +45,7 @@ export class EVMTradeAdapter {
   }
 
   public parseChainId(chainInput: string | number): number {
-    const key = String(chainInput).toLowerCase().trim();
-    return CHAIN_ID_MAP[key] || 4663;
+    return resolveExecutionChain(String(chainInput)).lifiChainId;
   }
 
   public async executeBuyToken(request: EVMTradeRequest, walletService?: WalletService): Promise<EVMTradeResult> {
@@ -121,74 +116,17 @@ export class EVMTradeAdapter {
     }
 
     try {
-      if (!walletService || !walletService.hasWallet('evm')) {
-        return {
-          success: false,
-          chain: String(request.chain),
-          inputEth: request.amountEth,
-          outputTokens: 0,
-          dexUsed: dexName,
-          simulated: false,
-          error: 'EVM wallet not configured for AUTO_EXECUTE mode. Set EVM_PRIVATE_KEY in .env or run /wallet setup.',
-        };
-      }
-
-      const chainId = this.parseChainId(request.chain);
-      const userAddr = walletService.getEvmAddress();
-
-      // Idempotent quote: retry transient HTTP failures via the shared call policy.
-      const response = await callWithRetry(async () => {
-        const res = await fetch('https://api.relay.link/quote/v2', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user: userAddr,
-            originChainId: chainId,
-            destinationChainId: chainId,
-            originCurrency: '0x0000000000000000000000000000000000000000',
-            destinationCurrency: request.tokenAddress,
-            amount: BigInt(Math.round(request.amountEth * 1e18)).toString(),
-          }),
-        });
-
-        if (!res.ok) {
-          const err = new Error(`Relay Swap quote error: ${await res.text()}`) as Error & { status?: number };
-          err.status = res.status;
-          throw err;
-        }
-        return res;
-      });
-
-      const quoteData = await response.json() as Record<string, unknown>;
-      const steps = quoteData.steps as Array<Record<string, unknown>> | undefined;
-      const firstStep = steps?.[0];
-      const items = firstStep?.items as Array<Record<string, unknown>> | undefined;
-      const txData = items?.[0]?.data as Record<string, unknown> | undefined;
-
-      if (!txData) {
-        throw new Error('No transaction step payload returned for Robinhood Chain swap execution.');
-      }
-
-      const walletClient = walletService.getEvmWalletClient(chainId);
-      const account = walletService.getEvmAccount();
-
-      const txHash = await walletClient.sendTransaction({
-        account,
-        chain: walletClient.chain || null,
-        to: String(txData.to) as `0x${string}`,
-        data: String(txData.data) as `0x${string}`,
-        value: BigInt(String(txData.value || 0)),
-      });
-
+      // Live execution now routes exclusively through the LI.FI executor
+      // (lifi-executor.ts). The raw EVM adapter no longer quotes/broadcasts via
+      // Relay — fail closed here so nothing bypasses the LI.FI-only layer.
       return {
-        success: true,
-        txHash,
-        explorerUrl: walletService.getExplorerUrl(chainId, txHash),
+        success: false,
         chain: String(request.chain),
         inputEth: request.amountEth,
-        outputTokens: Number((quoteData.details as any)?.currencyOut?.amount || 0) / 1e18,
-        dexUsed: 'Uniswap V3 Router (Robinhood L2)',
+        outputTokens: 0,
+        dexUsed: dexName,
         simulated: false,
+        error: 'live EVM execution now routes through the LI.FI executor — raw EVM adapter buy disabled (fail-closed)',
       };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -258,7 +196,7 @@ export class EVMTradeAdapter {
   }
 
   /**
-   * Swap tokens on EVM via Relay API / DEX router
+   * Swap tokens on EVM (simulated only — live swaps route through the LI.FI executor)
    */
   public async swapToken(request: EVMSwapRequest, walletService?: WalletService): Promise<EVMTradeResult> {
     const chainId = this.parseChainId(request.chain);
@@ -273,7 +211,7 @@ export class EVMTradeAdapter {
         chain: String(request.chain),
         inputEth: request.amountEth,
         outputTokens: request.amountEth * 3200, // Simulated output e.g. ETH -> USDC
-        dexUsed: 'Relay / Uniswap v3 Router',
+        dexUsed: 'LI.FI / Jumper (simulated)',
         simulated: true,
       };
     }
@@ -283,61 +221,17 @@ export class EVMTradeAdapter {
         throw new Error('EVM wallet not configured. Use /wallet setup or set EVM_PRIVATE_KEY in .env');
       }
 
-      // Live Relay step execution: Request quote with calldata step, sign via viem, broadcast
-      const userAddr = walletService.getEvmAddress();
-      // Idempotent quote: retry transient HTTP failures via the shared call policy.
-      const response = await callWithRetry(async () => {
-        const res = await fetch('https://api.relay.link/quote/v2', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user: userAddr,
-            originChainId: chainId,
-            destinationChainId: chainId,
-            originCurrency: request.fromToken,
-            destinationCurrency: request.toToken,
-            amount: (request.amountEth * 1e18).toString(),
-          }),
-        });
-
-        if (!res.ok) {
-          const err = new Error(`Relay API quote error: ${await res.text()}`) as Error & { status?: number };
-          err.status = res.status;
-          throw err;
-        }
-        return res;
-      });
-
-      const quoteData = await response.json() as Record<string, unknown>;
-      const steps = quoteData.steps as Array<Record<string, unknown>> | undefined;
-      const firstStep = steps?.[0];
-      const items = firstStep?.items as Array<Record<string, unknown>> | undefined;
-      const txData = items?.[0]?.data as Record<string, unknown> | undefined;
-
-      if (!txData) {
-        throw new Error('No transaction step data returned from Relay API');
-      }
-
-      const walletClient = walletService.getEvmWalletClient(chainId);
-      const account = walletService.getEvmAccount();
-
-      const txHash = await walletClient.sendTransaction({
-        account,
-        chain: walletClient.chain || null,
-        to: String(txData.to) as `0x${string}`,
-        data: String(txData.data) as `0x${string}`,
-        value: BigInt(String(txData.value || 0)),
-      });
-
+      // Live swaps now route exclusively through the LI.FI executor
+      // (lifi-executor.ts). The raw EVM adapter no longer quotes/broadcasts via
+      // Relay — fail closed here so nothing bypasses the LI.FI-only layer.
       return {
-        success: true,
-        txHash,
-        explorerUrl: walletService.getExplorerUrl(chainId, txHash),
+        success: false,
         chain: String(request.chain),
         inputEth: request.amountEth,
-        outputTokens: Number((quoteData.details as any)?.currencyOut?.amount || 0) / 1e18,
-        dexUsed: 'Relay Router',
+        outputTokens: 0,
+        dexUsed: 'LI.FI / Jumper (disabled on raw EVM adapter)',
         simulated: false,
+        error: 'live EVM swap now routes through the LI.FI executor — raw EVM adapter swap disabled (fail-closed)',
       };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -347,7 +241,7 @@ export class EVMTradeAdapter {
         chain: String(request.chain),
         inputEth: request.amountEth,
         outputTokens: 0,
-        dexUsed: 'Relay Router',
+        dexUsed: 'LI.FI / Jumper (disabled on raw EVM adapter)',
         simulated: false,
         error: errMsg,
       };

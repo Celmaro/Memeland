@@ -21,7 +21,7 @@ import { PriceAlertService } from '../../services/price-alert-service.js';
 import { TradeJournalService } from '../../services/trade-journal-service.js';
 import { globalWalletService } from '../../services/wallet-service.js';
 import { globalApprovalQueueService } from '../../services/approval-queue-service.js';
-import { RelayAdapter } from '../../adapters/relay-adapter.js';
+import { globalLifiExecutor } from '../../adapters/lifi-executor.js';
 import { runTokenAudit } from '../../services/token-audit-service.js';
 import { createDashboardComponents } from '../embeds/dashboard-embed.js';
 
@@ -482,16 +482,15 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
     const amount = interaction.options.getNumber('amount', true);
     const chain = interaction.options.getString('chain') || 'robinhood';
 
-    const relayAdapter = new RelayAdapter();
-    const result = await relayAdapter.executeSwap({
+    const result = await globalLifiExecutor.swap({
       chain,
       fromToken: from,
       toToken: to,
       amount,
-    }, walletService);
+    });
 
     const embed = new EmbedBuilder()
-      .setTitle(`🔄 RELAY.LINK TOKEN SWAP DIRECT EXECUTION`)
+      .setTitle(`🔄 LI.FI / JUMPER TOKEN SWAP DIRECT EXECUTION`)
       .setColor(0x7B3FE4)
       .setDescription(
         `🔄 **Swapping:** \`${result.amountIn} ${result.fromToken}\` ➡️ \`~${result.expectedAmountOut} ${result.toToken}\`\n` +
@@ -501,13 +500,13 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
         `⚡ **Est. Speed:** \`~${result.estimatedDurationSeconds} seconds\`\n` +
         `💡 **Execution Mode:** ${result.simulated ? '`DRY_RUN (Simulated Direct On-Chain Swap)`' : '`Live Broadcast`'}`
       )
-      .setFooter({ text: 'Powered by Relay.link Swap Engine • OpenCatz Multi-Agent Hub' });
+      .setFooter({ text: 'Powered by LI.FI / Jumper Swap Engine • OpenCatz Multi-Agent Hub' });
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setLabel(`View on Explorer`)
         .setStyle(ButtonStyle.Link)
-        .setURL(result.explorerUrl || result.relayWebUrl)
+        .setURL(result.explorerUrl || result.webUrl)
     );
 
     await interaction.reply({ embeds: [embed], components: [actionRow] });
@@ -517,16 +516,15 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
     const token = interaction.options.getString('token') || 'ETH';
     const chain = interaction.options.getString('chain') || 'robinhood';
 
-    const relayAdapter = new RelayAdapter();
-    const result = await relayAdapter.executeSend({
+    const result = await globalLifiExecutor.send({
       chain,
       token,
       amount,
       recipientAddress: to,
-    }, walletService);
+    });
 
     const embed = new EmbedBuilder()
-      .setTitle(`📤 RELAY.LINK TOKEN SEND DIRECT EXECUTION`)
+      .setTitle(`📤 LI.FI / JUMPER TOKEN SEND DIRECT EXECUTION`)
       .setColor(0x00C853)
       .setDescription(
         `📤 **Sending:** \`${result.amountIn} ${result.tokenSymbol}\` to \`${result.recipientAddress.substring(0, 6)}...${result.recipientAddress.substring(result.recipientAddress.length - 4)}\`\n` +
@@ -537,13 +535,13 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
         `⚡ **Est. Speed:** \`~${result.estimatedDurationSeconds} seconds\`\n` +
         `💡 **Execution Mode:** ${result.simulated ? '`DRY_RUN (Simulated Direct On-Chain Transfer)`' : '`Live Broadcast`'}`
       )
-      .setFooter({ text: 'Powered by Relay.link Transfer Engine • OpenCatz Multi-Agent Hub' });
+      .setFooter({ text: 'Powered by LI.FI / Jumper Transfer Engine • OpenCatz Multi-Agent Hub' });
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setLabel(`View on Explorer`)
         .setStyle(ButtonStyle.Link)
-        .setURL(result.explorerUrl || result.relayWebUrl)
+        .setURL(result.explorerUrl || result.webUrl)
     );
 
     await interaction.reply({ embeds: [embed], components: [actionRow] });

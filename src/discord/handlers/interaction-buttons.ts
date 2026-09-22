@@ -12,6 +12,7 @@ import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
 import { createDashboardComponents } from '../embeds/dashboard-embed.js';
 import { globalRiskEngineV2 } from '../../orchestrator/risk-engine-v2.js';
 import { EVMTradeAdapter } from '../../adapters/evm-adapter.js';
+import { globalLifiExecutor } from '../../adapters/lifi-executor.js';
 import { executeMemeBuy } from '../../services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from '../../services/execution-gates.js';
 import { priceAlertService, walletService, tradeJournalService, approvalQueueService, buildDashboardOptions } from './command-handlers.js';
@@ -125,6 +126,7 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         wallet: walletService,
         journal: tradeJournalService,
         onExecuted: () => approvalQueueService.recordExecuted(approved.id),
+        executor: globalLifiExecutor,
         chain: approved.chain,
         symbol: approved.symbol,
         contractAddress: approved.contractAddress,

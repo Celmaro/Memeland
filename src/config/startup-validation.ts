@@ -1,3 +1,5 @@
+import { normalizeExecutionChainKey, resolveFundingToken } from './execution-registry.js';
+
 export interface StartupConfigError {
   key: string;
   message: string;
@@ -28,6 +30,13 @@ function isLoopback(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
 }
 
+function executableChains(env: NodeJS.ProcessEnv): string[] {
+  return (env.MULTICHAIN_CHAINS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 /** Pure, centralized validation for settings that can change startup safety. */
 export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): StartupConfigResult {
   const errors: StartupConfigError[] = [];
@@ -54,6 +63,36 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): Sta
       errors.push({ key: 'OPERATOR_APPROVAL_REQUIRED', message: 'cannot be false for live auto-execution' });
     }
     if (!env.EVM_PRIVATE_KEY?.trim()) errors.push({ key: 'EVM_PRIVATE_KEY', message: 'is required for live auto-execution' });
+  }
+
+  // LI.FI is the ONLY execution layer. Live execution therefore also needs the
+  // LI.FI integrator id, and any Solana chain in MULTICHAIN_CHAINS needs a
+  // Solana keypair (EVM and Solana cannot share one address). Funding tokens are
+  // resolved fail-closed from the registry so a typo'd override fails startup.
+  const chains = executableChains(env);
+  if (chains.length > 0) {
+    if (liveAuto && !env.LIFI_INTEGRATOR?.trim()) {
+      errors.push({ key: 'LIFI_INTEGRATOR', message: 'is required for live auto-execution (LI.FI is the only execution layer)' });
+    }
+    if (chains.includes('sol') && !env.SOLANA_PRIVATE_KEY?.trim()) {
+      errors.push({ key: 'SOLANA_PRIVATE_KEY', message: 'is required when sol is in MULTICHAIN_CHAINS' });
+    }
+    // Fail closed on a bad funding-token override: any executable chain whose
+    // configured funding token does not resolve (unknown / non-stablecoin) is a
+    // startup error rather than a silent mis-fund.
+    for (const chain of chains) {
+      const key = normalizeExecutionChainKey(chain);
+      if (!key) continue;
+      const override = env[`EXECUTION_FUNDING_TOKEN_${key.toUpperCase()}`];
+      try {
+        resolveFundingToken(key, override);
+      } catch (err) {
+        errors.push({
+          key: `EXECUTION_FUNDING_TOKEN_${key.toUpperCase()}`,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   const host = env.API_BIND_HOST || '127.0.0.1';

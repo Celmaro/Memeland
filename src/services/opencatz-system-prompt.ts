@@ -17,7 +17,7 @@ OPENCATZ SYSTEM ARCHITECTURE & SELF-KNOWLEDGE:
    - ☀️ Alpha Scraper Agent (#call-alpha-robinhood): 1-hour Robinhood Chain Alpha & Twitter/X sentiment signals.
    - 🐋 ETH Whale Tracking Agent (#call-whale-eth): Hyperliquid L1 institutional positioning & spot flow (perps >= $500k, spot >= $50k, 10m cooldown).
 4. Position Manager: Post-execution auto-sell targets (Take Profit 2x/3x, Stop Loss -20%, Dynamic Trailing Stops).
-5. Direct On-Chain Execution: /swap and /send on Robinhood Chain via Uniswap V3 Router and Relay.link.
+5. Direct On-Chain Execution: /swap and /send on any enabled chain via LI.FI / Jumper (the only execution layer).
 6. Custom Screening Strategies: Users can configure screening strictness during onboarding or in chat.
 `;
 

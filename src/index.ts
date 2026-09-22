@@ -15,6 +15,7 @@ import { globalHealthWatcher } from './services/health-watcher.js';
 import { globalMarketRegimeFilter, computeWhaleRiskOff } from './services/market-regime.js';
 import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
+import { globalLifiExecutor } from './adapters/lifi-executor.js';
 import { GMGNAdapter } from './adapters/gmgn-adapter.js';
 import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
@@ -36,6 +37,7 @@ import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability } from './services/execution-gates.js';
+import { executableChainsFromEnv, normalizeExecutionChainKey } from './config/execution-registry.js';
 import { bootstrapStartupConfig, printStartupBanner } from './startup/bootstrap.js';
 import { registerGracefulShutdown } from './startup/shutdown.js';
 import { createMarketRiskMonitor, startRuntimeMonitoring } from './startup/risk.js';
@@ -227,7 +229,7 @@ const loadedSkills = skillLoader.loadAllSkills();
 console.log(`[SKILL SYSTEM] Active skills loaded: ${loadedSkills.length} (${loadedSkills.map(s => s.name).join(', ')})`);
 console.log(`[SECURITY SERVICES] GMGN + GoPlus Security Initialized (sol/bsc/base/eth/robinhood).`);
 console.log(`[SCREENING AGENTS] Multi-Chain Meme (7-voter swarm) + ETH Whale Tracking Agents Initialized.`);
-console.log(`[SCREENING ADAPTERS] GMGN AI + GoPlus + Relay + Hyperliquid + EVM Adapters Initialized.`);
+      console.log(`[SCREENING ADAPTERS] GMGN AI + GoPlus + LI.FI + Hyperliquid + EVM Adapters Initialized.`);
 console.log(`[AI SERVICE] Configured with provider: ${aiService.getConfig().provider}, model: ${aiService.getConfig().modelName}`);
 
 const discordToken = process.env.DISCORD_BOT_TOKEN;
@@ -411,16 +413,22 @@ const runScreeningCycle = async () => {
       // PENDING order for one-click Approve/Cancel on the call card. AUTO
       // stays locked until the approved-fill + expectancy gate opens.
       let approvalOrderId: string | undefined;
-      if (item.channelName === 'call-meme-robinhood' && item.payload.contractAddress) {
+      // Multi-chain execution: resolve the signal's chain from the payload and
+      // only admit chains that are in the executable registry. Unknown chains
+      // fail closed — they never reach the approval ladder.
+      const signalChainKey = normalizeExecutionChainKey(String(item.payload.network || 'robinhood')) ?? 'robinhood';
+      const signalExecutable = executableChainsFromEnv().has(signalChainKey);
+      const autoExecDomain = signalExecutable ? `meme-${signalChainKey}` : undefined;
+      if (signalExecutable && item.payload.contractAddress) {
         const queuedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
         const order = approvalQueueService.enqueue(
           {
-            domain: 'meme-robinhood',
+            domain: autoExecDomain || 'meme-robinhood',
             symbol: item.payload.symbol || 'TOKEN',
             contractAddress: item.payload.contractAddress,
-            chain: String(item.payload.network || 'robinhood').toLowerCase(),
+            chain: signalChainKey,
             entryPriceUsd: queuedPrice,
-            suggestedSizeUsd: (hub.isAutoExecuteEnabled('meme-robinhood').maxTradeAmount || 0.1) * (queuedPrice || 1),
+            suggestedSizeUsd: (hub.isAutoExecuteEnabled(autoExecDomain || 'meme-robinhood').maxTradeAmount || 0.1) * (queuedPrice || 1),
             confidence: Number(item.payload.confidenceScore) || 0,
             thesis: (item.rawReason || item.payload.aiThesis || '').slice(0, 300),
           },
@@ -433,8 +441,6 @@ const runScreeningCycle = async () => {
 
       // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates with real market quotes, SIGNAL_ONLY skips trade execution.
       const AUTO_EXECUTE_ENABLED = isAutoExecute() || process.env.AUTO_EXECUTE_ENABLED === 'true';
-                const autoExecDomain: string | undefined =
-                  item.channelName === 'call-meme-robinhood' ? 'meme-robinhood' : undefined;
       if (autoExecDomain && AUTO_EXECUTE_ENABLED && !isSignalOnly()) {
         // Phase-3 AUTO gate: execution only opens once the approved-fill floor
         // (N > 50) AND positive expectancy (closed win rate > 50%) are proven.
@@ -463,13 +469,14 @@ const runScreeningCycle = async () => {
                 await notifyControlRoom(activeClient, 'risk:killswitch', `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`);
                 break;
               }
-              if (autoExecDomain === 'meme-robinhood' && item.payload.contractAddress) {
+              if (autoExecDomain && item.payload.contractAddress) {
                 const execRes = await executeMemeBuy({
                   evm: evmTradeAdapter,
                   wallet: walletService,
                   journal: tradeJournalService,
-                  onExecuted: () => stateStore.incrementFunnel('meme-robinhood', 'executed'),
-                  chain: String(item.payload.network || 'robinhood'),
+                  onExecuted: () => stateStore.incrementFunnel(autoExecDomain, 'executed'),
+                  executor: globalLifiExecutor,
+                  chain: signalChainKey,
                   symbol: item.payload.symbol || 'TOKEN',
                   contractAddress: item.payload.contractAddress,
                   entryPriceUsd: parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0,
@@ -486,7 +493,7 @@ const runScreeningCycle = async () => {
                   governance: gateGovernance(),
                   ledger: globalDecisionLedger,
                 });
-                console.log(`[AUTO-EXECUTE] meme-robinhood ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
+                console.log(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
               }
             } catch (err: any) { console.error(`[AUTO-EXECUTE] ${item.payload.symbol} error: ${err.message}`); }
           }
@@ -519,7 +526,7 @@ const runScreeningCycle = async () => {
 
       // 3. Register called tokens for wallet auto-tracking (own-position detection + exit alerts)
                 if (item.channelName === 'call-meme-robinhood' && item.payload.contractAddress) {
-                  const chainForTracking = item.payload.network?.toLowerCase() === 'solana' ? 'sol' : 'robinhood';
+                  const chainForTracking = normalizeExecutionChainKey(String(item.payload.network || 'robinhood')) ?? 'robinhood';
                   walletTracker.registerTrackedToken(chainForTracking, item.payload.contractAddress, item.payload.symbol);
                 }
 

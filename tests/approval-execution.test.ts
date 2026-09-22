@@ -125,8 +125,8 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
   });
 
   it.each([
-    'sol', 'Solana', 'bsc', 'BNB Chain', 'base', 'eth', 'Ethereum',
-  ])('fail-closed: %s never reaches the EVM adapter, journal, or funnel', async (chain) => {
+    'aptos', 'polygon', 'avax', 'arbitrum', 'op', 'zksync',
+  ])('fail-closed: unknown chain %s never reaches the EVM adapter, journal, or funnel', async (chain) => {
     const { journal, evm, wallet } = makeDeps();
     const onExecuted = vi.fn();
     const res = await executeMemeBuy({
@@ -349,7 +349,22 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
           executor: { submit },
         });
         expect(res.success).toBe(true);
-        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ token: '0xabc', side: 'buy', chainId: 4663 }));
+        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ chain: 'robinhood', token: '0xabc', side: 'buy' }));
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('multi-chain: a registered non-robinhood chain routes through the executor by canonical key', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const submit = vi.fn().mockResolvedValue({ outcome: 'simulated', reason: 'DRY_RUN', at: Date.now() });
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          chain: 'Solana',
+          symbol: 'SOLTOKEN', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          executor: { submit },
+        });
+        expect(res.success).toBe(true);
+        expect(res.simulated).toBe(true);
+        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ chain: 'sol', token: '0xabc', side: 'buy' }));
         expect(evm.executeBuyToken).not.toHaveBeenCalled();
       });
 

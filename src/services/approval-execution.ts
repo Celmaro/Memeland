@@ -9,6 +9,7 @@ import type { WalletService } from './wallet-service.js';
 import type { TradeJournalService } from './trade-journal-service.js';
 import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
 import { confidenceToFraction } from './confidence.js';
+import { EXECUTION_CHAIN_KEYS, normalizeExecutionChainKey } from '../config/execution-registry.js';
 
 export interface ExecuteMemeBuyOptions {
   evm: EVMTradeAdapter;
@@ -41,7 +42,7 @@ export interface ExecuteMemeBuyOptions {
   /** Q11 execution governance. When provided, the order is reserved + receipt-locked before the fill. */
   governance?: { reserve(order: { nonce: string; payload: string }): { reserved: boolean; reason?: string }; issue(order: { nonce: string; payload: string }): { valid: boolean; reason?: string } };
   /** Q09 executor-DI. When provided, the buy is routed through this executor instead of the raw EVM adapter. */
-  executor?: { submit(req: { token: string; chainId: number; side: 'buy'; amountUsd: number; timeoutMs?: number }): Promise<{ outcome: 'confirmed' | 'failed' | 'timed_out'; txHash?: string; reason?: string; at: number }> };
+  executor?: { submit(req: { chain: string; token: string; side: 'buy'; amountUsd: number; timeoutMs?: number }): Promise<{ outcome: 'confirmed' | 'failed' | 'timed_out' | 'simulated'; txHash?: string; reason?: string; at: number }> };
   /** Decision ledger audit hook: proposal + send reconciliation for the shared fill path. */
   ledger?: DecisionLedger;
 }
@@ -53,24 +54,13 @@ export interface ExecuteMemeBuyResult {
   error?: string;
 }
 
-/** Chains with a live execution adapter today. All others fail closed. */
-const EXECUTABLE_CHAINS = new Set<string>(['robinhood']);
+/** Chains with a live execution adapter (every registered LI.FI chain). All others fail closed. */
+const EXECUTABLE_CHAINS = new Set<string>(EXECUTION_CHAIN_KEYS);
 
 /** Normalize payload/approval chain labels to the canonical chain key. */
 export function normalizeChain(v: string): string {
-  const k = String(v || '').trim().toLowerCase();
-  const alias: Record<string, string> = {
-    robinhood: 'robinhood',
-    solana: 'sol',
-    sol: 'sol',
-    'bnb chain': 'bsc',
-    bsc: 'bsc',
-    binance: 'bsc',
-    base: 'base',
-    ethereum: 'eth',
-    eth: 'eth',
-  };
-  return alias[k] ?? k;
+  const k = normalizeExecutionChainKey(v) ?? String(v || '').trim().toLowerCase();
+  return k;
 }
 
 export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<ExecuteMemeBuyResult> {
@@ -80,7 +70,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
       success: false,
       simulated: false,
       outputTokens: 0,
-      error: `no execution adapter for chain '${chain}' — fail-closed (robinhood only)`,
+      error: `no execution adapter for chain '${chain}' — fail-closed (LI.FI multi-chain registry)`,
     };
   }
 
@@ -165,17 +155,17 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     const execRes = opts.executor
       ? await (async () => {
           const r = await opts.executor!.submit({
+            chain,
             token: opts.contractAddress,
-            chainId: 4663,
             side: 'buy',
             amountUsd: desiredUsd,
             timeoutMs: 15_000,
           });
           return {
-            success: r.outcome === 'confirmed',
-            simulated: false,
+            success: r.outcome === 'confirmed' || r.outcome === 'simulated',
+            simulated: r.outcome === 'simulated',
             outputTokens: 0,
-            error: r.outcome === 'confirmed' ? undefined : (r.reason || r.outcome),
+            error: r.outcome === 'confirmed' || r.outcome === 'simulated' ? undefined : (r.reason || r.outcome),
           };
         })()
       : await opts.evm.executeBuyToken(

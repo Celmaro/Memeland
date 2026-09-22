@@ -275,7 +275,7 @@ export const slashCommands = [
 
   new SlashCommandBuilder()
     .setName('swap')
-    .setDescription('Swap tokens instantly via Relay.link (same-chain or cross-chain)')
+    .setDescription('Swap tokens instantly via LI.FI / Jumper (same-chain or cross-chain)')
     .addStringOption(opt => opt.setName('from').setDescription('Token to swap from (e.g. ETH, USDC, or contract address)').setRequired(true))
     .addStringOption(opt => opt.setName('to').setDescription('Token to swap to (e.g. USDC, ETH, or contract address)').setRequired(true))
     .addNumberOption(opt => opt.setName('amount').setDescription('Amount to swap').setRequired(true))
@@ -283,7 +283,7 @@ export const slashCommands = [
 
   new SlashCommandBuilder()
     .setName('send')
-    .setDescription('Send/transfer tokens to another wallet via Relay.link')
+    .setDescription('Send/transfer tokens to another wallet via LI.FI / Jumper')
     .addStringOption(opt => opt.setName('to').setDescription('Recipient wallet address (0x...)').setRequired(true))
     .addNumberOption(opt => opt.setName('amount').setDescription('Amount to send').setRequired(true))
     .addStringOption(opt => opt.setName('token').setDescription('Token symbol (default: ETH)'))
