@@ -77,6 +77,21 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): Sta
     if (chains.includes('sol') && !env.SOLANA_PRIVATE_KEY?.trim()) {
       errors.push({ key: 'SOLANA_PRIVATE_KEY', message: 'is required when sol is in MULTICHAIN_CHAINS' });
     }
+    // Per-chain EVM key check (R1): a shared EVM_PRIVATE_KEY covers all EVM
+    // chains when no per-chain override is set; per-chain overrides win.
+    // The check fires whether DRY_RUN is on or off — an unconfigured key on
+    // a configured chain means the first live fill will throw deep in the
+    // executor instead of failing fast at boot.
+    const hasSharedKey = !!env.EVM_PRIVATE_KEY?.trim();
+    for (const chain of chains) {
+      if (chain === 'sol') continue;
+      const override = env[`EVM_PRIVATE_KEY_${chain.toUpperCase()}`];
+      if (override?.trim() || hasSharedKey) continue;
+      errors.push({
+        key: `EVM_PRIVATE_KEY_${chain.toUpperCase()}`,
+        message: `is required when ${chain} is in MULTICHAIN_CHAINS (or set EVM_PRIVATE_KEY to share across EVM chains)`,
+      });
+    }
     // Fail closed on a bad funding-token override: any executable chain whose
     // configured funding token does not resolve (unknown / non-stablecoin) is a
     // startup error rather than a silent mis-fund.

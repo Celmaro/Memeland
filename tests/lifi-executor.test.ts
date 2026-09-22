@@ -83,6 +83,7 @@ function makeExecutor(overrides: { dryRun: boolean; now?: number; fetchImpl?: ty
     integrator: 'test',
     requestSpacingMs: 0,
     executionTimeoutMs: 1000,
+    nonceStorePath: '', // tests start with a clean nonce store
   });
 }
 
@@ -190,5 +191,104 @@ describe('LifiExecutor (LI.FI / Jumper — only execution layer)', () => {
     const addr = `0x${'a'.repeat(40)}`;
     expect(anyEx.resolveAnyTokenMeta('base', addr).address).toBe(addr);
     expect(() => anyEx.resolveAnyTokenMeta('eth', 'FOO')).toThrow(/no funding token 'FOO'/);
+  });
+
+  it('R9: slippage defaults to 0.02 and is overridable via opts.slippage / LIFI_SLIPPAGE_PCT', () => {
+    const ex = makeExecutor({ dryRun: false, now: 1000, fetchImpl: mockLifiFetch().fetchImpl });
+    const anyEx = ex as unknown as { slippage: number };
+    expect(anyEx.slippage).toBeCloseTo(0.02, 6);
+
+    const exPct = new LifiExecutor({
+      dryRun: false, now: () => 1000, fetchImpl: mockLifiFetch().fetchImpl,
+      evmPrivateKey: FAKE_KEY, solanaPrivateKey: '', integrator: 'test',
+      requestSpacingMs: 0, executionTimeoutMs: 1000, nonceStorePath: '',
+      slippage: 0.005,
+    });
+    expect((exPct as unknown as { slippage: number }).slippage).toBeCloseTo(0.005, 6);
+
+    const prev = process.env.LIFI_SLIPPAGE_PCT;
+    try {
+      // Fraction form: 0.005 means 0.5%
+      process.env.LIFI_SLIPPAGE_PCT = '0.005';
+      const exEnv = new LifiExecutor({
+        dryRun: false, now: () => 1000, fetchImpl: mockLifiFetch().fetchImpl,
+        evmPrivateKey: FAKE_KEY, solanaPrivateKey: '', integrator: 'test',
+        requestSpacingMs: 0, executionTimeoutMs: 1000, nonceStorePath: '',
+      });
+      expect((exEnv as unknown as { slippage: number }).slippage).toBeCloseTo(0.005, 6);
+
+      // Percent form: "3" means 3% — normalise by /100
+      process.env.LIFI_SLIPPAGE_PCT = '3';
+      const exEnvPct = new LifiExecutor({
+        dryRun: false, now: () => 1000, fetchImpl: mockLifiFetch().fetchImpl,
+        evmPrivateKey: FAKE_KEY, solanaPrivateKey: '', integrator: 'test',
+        requestSpacingMs: 0, executionTimeoutMs: 1000, nonceStorePath: '',
+      });
+      expect((exEnvPct as unknown as { slippage: number }).slippage).toBeCloseTo(0.03, 6);
+    } finally {
+      if (prev === undefined) delete process.env.LIFI_SLIPPAGE_PCT;
+      else process.env.LIFI_SLIPPAGE_PCT = prev;
+    }
+  });
+
+  it('R3: persists broadcast nonces to disk and refuses double-broadcast after restart', async () => {
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lifi-nonce-'));
+    const storePath = path.join(tmpDir, 'nonces.json');
+
+    // First executor: broadcasts successfully and persists the nonce record.
+    const first = new LifiExecutor({
+      dryRun: false,
+      now: () => 1000,
+      fetchImpl: mockLifiFetch({ status: { status: 'DONE', txHash: '0xrestored' } }).fetchImpl,
+      evmPrivateKey: FAKE_KEY,
+      solanaPrivateKey: '',
+      integrator: 'test',
+      requestSpacingMs: 0,
+      executionTimeoutMs: 1000,
+      nonceStorePath: storePath,
+    });
+    const firstRes = await first.submit({ chain: 'robinhood', token: '0xTOKEN', side: 'buy', amountUsd: 100 });
+    expect(firstRes.outcome).toBe('confirmed');
+    expect(firstRes.txHash).toBe('0xrestored');
+    // Store exists and contains one record.
+    const stored = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+    expect(stored).toHaveLength(1);
+    expect(stored[0].nonce).toMatch(/^robinhood:0xTOKEN:100:/);
+    expect(stored[0].outcome).toBe('confirmed');
+    expect(stored[0].txHash).toBe('0xrestored');
+
+    // Second executor against the same store: the same nonce refuses to
+    // rebroadcast. The fetch impl here would never be reached.
+    const second = new LifiExecutor({
+      dryRun: false,
+      now: () => 2000,
+      fetchImpl: mockLifiFetch().fetchImpl,
+      evmPrivateKey: FAKE_KEY,
+      solanaPrivateKey: '',
+      integrator: 'test',
+      requestSpacingMs: 0,
+      executionTimeoutMs: 1000,
+      nonceStorePath: storePath,
+    });
+    // Force the nonce to match the persisted one.
+    const sendEx = second as unknown as { broadcastEVM(chain: string, tx: object, nonce: string): Promise<string> };
+    await expect(sendEx.broadcastEVM('robinhood', { to: '0xpool', data: '0x', value: '0' }, stored[0].nonce))
+      .rejects.toThrow(/already broadcast/);
+
+    // getBroadcastRecord surfaces the persisted settlement.
+    expect(second.getBroadcastRecord(stored[0].nonce)?.txHash).toBe('0xrestored');
+
+    // Empty store path = no persistence (test factory behaviour).
+    const memOnly = new LifiExecutor({
+      dryRun: false, now: () => 3000, fetchImpl: mockLifiFetch().fetchImpl,
+      evmPrivateKey: FAKE_KEY, solanaPrivateKey: '', integrator: 'test',
+      requestSpacingMs: 0, executionTimeoutMs: 1000, nonceStorePath: '',
+    });
+    expect(memOnly.getBroadcastRecord('never-broadcasted')).toBeUndefined();
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });

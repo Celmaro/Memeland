@@ -63,6 +63,10 @@ export const EXECUTION_CHAIN_REGISTRY: Record<ExecutionChainKey, ExecutionChainC
     fundingTokenSymbol: 'USDG',
     explorerTxTemplate: 'https://robinhoodchain.blockscout.com/tx/{txHash}',
   },
+  // Solana's LI.FI chain id is the magic constant `1151111081099710`
+  // (0x10 = "Solana" on LI.FI's internal id table; see
+  // https://docs.li.fi/reference/solana and LI.FI's chainlist source).
+  // Do NOT derive this from cluster info; LI.FI uses its own id space.
   sol: {
     key: 'sol',
     lifiChainId: 1151111081099710,
@@ -85,6 +89,8 @@ export const FUNDING_TOKENS: Record<ExecutionChainKey, Record<string, FundingTok
     ETH: { symbol: 'ETH', address: ZERO_ADDRESS, decimals: 18, priceUsd: 0 },
   },
   bsc: {
+    // BNB-Peg USDC on BSC is 18 decimals (NOT 6 like on Ethereum/Base/Solana).
+    // Do not "correct" this to 6 — every quote would inflate by 10^12.
     USDC: { symbol: 'USDC', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18, priceUsd: 1 },
     BNB: { symbol: 'BNB', address: ZERO_ADDRESS, decimals: 18, priceUsd: 0 },
   },

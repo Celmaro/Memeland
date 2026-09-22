@@ -21,6 +21,8 @@
 import { createWalletClient, http, type Account, type Chain, type WalletClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import base58 from 'bs58';
+import fs from 'fs';
+import path from 'path';
 import { mainnet, bsc, base as baseChain, robinhood as robinhoodChain } from 'viem/chains';
 import { isDryRun as isDryRunMode } from '../config/config.js';
 import {
@@ -34,6 +36,14 @@ import {
 const LIFI_API_BASE = 'https://li.quest/v1';
 const DEFAULT_INTEGRATOR = 'memeland';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+/**
+ * Default path for the persistent broadcast-nonce store (R3).
+ * Overridable via `LIFI_NONCE_STORE_PATH`; absent in tests (use an explicit
+ * in-memory store via the constructor) — the production executor writes here
+ * so a process restart can detect that an in-flight nonce was already
+ * broadcast and refuses to double-broadcast.
+ */
+const DEFAULT_NONCE_STORE_PATH = process.env.LIFI_NONCE_STORE_PATH || path.resolve(process.cwd(), 'database', 'lifi-broadcast-nonces.json');
 
 export type LifiOutcome = 'confirmed' | 'failed' | 'timed_out' | 'simulated';
 
@@ -82,8 +92,25 @@ export interface LifiExecutorOptions {
   integrator?: string;
   requestSpacingMs?: number;
   executionTimeoutMs?: number;
+  /** R9: override /quote slippage (fraction). Falls back to LIFI_SLIPPAGE_PCT. */
+  slippage?: number;
   dryRun?: boolean;
   now?: () => number;
+  /** R3: load previously-broadcast nonces from a JSON file path so a
+   *  process restart can refuse to double-broadcast. Defaults to
+   *  `${cwd}/database/lifi-broadcast-nonces.json`; pass an empty string to
+   *  disable persistence. */
+  nonceStorePath?: string;
+}
+
+/** Persistent record of an in-flight or settled broadcast nonce. */
+export interface BroadcastNonceRecord {
+  nonce: string;
+  /** ISO timestamp the nonce was first added. */
+  at: string;
+  /** Latest known terminal state — undefined while in-flight. */
+  outcome?: 'confirmed' | 'failed' | 'timed_out' | 'simulated';
+  txHash?: string;
 }
 
 interface QuoteRoute {
@@ -93,12 +120,11 @@ interface QuoteRoute {
   transactionRequest?: unknown;
 }
 
-const EVM_CHAIN_IDS: Record<ExecutionChainKey, Chain> = {
+const EVM_CHAIN_IDS: Record<Exclude<ExecutionChainKey, 'sol'>, Chain> = {
   eth: mainnet,
   bsc,
   base: baseChain,
   robinhood: robinhoodChain,
-  sol: baseChain, // unused — Solana signs via web3.js, not viem
 };
 
 const EVM_RPC: Record<ExecutionChainKey, string> = {
@@ -129,11 +155,27 @@ export class LifiExecutor {
   private readonly solanaPrivateKey?: string;
   private readonly integrator: string;
   private readonly requestSpacingMs: number;
+  /** LI.FI /quote slippage as a fraction (0.005–0.05). Defaults to 0.02 (R9). */
+  private readonly slippage: number;
   private readonly executionTimeoutMs: number;
   private readonly now: () => number;
   private readonly isDryRun: boolean;
   /** Nonces that were already broadcast — never broadcast the same nonce twice. */
   private readonly broadcastNonces = new Set<string>();
+  /** Persistent mirror of `broadcastNonces` (R3): survives restarts, atomic write. */
+  private readonly broadcastRecords = new Map<string, BroadcastNonceRecord>();
+  private readonly nonceStorePath: string;
+  /**
+   * Per-chain EVM private-key override (R2): `EVM_PRIVATE_KEY_<CHAIN>` wins over
+   * the shared `EVM_PRIVATE_KEY` so operators can segregate trading keys per
+   * chain. Lookup is performed at broadcast time so a fresh key rotation
+   * (env reload) is picked up without restarting the executor.
+   */
+  private evmPrivateKeyForChain(chainKey: ExecutionChainKey): string | undefined {
+    const override = process.env[`EVM_PRIVATE_KEY_${chainKey.toUpperCase()}`];
+    if (override?.trim()) return override;
+    return this.evmPrivateKey;
+  }
 
   constructor(opts: LifiExecutorOptions = {}) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -142,9 +184,74 @@ export class LifiExecutor {
     this.solanaPrivateKey = opts.solanaPrivateKey ?? process.env.SOLANA_PRIVATE_KEY;
     this.integrator = opts.integrator ?? process.env.LIFI_INTEGRATOR ?? DEFAULT_INTEGRATOR;
     this.requestSpacingMs = Math.max(100, Number(opts.requestSpacingMs ?? process.env.LIFI_REQUEST_SPACING_MS ?? 300));
+    this.slippage = (() => {
+      const raw = opts.slippage ?? process.env.LIFI_SLIPPAGE_PCT;
+      if (raw === undefined) return 0.02;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return 0.02;
+      // Allow "2" (=2%) or "0.02" (=2%) — normalise by /100 when > 1.
+      const frac = n > 1 ? n / 100 : n;
+      return Math.min(0.5, Math.max(0, frac));
+    })();
     this.executionTimeoutMs = Number(opts.executionTimeoutMs ?? process.env.LIFI_EXECUTION_TIMEOUT_MS ?? 60_000);
     this.now = opts.now ?? Date.now;
     this.isDryRun = opts.dryRun ?? isDryRunMode();
+    // R3: load the persisted nonce store from disk and hydrate both the Set
+    // (in-process fast path) and the Map (carries outcome + txHash across
+    // restarts). An empty-string path disables persistence.
+    this.nonceStorePath = opts.nonceStorePath !== undefined ? opts.nonceStorePath : DEFAULT_NONCE_STORE_PATH;
+    this.loadBroadcastStore();
+  }
+
+  private loadBroadcastStore(): void {
+    if (!this.nonceStorePath) return;
+    try {
+      if (!fs.existsSync(this.nonceStorePath)) return;
+      const raw = fs.readFileSync(this.nonceStorePath, 'utf-8');
+      const records = JSON.parse(raw) as BroadcastNonceRecord[];
+      for (const r of records) {
+        this.broadcastNonces.add(r.nonce);
+        this.broadcastRecords.set(r.nonce, r);
+      }
+    } catch (err: unknown) {
+      console.warn(`[LIFI] nonce store load failed (${err instanceof Error ? err.message : String(err)}) — starting with empty store`);
+    }
+  }
+
+  private persistBroadcastStore(): void {
+    if (!this.nonceStorePath) return;
+    try {
+      fs.mkdirSync(path.dirname(this.nonceStorePath), { recursive: true });
+      const records = Array.from(this.broadcastRecords.values());
+      // Atomic write: tmp + rename so a crash mid-write never truncates.
+      const tmp = `${this.nonceStorePath}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(records, null, 2), 'utf-8');
+      fs.renameSync(tmp, this.nonceStorePath);
+    } catch (err: unknown) {
+      console.warn(`[LIFI] nonce store persist failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** R3: expose the persistent record so callers can correlate txHash after restart. */
+  public getBroadcastRecord(nonce: string): BroadcastNonceRecord | undefined {
+    return this.broadcastRecords.get(nonce);
+  }
+
+  /**
+   * R3: record a broadcast attempt (called by broadcastEVM / broadcastSolana).
+   * Persists immediately so a process crash before settlement still has the
+   * nonce on disk.
+   */
+  private recordBroadcast(nonce: string, partial: Partial<BroadcastNonceRecord> = {}): void {
+    const existing = this.broadcastRecords.get(nonce);
+    const record: BroadcastNonceRecord = {
+      nonce,
+      at: existing?.at || new Date().toISOString(),
+      outcome: partial.outcome ?? existing?.outcome,
+      txHash: partial.txHash ?? existing?.txHash,
+    };
+    this.broadcastRecords.set(nonce, record);
+    this.persistBroadcastStore();
   }
 
   private async paced<T>(fn: () => Promise<T>): Promise<T> {
@@ -215,7 +322,7 @@ export class LifiExecutor {
         fromAmount: params.fromAmount,
         fromAddress: params.fromAddress,
         toAddress: params.toAddress,
-        slippage: 0.02,
+        slippage: this.slippage,
         integrator: this.integrator,
         allowSwitchChain: false,
       };
@@ -249,17 +356,19 @@ export class LifiExecutor {
     return null;
   }
 
-  private evmAccount(): Account {
+  private evmAccount(chainKey?: ExecutionChainKey): Account {
     if (this.wallet) return this.wallet.getEvmAccount();
-    if (!this.evmPrivateKey) throw new Error('EVM_PRIVATE_KEY not configured — cannot sign EVM execution');
-    const key = this.evmPrivateKey.startsWith('0x') ? this.evmPrivateKey : `0x${this.evmPrivateKey}`;
-    return privateKeyToAccount(key as `0x${string}`);
+    const key = (chainKey ? this.evmPrivateKeyForChain(chainKey) : this.evmPrivateKey);
+    if (!key) throw new Error(`EVM private key not configured for chain '${chainKey ?? 'shared'}' — cannot sign EVM execution`);
+    const formatted = key.startsWith('0x') ? key : `0x${key}`;
+    return privateKeyToAccount(formatted as `0x${string}`);
   }
 
-  private async broadcastEVM(chainKey: ExecutionChainKey, tx: Record<string, unknown>, nonce: string): Promise<string> {
+  private async broadcastEVM(chainKey: Exclude<ExecutionChainKey, 'sol'>, tx: Record<string, unknown>, nonce: string): Promise<string> {
     if (this.broadcastNonces.has(nonce)) throw new Error(`nonce ${nonce} already broadcast — idempotent guard`);
     this.broadcastNonces.add(nonce);
-    const account = this.evmAccount();
+    this.recordBroadcast(nonce); // R3: persist before broadcast
+    const account = this.evmAccount(chainKey);
     const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(EVM_RPC[chainKey]) });
     const txHash = await walletClient.sendTransaction({
       account,
@@ -268,16 +377,14 @@ export class LifiExecutor {
       data: String(tx.data ?? '0x') as `0x${string}`,
       value: BigInt(String(tx.value ?? 0)),
     });
+    this.recordBroadcast(nonce, { txHash }); // R3: persist settlement hash
     return txHash;
   }
 
   private async broadcastSolana(tx: Record<string, unknown>, nonce: string): Promise<string> {
     if (this.broadcastNonces.has(nonce)) throw new Error(`nonce ${nonce} already broadcast — idempotent guard`);
     this.broadcastNonces.add(nonce);
-    if (this.wallet?.sendSolana) {
-      // Route-built Solana tx must go through the web3.js path below.
-      throw new Error('built Solana route requires the web3.js broadcast path');
-    }
+    this.recordBroadcast(nonce); // R3: persist before broadcast
     if (!this.solanaPrivateKey) throw new Error('SOLANA_PRIVATE_KEY not configured — cannot sign Solana execution');
     const solana = await import('@solana/web3.js');
     const decoded = base58.decode(this.solanaPrivateKey);
@@ -289,7 +396,9 @@ export class LifiExecutor {
     if (!transaction.feePayer) transaction.feePayer = keypair.publicKey;
     transaction.sign(keypair);
     const connection = new solana.Connection(EVM_RPC.sol);
-    return await solana.sendAndConfirmTransaction(connection, transaction, [keypair]);
+    const txHash = await solana.sendAndConfirmTransaction(connection, transaction, [keypair]);
+    this.recordBroadcast(nonce, { txHash }); // R3: persist settlement hash
+    return txHash;
   }
 
   /**
@@ -339,11 +448,14 @@ export class LifiExecutor {
       const explorerUrl = explorerUrlForChain(chainKey, txHash);
       const status = quoted.id ? await this.pollStatus(quoted.id, req.timeoutMs ?? this.executionTimeoutMs) : null;
       if (status?.status === 'FAILED' || status?.status === 'INVALID') {
+        this.recordBroadcast(nonce, { outcome: 'failed', txHash }); // R3
         return this.failed(`LI.FI status ${status.status}`, txHash, explorerUrl);
       }
       if (status === null) {
+        this.recordBroadcast(nonce, { outcome: 'timed_out', txHash }); // R3
         return { outcome: 'timed_out', txHash, explorerUrl, reason: 'no status receipt in window', at: this.now() };
       }
+      this.recordBroadcast(nonce, { outcome: 'confirmed', txHash: status.txHash ?? txHash }); // R3
       return { outcome: 'confirmed', txHash: status.txHash ?? txHash, explorerUrl, at: this.now() };
     } catch (err: unknown) {
       return this.failed(err instanceof Error ? err.message : String(err));
@@ -450,7 +562,7 @@ export class LifiExecutor {
       if (symbol !== cfg.nativeCoin) {
         throw new Error(`send supports native ${cfg.nativeCoin} only — token transfers via /swap`);
       }
-      const account = this.evmAccount();
+      const account = this.evmAccount(chainKey);
       const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(EVM_RPC[chainKey]) });
       const txHash = await walletClient.sendTransaction({
         account,
@@ -473,9 +585,10 @@ export class LifiExecutor {
         return '';
       }
     }
-    if (this.evmPrivateKey) {
-      const key = this.evmPrivateKey.startsWith('0x') ? this.evmPrivateKey : `0x${this.evmPrivateKey}`;
-      return privateKeyToAccount(key as `0x${string}`).address;
+    const key = this.evmPrivateKeyForChain(chainKey);
+    if (key) {
+      const formatted = key.startsWith('0x') ? key : `0x${key}`;
+      return privateKeyToAccount(formatted as `0x${string}`).address;
     }
     return '';
   }

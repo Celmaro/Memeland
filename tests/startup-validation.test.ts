@@ -27,4 +27,37 @@ describe('startup configuration validation', () => {
     expect(validateStartupConfig({ API_BIND_HOST: '0.0.0.0' }).ok).toBe(false);
     expect(validateStartupConfig({ API_BIND_HOST: '0.0.0.0', OPENCATZ_API_KEY: 'test-key' }).ok).toBe(true);
   });
+
+  it('R1: requires EVM_PRIVATE_KEY per executable EVM chain (or a shared key)', () => {
+    // Each EVM chain in MULTICHAIN_CHAINS needs a key — either the shared one
+    // or a per-chain override. Sol is its own key. Unconfigured chain = fail.
+    expect(
+      validateStartupConfig({ MULTICHAIN_CHAINS: 'eth' } as NodeJS.ProcessEnv).ok
+    ).toBe(false);
+    expect(
+      validateStartupConfig({ MULTICHAIN_CHAINS: 'eth', EVM_PRIVATE_KEY: 'k' } as NodeJS.ProcessEnv).ok
+    ).toBe(true);
+    expect(
+      validateStartupConfig({ MULTICHAIN_CHAINS: 'eth,base', EVM_PRIVATE_KEY: 'k' } as NodeJS.ProcessEnv).ok
+    ).toBe(true);
+    // A per-chain override without a shared key covers ONLY that chain; the
+    // other executable EVM chain is still unconfigured → fail.
+    expect(
+      validateStartupConfig({
+        MULTICHAIN_CHAINS: 'eth', EVM_PRIVATE_KEY_BASE: 'k2',
+      } as NodeJS.ProcessEnv).ok
+    ).toBe(false);
+    // Per-chain override plus shared key = both covered.
+    expect(
+      validateStartupConfig({
+        MULTICHAIN_CHAINS: 'eth,base', EVM_PRIVATE_KEY: 'k', EVM_PRIVATE_KEY_BASE: 'k2',
+      } as NodeJS.ProcessEnv).ok
+    ).toBe(true);
+    // sol + eth: SOLANA_PRIVATE_KEY present but no EVM key → fail.
+    expect(
+      validateStartupConfig({
+        MULTICHAIN_CHAINS: 'sol,eth', SOLANA_PRIVATE_KEY: 'sk',
+      } as NodeJS.ProcessEnv).ok
+    ).toBe(false);
+  });
 });
