@@ -11,7 +11,7 @@ import { AIService } from './services/ai-service.js';
 import { handleInteraction } from './discord/handlers/interaction-handler.js';
 import { handleControlRoomMessage } from './discord/handlers/message-handler.js';
 import { globalHealthWatcher } from './services/health-watcher.js';
-import { globalMarketRegimeFilter, computeWhaleRiskOff } from './services/market-regime.js';
+import { globalMarketRegimeFilter } from './services/market-regime.js';
 import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
 import { globalLifiExecutor } from './adapters/lifi-executor.js';
@@ -240,7 +240,7 @@ const runScreeningCycle = createScreeningCycle({
   globalDecisionLedger, normalizeExecutionChainKey, executableChainsFromEnv, buildCallEmbed,
   telegramService, getActiveClient: () => activeClient, walletTracker, positionManager,
   globalReputationMemory, GMGNAdapter, notifyControlRoom, opportunityPostMortem,
-  computeWhaleRiskOff, ChannelType, SCREENING_TIMEOUT_MS, withScreeningTimeout,
+  ChannelType, SCREENING_TIMEOUT_MS, withScreeningTimeout,
 });
 // Scheduler and the independent market-risk monitor are owned by the startup module.
 const marketSentinel = createMarketRiskMonitor();

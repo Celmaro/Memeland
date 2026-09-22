@@ -150,7 +150,7 @@ export function marketSentinelProbe(
     return {
       botRisk: snap.avg,
       highRiskFraction: snap.highFraction,
-      regimeRiskOff: r.whaleRiskOff === true || r.regime === 'TRENDING_BEAR' || r.regime === 'EXTREME_VOLATILITY',
+      regimeRiskOff: r.regime === 'TRENDING_BEAR' || r.regime === 'EXTREME_VOLATILITY',
     };
   };
 }

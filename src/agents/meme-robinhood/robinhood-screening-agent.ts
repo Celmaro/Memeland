@@ -623,7 +623,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             const regime = globalMarketRegimeFilter.getRegime();
             opinions.push(regimeVote({
               volatilityIndex: regime.volatilityIndex,
-              riskOff: regime.regime === 'TRENDING_BEAR' || regime.regime === 'EXTREME_VOLATILITY' || regime.whaleRiskOff === true,
+              riskOff: regime.regime === 'TRENDING_BEAR' || regime.regime === 'EXTREME_VOLATILITY',
             }));
             if (klines) {
               const pred = predictUpMomentum(klines);

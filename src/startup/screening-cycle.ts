@@ -67,7 +67,6 @@ export interface ScreeningCycleDeps {
   GMGNAdapter: any;
   notifyControlRoom: (client: any, key: string, content: string) => Promise<void>;
   opportunityPostMortem: any;
-  computeWhaleRiskOff: any;
   ChannelType: any;
   SCREENING_TIMEOUT_MS: number;
   withScreeningTimeout: <T>(promise: Promise<T>, domain: string, timeoutMs: number) => Promise<T>;
@@ -84,7 +83,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     gateFillSim, gateCostGate, gateGovernance, gateSellability, globalLifiExecutor,
     globalDecisionLedger, normalizeExecutionChainKey, executableChainsFromEnv, buildCallEmbed,
     telegramService, getActiveClient, walletTracker, positionManager, globalReputationMemory,
-    GMGNAdapter, notifyControlRoom, opportunityPostMortem, computeWhaleRiskOff, ChannelType,
+    GMGNAdapter, notifyControlRoom, opportunityPostMortem, ChannelType,
     SCREENING_TIMEOUT_MS, withScreeningTimeout,
   } = deps;
 
@@ -154,17 +153,6 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
               keyReady: () => apiKeyGuard.checkDomainKeys('whale-eth'),
             });
             dispatchedPayloads.push(...whaleDispatched);
-
-            // Feed Hyperliquid ETH whale net positioning into the regime filter as a
-            // risk-off overlay (takes effect from the next cycle — a slow-moving signal).
-            const whaleSignal = whaleScreeningAgent.getLastSignal();
-            if (whaleSignal) {
-              const whaleRegime = computeWhaleRiskOff(whaleSignal.totalLongUsd, whaleSignal.totalShortUsd);
-              globalMarketRegimeFilter.setWhaleRiskOff(
-                whaleRegime.riskOff,
-                `Hyperliquid ETH whales net $${(whaleSignal.netUsd / 1e6).toFixed(1)}M (short share ${whaleRegime.shortSharePct}%)`
-              );
-            }
 
     // Real Swarm Consensus gate (>= 80%): every signal must pass with real data
     const preGateCount = dispatchedPayloads.length;
