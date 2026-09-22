@@ -166,9 +166,9 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
       delete process.env.AI_API_KEY;
       try {
         const res = guard.checkDomainKeys('meme-robinhood');
-        expect(res.ready).toBe(false);
-        expect(res.missingKeys).toContain('AI_API_KEY');
-        expect(res.statusMessage).toContain('HALTED');
+        expect(res.ready).toBe(true);
+        expect(res.missingKeys).not.toContain('AI_API_KEY');
+        expect(res.statusMessage).not.toContain('HALTED');
       } finally {
         if (original !== undefined) process.env.AI_API_KEY = original;
       }

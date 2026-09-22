@@ -36,7 +36,7 @@ ${C.cyan}Autonomous Multi-Agent Health Audit & Diagnostics${C.reset}
   // 1. Check API Keys & Backup Pool Configuration
   console.log('🔑 1. API KEYS & BACKUP ROTATION POOLS:');
   const envKeyDefs = [
-    { name: 'AI_API_KEY', aliases: ['AI_API_KEYS', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'], required: true },
+    { name: 'AI_API_KEY', aliases: ['AI_API_KEYS', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'], required: false },
     { name: 'GMGN_API_KEY', aliases: ['GMGN_API_KEY_ROBINHOOD'], required: false },
     { name: 'GOPLUS_API_KEY', aliases: [], required: false },
     { name: 'UNISWAP_API_KEY', aliases: [], required: false },
