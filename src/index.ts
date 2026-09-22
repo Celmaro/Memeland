@@ -30,6 +30,7 @@ import { StateStore } from './services/state-store.js';
 import { OpportunityLedger } from './services/opportunity-ledger.js';
 import { ChatNotifier, discordChannelSink } from './notifications/chat-notifier.js';
 import { withScreeningTimeout } from './runtime/screening-runner.js';
+import { WalletBalanceReader } from './services/wallet-balance-reader.js';
 import { OpportunityStrategist } from './services/opportunity-strategist.js';
 import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
 import { globalDecisionLedger } from './services/decision-ledger.js';
@@ -161,6 +162,9 @@ const positionManager = new PositionManager();
 positionManager.attachStateStore(stateStore);
 positionManager.attachOpportunityLedger(opportunityLedger);
 
+// KC7 — single balance-reader surface (defaults to Robinhood Chain 4663).
+const globalWalletBalanceReader = new WalletBalanceReader(walletService);
+
 // Wallet auto-tracker: mirrors user's on-chain holdings into PositionManager lifecycle + exit alerts
 const walletTracker = new WalletTracker({ positionManager, stateStore, gmgn: new GMGNAdapter(), walletService, tradeJournal: tradeJournalService });
 
@@ -255,7 +259,7 @@ const runScreeningCycle = async () => {
     // Real portfolio equity -> drawdown (fail-soft: skip if data unavailable)
     try {
       let currentEquityUsd = 0;
-      const ethBal = await walletService.getEvmBalance(4663);
+      const ethBal = await globalWalletBalanceReader.getEvmBalance();
       const ethPrice = await priceFeedService.getPrice('ETH');
       if (ethBal && ethPrice !== null) currentEquityUsd += ethBal.balance * ethPrice;
       const openPositions = stateStore.getAllPositions();

@@ -15,7 +15,7 @@ import { EVMTradeAdapter } from '../../adapters/evm-adapter.js';
 import { globalLifiExecutor } from '../../adapters/lifi-executor.js';
 import { executeMemeBuy } from '../../services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from '../../services/execution-gates.js';
-import { priceAlertService, walletService, tradeJournalService, approvalQueueService, buildDashboardOptions } from './command-handlers.js';
+import { priceAlertService, walletService, walletBalanceReader, tradeJournalService, approvalQueueService, buildDashboardOptions } from './command-handlers.js';
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (interaction.customId === 'wallet_setup_modal') {
@@ -70,7 +70,7 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
     hub.setAllAgentsActive(false);
     await interaction.reply({ content: '🛑 **EMERGENCY CIRCUIT BREAKER TRIGGERED!** All sub-agents paused & pending orders halted.', ephemeral: false });
   } else if (customId === 'btn_view_wallets') {
-    const eth = await walletService.getEvmBalance(4663);
+    const eth = await walletBalanceReader.getEvmBalance();
     const ethStr = eth ? `${eth.balance.toFixed(4)} ETH${eth.simulated ? ' (Simulated)' : ''}` : '— (unavailable)';
     await interaction.reply({ content: `🔑 **Burner Wallets:** Robinhood (ETH): \`${ethStr}\`.`, ephemeral: true });
   } else if (customId === 'btn_view_alerts') {

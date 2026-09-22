@@ -3,6 +3,7 @@ import type { AIService } from '../services/ai-service.js';
 import { StrategyEngine } from './strategy-engine.js';
 import { globalRiskEngineV2 } from './risk-engine-v2.js';
 import { AGENT_DOMAINS, getAgentDomain } from './agent-registry.js';
+import { WalletBalanceReader } from '../services/wallet-balance-reader.js';
 import { globalStateStore } from '../services/state-store.js';
 import { globalPriceAlertService } from '../services/price-alert-service.js';
 import { globalCronScheduler } from '../services/cron-scheduler.js';
@@ -600,7 +601,7 @@ export class ToolRegistry {
 
         case 'get_portfolio': {
           const ws = this.walletService ?? (await import('../services/wallet-service.js')).globalWalletService;
-          const eth = await ws.getEvmBalance(4663);
+          const eth = await new WalletBalanceReader(ws).getEvmBalance();
           const drawdown = this.orchestrator?.getRiskManager().getRiskState().currentDrawdownPct ?? null;
           return {
             success: true,

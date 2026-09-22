@@ -5,6 +5,7 @@ import { OpenCatHub } from '../orchestrator/hub.js';
 import { SwarmConsensusEngine } from '../orchestrator/swarm-consensus.js';
 import { AIService } from '../services/ai-service.js';
 import { globalWalletService } from '../services/wallet-service.js';
+import { WalletBalanceReader } from '../services/wallet-balance-reader.js';
 import { StateStore } from '../services/state-store.js';
 import { AGENT_DOMAINS, getAgentDomain } from '../orchestrator/agent-registry.js';
 import { StrategyEngine } from '../orchestrator/strategy-engine.js';
@@ -17,6 +18,8 @@ swarmEngine.attachStateStore(stateStore);
 const aiService = new AIService();
 const walletService = globalWalletService;
 walletService.attachStateStore(stateStore);
+// KC7 — single balance-reader surface (defaults to Robinhood Chain 4663).
+const walletBalanceReader = new WalletBalanceReader(walletService);
 const strategyEngine = new StrategyEngine();
 
 // ANSI Color Tokens from Opencatz Master Palette
@@ -109,7 +112,7 @@ export async function launchTUI(): Promise<void> {
         console.log(`• Robinhood (EVM) Wallet: ${hasEvm ? C.green + walletService.getEvmAddress() + C.reset : C.red + 'Not Configured' + C.reset}\n`);
         if (hasEvm) {
           try {
-            const bal = await walletService.getEvmBalance(4663);
+            const bal = await walletBalanceReader.getEvmBalance();
             const balStr = bal ? bal.balance.toFixed(4) : 'unavailable';
             console.log(`• Robinhood ETH Balance: ${C.green}${balStr} ETH${C.reset}`);
           } catch (err: any) {

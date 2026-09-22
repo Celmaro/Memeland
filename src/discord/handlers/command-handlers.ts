@@ -20,6 +20,7 @@ import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { PriceAlertService } from '../../services/price-alert-service.js';
 import { TradeJournalService } from '../../services/trade-journal-service.js';
 import { globalWalletService } from '../../services/wallet-service.js';
+import { WalletBalanceReader } from '../../services/wallet-balance-reader.js';
 import { globalApprovalQueueService } from '../../services/approval-queue-service.js';
 import { globalLifiExecutor } from '../../adapters/lifi-executor.js';
 import { runTokenAudit } from '../../services/token-audit-service.js';
@@ -29,13 +30,15 @@ export const priceFeedService = globalPriceFeedService;
 export const priceAlertService = new PriceAlertService();
 export const tradeJournalService = new TradeJournalService();
 export const walletService = globalWalletService;
+// KC7 — single balance-reader surface (defaults to Robinhood Chain 4663).
+export const walletBalanceReader = new WalletBalanceReader(walletService);
 export const approvalQueueService = globalApprovalQueueService;
 
 export async function buildDashboardOptions(): Promise<import('../embeds/dashboard-embed.js').DashboardEmbedOptions> {
   let ethBalance: string | null = null;
   try {
-    const eth = await walletService.getEvmBalance(4663);
-    if (eth) ethBalance = `${eth.balance.toFixed(4)} ETH${eth.simulated ? ' (Simulated)' : ''}`;
+    const eth = await walletBalanceReader.getEvmBalance();
+        if (eth) ethBalance = `${eth.balance.toFixed(4)} ETH${eth.simulated ? ' (Simulated)' : ''}`;
   } catch {
     ethBalance = null;
   }
@@ -104,7 +107,7 @@ export async function handleChatInput(
       if (hasEvm) {
         try {
           evmAddrStr = `\`${walletService.getEvmAddress()}\``;
-          const b = await walletService.getEvmBalance(4663); // Robinhood Chain
+          const b = await walletBalanceReader.getEvmBalance(); // Robinhood Chain (KC7 default)
           evmBalStr = b === null ? '`— (unavailable)`' : `\`${b.balance.toFixed(4)} ETH\``;
         } catch (e: any) {
           evmBalStr = `Error: ${e.message}`;
