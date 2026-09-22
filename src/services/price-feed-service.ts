@@ -1,8 +1,9 @@
+import { TtlCache } from '../cache/ttl-cache.js';
+
 export class PriceFeedService {
-  private cache: Record<string, number> = {};
-  private changeCache: Record<string, number> = {};
-  private lastFetchTime = 0;
-  private cacheDurationMs = 60 * 1000;
+  private readonly prices: TtlCache<number>;
+  private readonly changes: TtlCache<number>;
+  private readonly cacheDurationMs: number;
 
   private symbolToGeckoId: Record<string, string> = {
     BTC: 'bitcoin',
@@ -17,6 +18,12 @@ export class PriceFeedService {
     LINK: 'chainlink',
   };
 
+  constructor(opts: { cacheDurationMs?: number; now?: () => number } = {}) {
+    this.cacheDurationMs = opts.cacheDurationMs ?? 60_000;
+    this.prices = new TtlCache<number>({ ttlMs: this.cacheDurationMs, now: opts.now });
+    this.changes = new TtlCache<number>({ ttlMs: this.cacheDurationMs, now: opts.now });
+  }
+
   public async getPrice(symbol: string): Promise<number | null> {
     const cleanSymbol = symbol.toUpperCase().trim();
     const geckoId = this.symbolToGeckoId[cleanSymbol];
@@ -24,10 +31,10 @@ export class PriceFeedService {
       console.warn(`[PRICE SERVICE] Unsupported symbol "${symbol}" — returning null.`);
       return null;
     }
-    if (Date.now() - this.lastFetchTime > this.cacheDurationMs) {
+    if (!this.isFresh()) {
       await this.refreshPrices();
     }
-    return this.cache[cleanSymbol] ?? null;
+    return this.prices.get(cleanSymbol);
   }
 
   public async get24hChange(symbol: string): Promise<number | null> {
@@ -36,11 +43,17 @@ export class PriceFeedService {
     if (!geckoId) {
       return null;
     }
-    if (Date.now() - this.lastFetchTime > this.cacheDurationMs) {
+    if (!this.isFresh()) {
       await this.refreshPrices();
     }
-    const change = this.changeCache[cleanSymbol];
-    return typeof change === 'number' ? change : null;
+    return this.changes.get(cleanSymbol);
+  }
+
+  /** Cache freshness — true if any populated entry is still inside its TTL. */
+  private isFresh(): boolean {
+    if (this.prices.size() === 0) return false;
+    // Probe any key — TtlCache.get returns null on TTL expiry, evicting stale entries.
+    return this.prices.get('BTC') !== null || this.prices.size() > 0;
   }
 
   private async refreshPrices(): Promise<void> {
@@ -55,14 +68,13 @@ export class PriceFeedService {
       for (const [symbol, geckoId] of Object.entries(this.symbolToGeckoId)) {
         const price = data[geckoId]?.usd;
         if (typeof price === 'number' && price > 0) {
-          this.cache[symbol] = price;
+          this.prices.set(symbol, price);
         }
         const change = data[geckoId]?.usd_24h_change;
         if (typeof change === 'number') {
-          this.changeCache[symbol] = change;
+          this.changes.set(symbol, change);
         }
       }
-      this.lastFetchTime = Date.now();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[PRICE SERVICE ERROR] Failed to fetch prices: ${message}`);

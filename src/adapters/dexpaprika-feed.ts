@@ -13,6 +13,7 @@ import {
   type MarketDiscoveryOptions,
   type MarketToken,
 } from './market-data-provider.js';
+import { TtlCache } from '../cache/ttl-cache.js';
 
 export const DEXPAPRIKA_DEFAULT_BASE = 'https://api.dexpaprika.com';
 
@@ -59,15 +60,16 @@ export class DexpaprikaFeed implements MarketDataProvider {
   private readonly baseUrl: string;
   private readonly ttlMs: number;
   private readonly supportedChains: Set<string>;
-  private cache = new Map<string, { at: number; data: MarketToken[] }>();
+  private readonly cache: TtlCache<MarketToken[]>;
 
-  constructor(opts: DexpaprikaFeedOptions = {}) {
+    constructor(opts: DexpaprikaFeedOptions = {}) {
     const f = opts.fetch ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
     this.fetch = f;
     this.baseUrl = opts.baseUrl ?? DEXPAPRIKA_DEFAULT_BASE;
     this.ttlMs = opts.ttlMs ?? 60_000;
+    this.cache = new TtlCache<MarketToken[]>({ ttlMs: this.ttlMs });
     this.supportedChains = new Set(
-      (opts.supportedChains ?? ['robinhood', 'bsc', 'base', 'solana']).map((c) => c.toLowerCase())
+    (opts.supportedChains ?? ['robinhood', 'bsc', 'base', 'solana']).map((c) => c.toLowerCase())
     );
   }
 
@@ -82,22 +84,22 @@ export class DexpaprikaFeed implements MarketDataProvider {
     const curr = input.currLiquidityUsd;
     let dropPct = 0;
     if (prev > 0) {
-      dropPct = Math.max(0, Math.min(100, ((prev - curr) / prev) * 100));
+    dropPct = Math.max(0, Math.min(100, ((prev - curr) / prev) * 100));
     }
     return {
-      pairAddress: input.pairAddress,
-      chain: input.chain,
-      drained: dropPct >= DRAIN_THRESHOLD_PCT,
-      dropPct: Math.round(dropPct),
+    pairAddress: input.pairAddress,
+    chain: input.chain,
+    drained: dropPct >= DRAIN_THRESHOLD_PCT,
+    dropPct: Math.round(dropPct),
     };
   }
 
   private async baseTokens(): Promise<MarketToken[]> {
-    const key = 'base';
-    const hit = this.cache.get(key);
-    if (hit && Date.now() - hit.at <= this.ttlMs) return hit.data;
+      const key = 'base';
+    const cached = this.cache.get(key);
+    if (cached) return cached;
     const tokens = await this.fetchPairs();
-    this.cache.set(key, { at: Date.now(), data: tokens });
+    this.cache.set(key, tokens);
     return tokens;
   }
 
@@ -108,8 +110,8 @@ export class DexpaprikaFeed implements MarketDataProvider {
     const pairs = Array.isArray(body?.data) ? body.data : [];
     const tokens: MarketToken[] = [];
     for (const p of pairs) {
-      const t = this.normalizePair(p);
-      if (t) tokens.push(t);
+    const t = this.normalizePair(p);
+    if (t) tokens.push(t);
     }
     return tokens;
   }
@@ -120,14 +122,14 @@ export class DexpaprikaFeed implements MarketDataProvider {
     const bt = p.pair?.baseToken;
     if (!bt?.address || !bt.symbol) return undefined;
     return {
-      address: bt.address,
-      chainId,
-      symbol: bt.symbol,
-      ...(bt.name ? { name: bt.name } : {}),
-      priceUsd: 0,
-      liquidityUsd: this.num(p.liquidityUsd),
-      volume24hUsd: this.num(p.volumeUsd24),
-      ...(p.pair?.address ? { pairAddress: p.pair.address } : {}),
+    address: bt.address,
+    chainId,
+    symbol: bt.symbol,
+    ...(bt.name ? { name: bt.name } : {}),
+    priceUsd: 0,
+    liquidityUsd: this.num(p.liquidityUsd),
+    volume24hUsd: this.num(p.volumeUsd24),
+    ...(p.pair?.address ? { pairAddress: p.pair.address } : {}),
     };
   }
 
@@ -139,13 +141,13 @@ export class DexpaprikaFeed implements MarketDataProvider {
   private applyOptions(base: MarketToken[], options: MarketDiscoveryOptions): MarketToken[] {
     let out = base;
     if (options.chainIds && options.chainIds.length > 0) {
-      out = out.filter((t) => options.chainIds!.includes(t.chainId));
+    out = out.filter((t) => options.chainIds!.includes(t.chainId));
     }
     if (options.minLiquidityUsd !== undefined) {
-      out = out.filter((t) => t.liquidityUsd >= options.minLiquidityUsd!);
+    out = out.filter((t) => t.liquidityUsd >= options.minLiquidityUsd!);
     }
     if (options.sort) {
-      out = [...out].sort((a, b) => (b[options.sort!] ?? 0) - (a[options.sort!] ?? 0));
+    out = [...out].sort((a, b) => (b[options.sort!] ?? 0) - (a[options.sort!] ?? 0));
     }
     if (options.limit !== undefined && options.limit > 0) out = out.slice(0, options.limit);
     return out;

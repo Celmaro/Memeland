@@ -11,6 +11,7 @@ import {
   type MarketDiscoveryOptions,
   type MarketToken,
 } from './market-data-provider.js';
+import { TtlCache } from '../cache/ttl-cache.js';
 
 export const CODEX_DEFAULT_ENDPOINT = 'https://api.codex.io/graphql';
 
@@ -38,15 +39,14 @@ export class CodexFeed implements MarketDataProvider {
   readonly id = 'codex';
   private readonly fetch: FetchLike;
   private readonly endpoint: string;
-  private readonly ttlMs: number;
   private readonly supportedChains: Set<string>;
-  private cache = new Map<string, { at: number; data: MarketToken[] }>();
+  private readonly cache: TtlCache<MarketToken[]>;
 
   constructor(opts: CodexFeedOptions = {}) {
-    const f = opts.fetch ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
+      const f = opts.fetch ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
     this.fetch = f;
     this.endpoint = opts.endpoint ?? CODEX_DEFAULT_ENDPOINT;
-    this.ttlMs = opts.ttlMs ?? 60_000;
+    this.cache = new TtlCache<MarketToken[]>({ ttlMs: opts.ttlMs ?? 60_000 });
     this.supportedChains = new Set(
       (opts.supportedChains ?? ['robinhood', 'bsc', 'base', 'solana']).map((c) => c.toLowerCase())
     );
@@ -58,28 +58,28 @@ export class CodexFeed implements MarketDataProvider {
   }
 
   private async baseTokens(): Promise<MarketToken[]> {
-    const key = 'base';
-    const hit = this.cache.get(key);
-    if (hit && Date.now() - hit.at <= this.ttlMs) return hit.data;
+      const key = 'base';
+    const cached = this.cache.get(key);
+    if (cached) return cached;
     const tokens = await this.fetchMarkets();
-    this.cache.set(key, { at: Date.now(), data: tokens });
+    this.cache.set(key, tokens);
     return tokens;
-  }
+    }
 
   private async fetchMarkets(): Promise<MarketToken[]> {
     const query = `{ markets { baseToken { address symbol name } chainId priceUsd liquidityUsd volumeUsd fdvUsd pairAddress } }`;
     const res = await this.fetch(this.endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query }),
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query }),
     });
     if (!res.ok) throw new Error('codex feed fetch failed');
     const body = (await res.json()) as { data?: { markets?: RawMarket[] } };
     const markets = Array.isArray(body?.data?.markets) ? body.data.markets : [];
     const tokens: MarketToken[] = [];
     for (const m of markets) {
-      const t = this.normalizeMarket(m);
-      if (t) tokens.push(t);
+    const t = this.normalizeMarket(m);
+    if (t) tokens.push(t);
     }
     return tokens;
   }
@@ -89,15 +89,15 @@ export class CodexFeed implements MarketDataProvider {
     if (chainId === undefined || !this.supportedChains.has(String(m.chainId).toLowerCase())) return undefined;
     if (!m.baseToken?.address || !m.baseToken.symbol) return undefined;
     return {
-      address: m.baseToken.address,
-      chainId,
-      symbol: m.baseToken.symbol,
-      ...(m.baseToken.name ? { name: m.baseToken.name } : {}),
-      priceUsd: this.num(m.priceUsd),
-      liquidityUsd: this.num(m.liquidityUsd),
-      volume24hUsd: this.num(m.volumeUsd),
-      ...(m.fdvUsd !== undefined ? { fdvUsd: this.num(m.fdvUsd) } : {}),
-      ...(m.pairAddress ? { pairAddress: m.pairAddress } : {}),
+    address: m.baseToken.address,
+    chainId,
+    symbol: m.baseToken.symbol,
+    ...(m.baseToken.name ? { name: m.baseToken.name } : {}),
+    priceUsd: this.num(m.priceUsd),
+    liquidityUsd: this.num(m.liquidityUsd),
+    volume24hUsd: this.num(m.volumeUsd),
+    ...(m.fdvUsd !== undefined ? { fdvUsd: this.num(m.fdvUsd) } : {}),
+    ...(m.pairAddress ? { pairAddress: m.pairAddress } : {}),
     };
   }
 
@@ -109,13 +109,13 @@ export class CodexFeed implements MarketDataProvider {
   private applyOptions(base: MarketToken[], options: MarketDiscoveryOptions): MarketToken[] {
     let out = base;
     if (options.chainIds && options.chainIds.length > 0) {
-      out = out.filter((t) => options.chainIds!.includes(t.chainId));
+    out = out.filter((t) => options.chainIds!.includes(t.chainId));
     }
     if (options.minLiquidityUsd !== undefined) {
-      out = out.filter((t) => t.liquidityUsd >= options.minLiquidityUsd!);
+    out = out.filter((t) => t.liquidityUsd >= options.minLiquidityUsd!);
     }
     if (options.sort) {
-      out = [...out].sort((a, b) => (b[options.sort!] ?? 0) - (a[options.sort!] ?? 0));
+    out = [...out].sort((a, b) => (b[options.sort!] ?? 0) - (a[options.sort!] ?? 0));
     }
     if (options.limit !== undefined && options.limit > 0) out = out.slice(0, options.limit);
     return out;

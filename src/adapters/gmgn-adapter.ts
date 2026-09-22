@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createApiKeyPool, loadApiKeyPool, type ApiKeyPool } from '../services/api-key-pool.js';
 import type { SellTrade } from '../services/sellability/sellability-simulator.js';
 import { chainIdFor, type MarketDataProvider, type MarketDiscoveryOptions, type MarketToken } from './market-data-provider.js';
+import { TtlCache } from '../cache/ttl-cache.js';
 
 /** All chains GMGN OpenAPI serves for market/token/track routes (multi-chain expansion, 2026-09-18). */
 export type Chain = 'sol' | 'bsc' | 'base' | 'eth' | 'robinhood';
@@ -171,16 +172,14 @@ export class GMGNAdapter implements MarketDataProvider {
   private keyPool: ApiKeyPool;
 
   /** MarketDataProvider.discover cache — per chain, module-independent, TTL 30s. */
-  private static readonly DISCOVERY_TTL_MS = 30 * 1000;
-  private readonly discoveryCache = new Map<string, { at: number; data: MarketToken[] }>();
+    private static readonly DISCOVERY_TTL_MS = 30 * 1000;
+    private readonly discoveryCache = new TtlCache<MarketToken[]>({ ttlMs: GMGNAdapter.DISCOVERY_TTL_MS });
 
-  /** Security audit cache — module-level, shared across ALL adapter instances. */
-  private static securityCache = new Map<string, { audit: GMGNSecurityAudit; at: number }>();
-  private static readonly SECURITY_CACHE_TTL_MS = 10 * 60 * 1000;
+    /** Security audit cache — module-level, shared across ALL adapter instances. */
+    private static securityCache = new TtlCache<GMGNSecurityAudit>({ ttlMs: 10 * 60 * 1000 });
 
-  /** Trade feed cache — module-level (all instances share), TTL 60 seconds. */
-  private static trackCache = new Map<string, { trades: GMGNTrackTrade[]; at: number }>();
-  private static readonly TRACK_CACHE_TTL_MS = 60 * 1000;
+    /** Trade feed cache — module-level (all instances share), TTL 60 seconds. */
+    private static trackCache = new TtlCache<GMGNTrackTrade[]>({ ttlMs: 60 * 1000 });
 
   /**
    * Global pacing queue — ALL GMGN requests (every adapter instance: meme
@@ -511,11 +510,9 @@ export class GMGNAdapter implements MarketDataProvider {
    * audited repeatedly within the same window. Fail-closed: error → null.
    */
   public async fetchTokenSecurity(chain: Chain, address: string): Promise<GMGNSecurityAudit | null> {
-    const key = `${chain}:${address.toLowerCase()}`;
-    const cached = GMGNAdapter.securityCache.get(key);
-    if (cached && Date.now() - cached.at < GMGNAdapter.SECURITY_CACHE_TTL_MS) {
-      return cached.audit;
-    }
+      const key = `${chain}:${address.toLowerCase()}`;
+      const cached = GMGNAdapter.securityCache.get(key);
+      if (cached) return cached;
     const res = await this.gmgnRequest<any>('GET', '/v1/token/security', { chain, address });
     if (!res) return null;
     const d = res?.data;
@@ -539,7 +536,7 @@ export class GMGNAdapter implements MarketDataProvider {
       isShowAlert: d.is_show_alert === true || d.is_show_alert === 1 || d.is_show_alert === '1',
       flags: Array.isArray(d.flags) ? d.flags.map((f: unknown) => String(f)) : [],
     };
-    GMGNAdapter.securityCache.set(key, { audit, at: Date.now() });
+    GMGNAdapter.securityCache.set(key, audit);
     return audit;
   }
 
@@ -550,11 +547,9 @@ export class GMGNAdapter implements MarketDataProvider {
    * alerts) without duplicate requests. Fail-open: error → [].
    */
   public async fetchTrackTrades(chain: Chain, kind: 'smartmoney' | 'kol'): Promise<GMGNTrackTrade[]> {
-    const key = `track:${chain}:${kind}`;
-    const cached = GMGNAdapter.trackCache.get(key);
-    if (cached && Date.now() - cached.at < GMGNAdapter.TRACK_CACHE_TTL_MS) {
-      return cached.trades;
-    }
+      const key = `track:${chain}:${kind}`;
+      const cached = GMGNAdapter.trackCache.get(key);
+      if (cached) return cached;
     const res = await this.gmgnRequest<any>('GET', `/v1/user/${kind}`, { chain, limit: 100 });
     if (!res) return [];
     const list: any[] = Array.isArray(res?.data?.list) ? res.data.list : (Array.isArray(res?.list) ? res.list : []);
@@ -577,7 +572,7 @@ export class GMGNAdapter implements MarketDataProvider {
       })
       .filter((t: GMGNTrackTrade | null): t is GMGNTrackTrade => t !== null)
       .sort((a, b) => b.timestamp - a.timestamp);
-    GMGNAdapter.trackCache.set(key, { trades, at: Date.now() });
+    GMGNAdapter.trackCache.set(key, trades);
     return trades;
   }
 
@@ -738,15 +733,15 @@ export class GMGNAdapter implements MarketDataProvider {
   }
 
   /** TTL-cached, normalized rank tokens for one chain. */
-  private async rankTokens(chain: Chain): Promise<MarketToken[]> {
-    const hit = this.discoveryCache.get(chain);
-    if (hit && Date.now() - hit.at <= GMGNAdapter.DISCOVERY_TTL_MS) return hit.data;
-    // 24h window so the bare `volume` field lands in volume24hUsd (the schema's
-    // primary sort key), keeping sort-by-volume meaningful.
-    const tokens = this.toMarketTokens(await this.fetchRank(chain, { interval: '24h' }));
-    this.discoveryCache.set(chain, { at: Date.now(), data: tokens });
-    return tokens;
-  }
+    private async rankTokens(chain: Chain): Promise<MarketToken[]> {
+      const hit = this.discoveryCache.get(chain);
+      if (hit) return hit;
+      // 24h window so the bare `volume` field lands in volume24hUsd (the schema's
+      // primary sort key), keeping sort-by-volume meaningful.
+      const tokens = this.toMarketTokens(await this.fetchRank(chain, { interval: '24h' }));
+      this.discoveryCache.set(chain, tokens);
+      return tokens;
+    }
 
   private applyMarketOptions(base: MarketToken[], options: MarketDiscoveryOptions): MarketToken[] {
     let out = base;

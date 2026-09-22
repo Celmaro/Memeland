@@ -27,7 +27,8 @@ describe('PriceFeedService', () => {
   });
 
   it('starts with empty cache (no fabricated seed prices)', () => {
-    const svc = new PriceFeedService();
-    expect((svc as any).cache).toEqual({});
+      const svc = new PriceFeedService();
+      expect((svc as unknown as { prices: { size(): number } }).prices.size()).toBe(0);
+      expect((svc as unknown as { changes: { size(): number } }).changes.size()).toBe(0);
+    });
   });
-});
