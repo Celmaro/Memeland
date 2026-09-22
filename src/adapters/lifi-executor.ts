@@ -18,7 +18,7 @@
  *     a `timed_out` fill is reconciled via /v1/status before any retry.
  *   - Unknown chains / tokens fail closed — no silent chain-id default.
  */
-import { createWalletClient, http, type Account, type Chain, type WalletClient } from 'viem';
+import { createWalletClient, http, type Account, type Chain } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import base58 from 'bs58';
 import fs from 'fs';

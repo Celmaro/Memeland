@@ -67,7 +67,7 @@ const IC_STEP = 0.05;
 export function icWeightDeltas(
   rows: CalibrationRow[],
   voters: string[],
-  base: Record<string, number>
+  _base: Record<string, number>
 ): ICResult {
   const ics = voterICs(rows, voters);
   const deltas: Record<string, number> = {};

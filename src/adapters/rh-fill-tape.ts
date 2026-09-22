@@ -59,7 +59,6 @@ interface Labeled {
 export class RhFillTapeReader {
   private readonly chainId: number;
   private readonly maxWindow: number;
-  private readonly ttlMs: number;
   private labelHints: Map<string, string>;
   private readonly labelCache = new TtlCache<{ label: string }>({ ttlMs: 600_000 });
   private inFlight = new Map<string, Promise<Labeled>>();
@@ -71,7 +70,6 @@ export class RhFillTapeReader {
     ) {
     this.chainId = opts.chainId ?? 4663;
     this.maxWindow = opts.maxWindow ?? 200;
-    this.ttlMs = opts.ttlMs ?? 600_000;
     this.labelHints = new Map(Object.entries(opts.labelHints ?? {}));
     }
 

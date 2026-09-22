@@ -4,7 +4,7 @@
  * backward compatibility with existing consumers (index.ts, message-handler.ts).
  */
 import { Interaction } from 'discord.js';
-import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
+import { OpenCatzHub } from '../../orchestrator/hub.js';
 import { AIService } from '../../services/ai-service.js';
 import {
   priceAlertService,
@@ -65,7 +65,7 @@ export const isOpenCatChannel = isOpenCatzChannel;
 export async function handleInteraction(
   interaction: Interaction,
   hub: OpenCatzHub,
-  aiService: AIService
+  _aiService: AIService
 ): Promise<void> {
   try {
     // Channel Restriction Guard: Block interaction outside OpenCatz channels

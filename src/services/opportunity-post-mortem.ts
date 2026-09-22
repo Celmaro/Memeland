@@ -37,7 +37,7 @@ export class OpportunityPostMortem {
 
   constructor(
     ledger: OpportunityLedger,
-    feedLearning: (success: boolean) => void = (success: boolean) => {
+    feedLearning: (success: boolean) => void = () => {
       // no-op — the live loop injects the real SwarmLearningEngine feed.
     }
   ) {

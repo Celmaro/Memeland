@@ -1,6 +1,6 @@
 import { GMGNAdapter, GMGNRawToken, type Chain, type KlineCandle } from '../../adapters/gmgn-adapter.js';
-import { RhFillTapeReader, type FillTapeWindow } from '../../adapters/rh-fill-tape.js';
-import { chainIdFor, type MarketDataProvider, type MarketToken } from '../../adapters/market-data-provider.js';
+import { RhFillTapeReader } from '../../adapters/rh-fill-tape.js';
+import { chainIdFor, type MarketDataProvider } from '../../adapters/market-data-provider.js';
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { globalMarketRegimeFilter } from '../../services/market-regime.js';
 import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
@@ -16,7 +16,7 @@ import { SentimentVoter } from '../shared/sentiment-voter.js';
 import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
-  type VoterOpinion, type VoterScores, type VoterContext, scoresFromOpinions,
+  type VoterOpinion, type VoterContext, scoresFromOpinions,
   whaleVote, regimeVote, securityVote, walletVote, rubricVote,
   reputationAwareSecurityVote, reputationAwareWalletVote, reputationContextFromToken,
   stickyQuantVote, ownerDedupedConvergenceVote,

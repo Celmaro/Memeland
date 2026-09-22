@@ -7,7 +7,7 @@
  * utility, no I/O, no env reads — caller controls the clock and TTL.
  */
 
-export interface TtlCacheOptions<V> {
+export interface TtlCacheOptions {
   /** Time-to-live in milliseconds. Required — fail fast on misconfiguration. */
   ttlMs: number;
   /** Optional LRU cap. When set, the oldest inserted entry is dropped first. */
@@ -28,7 +28,7 @@ export class TtlCache<V> {
   private readonly now: () => number;
   private readonly entries = new Map<string, Entry<V>>();
 
-  constructor(opts: TtlCacheOptions<V>) {
+  constructor(opts: TtlCacheOptions) {
     if (!(opts.ttlMs > 0)) throw new Error('TtlCache: ttlMs must be > 0');
     this.ttlMs = opts.ttlMs;
     this.maxEntries = opts.maxEntries;

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { OpenCatzHub, OpenCatHub } from '../orchestrator/hub.js';
+import type { OpenCatzHub } from '../orchestrator/hub.js';
 import { atomicWriteJsonSync, readJsonFileSafe } from '../storage/atomic-file-store.js';
 
 export interface ScheduledTask {

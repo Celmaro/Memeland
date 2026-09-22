@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { OpenCatzHub, OpenCatHub } from '../orchestrator/hub.js';
+import { OpenCatzHub } from '../orchestrator/hub.js';
 import { loadApiKeyPool } from '../services/api-key-pool.js';
 
 // ANSI Color Tokens from OpenCatz Palette
@@ -72,7 +72,7 @@ ${C.cyan}Autonomous Multi-Agent Health Audit & Diagnostics${C.reset}
   for (const rpc of rpcs) {
     const start = Date.now();
     try {
-      const res = await fetch(rpc.url, {
+      void await fetch(rpc.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),

@@ -30,7 +30,6 @@ export class OpenCatzHub {
 
   private agentFactories: Partial<Record<AgentDomainId, () => ScreeningAgent | Promise<ScreeningAgent>>>;
 
-  private strategyProvider: ((domain: string) => HubStrategyLike | null) | null = null;
 
   private stateStore?: any;
 
@@ -43,11 +42,6 @@ export class OpenCatzHub {
   /** Late wiring seam for composition roots (index.ts): share singleton agents with on-demand passes. */
   public attachAgentFactories(factories: Partial<Record<AgentDomainId, () => ScreeningAgent | Promise<ScreeningAgent>>>): void {
     this.agentFactories = { ...this.agentFactories, ...factories };
-  }
-
-  /** Wire the StrategyEngine into the hub so agents can evaluate against active strategies. */
-  public setStrategyProvider(fn: ((domain: string) => HubStrategyLike | null) | null): void {
-    this.strategyProvider = fn;
   }
 
   public attachStateStore(store: any): void {

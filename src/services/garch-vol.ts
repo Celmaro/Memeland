@@ -55,7 +55,7 @@ export function volTargetSize(baseUsd: number, forecastVolPct: number, targetVol
  * squared returns; a non-finite purged estimate blocks the gate. This keeps the
  * future test window and its embargo out of the training folds (no look-ahead).
  */
-export function garchHarnessValidation(returns: number[], params: GarchParams): {
+export function garchHarnessValidation(returns: number[], _params: GarchParams): {
   valid: boolean;
   purgedMean?: number;
   reason: string;

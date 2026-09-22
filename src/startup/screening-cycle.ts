@@ -12,7 +12,6 @@
  * client is assigned after the factory runs.
  */
 
-import type { ChatNotifier } from '../notifications/chat-notifier.js';
 import { isAutoExecute, isSignalOnly } from '../config/config.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
 import { globalDecisionCache } from '../services/decision-cache.js';

@@ -7,7 +7,7 @@ import { AIService } from '../services/ai-service.js';
 import { globalWalletService } from '../services/wallet-service.js';
 import { WalletBalanceReader } from '../services/wallet-balance-reader.js';
 import { StateStore } from '../services/state-store.js';
-import { AGENT_DOMAINS, getAgentDomain } from '../orchestrator/agent-registry.js';
+import { AGENT_DOMAINS } from '../orchestrator/agent-registry.js';
 import { StrategyEngine } from '../orchestrator/strategy-engine.js';
 import { globalPriceAlertService } from '../services/price-alert-service.js';
 
@@ -20,7 +20,7 @@ const walletService = globalWalletService;
 walletService.attachStateStore(stateStore);
 // KC7 — single balance-reader surface (defaults to Robinhood Chain 4663).
 const walletBalanceReader = new WalletBalanceReader(walletService);
-const strategyEngine = new StrategyEngine();
+new StrategyEngine();
 
 // ANSI Color Tokens from Opencatz Master Palette
 const C = {

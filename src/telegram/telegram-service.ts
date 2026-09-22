@@ -166,7 +166,7 @@ ${dexUrl ? `📊 [View Chart on DexScreener](${dexUrl})` : ''}
     return this.sendMessage(message, 'Markdown', undefined, threadId);
   }
 
-  public async broadcastInteractiveMenu(hub?: OpenCatHub, walletService?: WalletService): Promise<boolean> {
+  public async broadcastInteractiveMenu(hub?: OpenCatHub, _walletService?: WalletService): Promise<boolean> {
     const activeDomains = hub ? hub.getActiveDomains() : [];
     const autoExecuteEnabled = process.env.AUTO_EXECUTE_ENABLED === 'true';
     const risk = hub ? hub.getRiskManager().getRiskState() : null;

@@ -48,7 +48,7 @@ export class EVMTradeAdapter {
     return resolveExecutionChain(String(chainInput)).lifiChainId;
   }
 
-  public async executeBuyToken(request: EVMTradeRequest, walletService?: WalletService): Promise<EVMTradeResult> {
+  public async executeBuyToken(request: EVMTradeRequest, _walletService?: WalletService): Promise<EVMTradeResult> {
     const dexName = 'Uniswap API (Robinhood L2)';
 
     console.log(`[EVM ADAPTER] Initiating Buy Order on ${String(request.chain).toUpperCase()} via ${dexName} (Amount: ${request.amountEth} ETH)`);

@@ -6,9 +6,9 @@ import {
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
 } from 'discord.js';
-import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
+import { OpenCatzHub } from '../../orchestrator/hub.js';
 import { AGENT_DOMAINS } from '../../orchestrator/agent-registry.js';
-import { isDryRun as isDryRunMode, getExecutionMode } from '../../config/config.js';
+import { getExecutionMode } from '../../config/config.js';
 
 export interface DashboardEmbedOptions {
   ethBalance?: string | null;

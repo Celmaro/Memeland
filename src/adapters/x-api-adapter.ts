@@ -22,11 +22,9 @@ export interface XSearchResult {
 
 export class XApiAdapter {
   private keyPool: ApiKeyPool;
-  private isEnabled: boolean;
 
   constructor() {
     this.keyPool = loadApiKeyPool('X_API_BEARER_TOKEN');
-    this.isEnabled = process.env.ENABLE_X_ALPHA_SCRAPER === 'true' || this.keyPool.size > 0;
   }
 
   public isConfigured(): boolean {

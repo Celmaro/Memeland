@@ -331,13 +331,13 @@ export class StateStore {
   // WALLET KEYS (Persistent across bot updates)
   // ==========================================
 
-  public setWalletKey(chain: 'evm', privateKey: string): void {
+  public setWalletKey(_chain: 'evm', privateKey: string): void {
     if (!this.state.walletKeys) this.state.walletKeys = {};
     this.state.walletKeys.evmPrivateKey = privateKey;
     this.scheduleSave();
   }
 
-  public removeWalletKey(chain: 'evm'): void {
+  public removeWalletKey(_chain: 'evm'): void {
     if (this.state.walletKeys) {
       delete this.state.walletKeys.evmPrivateKey;
       this.scheduleSave();

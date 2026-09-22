@@ -71,7 +71,7 @@ export class WalletService {
   }
 
   /** Check if the EVM wallet is configured */
-  public hasWallet(chain: 'evm'): boolean {
+  public hasWallet(_chain: 'evm'): boolean {
     return this.evmPrivateKey !== null;
   }
 
@@ -183,7 +183,7 @@ export class WalletService {
   }
 
   /** Get wallet address for a given chain type */
-  public getAddress(chain: 'evm'): string {
+  public getAddress(_chain: 'evm'): string {
     return this.getEvmAddress();
   }
 }

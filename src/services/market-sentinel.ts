@@ -155,8 +155,3 @@ export function marketSentinelProbe(
   };
 }
 
-export const globalMarketSentinel = new MarketSentinel(() => ({
-  botRisk: 0,
-  highRiskFraction: 0,
-  regimeRiskOff: false,
-}));

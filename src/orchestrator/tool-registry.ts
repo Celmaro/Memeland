@@ -1,13 +1,7 @@
 import type { OpenCatHub } from './hub.js';
 import type { AIService } from '../services/ai-service.js';
 import { StrategyEngine } from './strategy-engine.js';
-import { globalRiskEngineV2 } from './risk-engine-v2.js';
-import { AGENT_DOMAINS, getAgentDomain } from './agent-registry.js';
 import { WalletBalanceReader } from '../services/wallet-balance-reader.js';
-import { globalStateStore } from '../services/state-store.js';
-import { globalPriceAlertService } from '../services/price-alert-service.js';
-import { globalCronScheduler } from '../services/cron-scheduler.js';
-import { ApiKeyGuardService } from '../services/api-key-guard.js';
 import fs from 'fs';
 import path from 'path';
 

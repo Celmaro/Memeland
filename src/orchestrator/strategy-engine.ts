@@ -118,7 +118,7 @@ export class StrategyEngine {
       }).catch((e) => { console.error('INVALID: ' + (e?.message || String(e))); process.exit(1); });
     `;
     try {
-      const res = execFileSync(
+      execFileSync(
         process.execPath,
         ['--input-type=module', '-e', script, url, kind],
         { timeout: 20000, encoding: 'utf-8', windowsHide: true, env: this.baselineEnv() }

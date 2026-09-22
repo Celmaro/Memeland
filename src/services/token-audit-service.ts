@@ -15,11 +15,6 @@ function fmtUsd(v: number | undefined | null): string {
   return `$${v.toFixed(4)}`;
 }
 
-function fmtPct(v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-  return `${(v * 100).toFixed(1)}%`;
-}
-
 function fmtInt(v: number | undefined | null): string {
   if (v === undefined || v === null || !Number.isFinite(v) || v <= 0) return '—';
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;

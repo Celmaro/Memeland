@@ -338,5 +338,4 @@ export class SwarmLearningEngine {
  * and consumed by position tracking for outcome-driven weight recalibration.
  */
 export const globalSwarmLearning = new SwarmLearningEngine();
-export const globalAgentLearning = globalSwarmLearning;
 export const AgentLearningEngine = SwarmLearningEngine;

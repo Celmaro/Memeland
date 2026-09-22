@@ -5,10 +5,8 @@ import {
   ModalSubmitInteraction,
   ButtonInteraction,
   StringSelectMenuInteraction,
-  ButtonBuilder,
-  ButtonStyle,
 } from 'discord.js';
-import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
+import { OpenCatzHub } from '../../orchestrator/hub.js';
 import { createDashboardComponents } from '../embeds/dashboard-embed.js';
 import { globalRiskEngineV2 } from '../../orchestrator/risk-engine-v2.js';
 import { EVMTradeAdapter } from '../../adapters/evm-adapter.js';

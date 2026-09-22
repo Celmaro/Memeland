@@ -370,7 +370,7 @@ export class OpportunityStrategist {
   private accelerateReason(
     identity: OpportunityIdentity,
     o: OpportunityObservation,
-    now: Date
+    _now: Date
   ): string | null {
     const priors = this.ledger
       .getObservations(identity.opportunityId)

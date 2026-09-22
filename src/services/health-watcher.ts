@@ -12,7 +12,6 @@ export interface AgentHeartbeat {
 
 export class HealthWatcherService {
   private agentMap: Map<string, AgentHeartbeat> = new Map();
-  private checkIntervalMs = 60000; // 60 seconds
 
   constructor() {
     this.initializeAgents();

@@ -50,7 +50,6 @@ export class GoPlusSecurityService {
   public async auditTokenFull(chain: EvmChain, contractAddress: string): Promise<GoPlusTokenSecurity | null> {
     const chainId = CHAIN_ID_MAP[chain];
     if (!chainId) return null;
-    const apiKey = this.keyPool.get() || '';
     const buildUrl = (k: string) => {
       let url = `${this.baseUrl}/token_security/${chainId}?contract_addresses=${contractAddress}`;
       if (k && !k.includes('YOUR_') && !k.includes('placeholder') && !k.includes('mock')) {

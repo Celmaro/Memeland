@@ -14,7 +14,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from 'discord.js';
-import { OpenCatzHub, OpenCatHub } from '../../orchestrator/hub.js';
+import { OpenCatzHub } from '../../orchestrator/hub.js';
 import { isDryRun as isDryRunMode, getExecutionMode } from '../../config/config.js';
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { PriceAlertService } from '../../services/price-alert-service.js';

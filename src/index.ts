@@ -1,5 +1,4 @@
 import dotenv from 'dotenv';
-import { isDryRun as isDryRunMode, isAutoExecute, isSignalOnly } from './config/config.js';
 import { Client, GatewayIntentBits, ChannelType, Events } from 'discord.js';
 import { buildCallEmbed } from './discord/embeds/call-embed.js';
 import { OpenCatzHub } from './orchestrator/hub.js';
@@ -37,7 +36,6 @@ import { globalDecisionLedger } from './services/decision-ledger.js';
 import { globalDecisionCache } from './services/decision-cache.js';
 import { globalReputationMemory } from './services/reputation-memory.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
-import { globalRiskEngineV2 } from './orchestrator/risk-engine-v2.js';
 import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability } from './services/execution-gates.js';
@@ -87,7 +85,6 @@ const opportunityPostMortem = new OpportunityPostMortem(opportunityLedger, (succ
 // Wire sandboxed StrategyEngine into Swarm Consensus (active strategy can adjust confidence)
 const strategyEngine = new StrategyEngine();
 SwarmConsensusEngine.setStrategyProvider((domain: string) => strategyEngine.getActiveStrategy(domain));
-hub.setStrategyProvider((domain: string) => strategyEngine.getActiveStrategy(domain));
 
 function gateSignal(payload: any): boolean {
   // Kernel B — feed the prism-insight regime and azimuth sticky-conviction keys
