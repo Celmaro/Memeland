@@ -1,8 +1,10 @@
 import { TtlCache } from '../cache/ttl-cache.js';
+import { StalenessClock } from '../clock/staleness-clock.js';
 
 export class PriceFeedService {
   private readonly prices: TtlCache<number>;
   private readonly changes: TtlCache<number>;
+  private readonly freshness: StalenessClock;
   private readonly cacheDurationMs: number;
 
   private symbolToGeckoId: Record<string, string> = {
@@ -22,6 +24,7 @@ export class PriceFeedService {
     this.cacheDurationMs = opts.cacheDurationMs ?? 60_000;
     this.prices = new TtlCache<number>({ ttlMs: this.cacheDurationMs, now: opts.now });
     this.changes = new TtlCache<number>({ ttlMs: this.cacheDurationMs, now: opts.now });
+    this.freshness = new StalenessClock({ ttlMs: this.cacheDurationMs, now: opts.now });
   }
 
   public async getPrice(symbol: string): Promise<number | null> {
@@ -31,29 +34,29 @@ export class PriceFeedService {
       console.warn(`[PRICE SERVICE] Unsupported symbol "${symbol}" — returning null.`);
       return null;
     }
-    if (!this.isFresh()) {
+    if (this.freshness.isStale() || this.prices.size() === 0) {
       await this.refreshPrices();
     }
-    return this.prices.get(cleanSymbol);
+    return this.prices.get(cleanSymbol) ?? null;
   }
 
   public async get24hChange(symbol: string): Promise<number | null> {
     const cleanSymbol = symbol.toUpperCase().trim();
     const geckoId = this.symbolToGeckoId[cleanSymbol];
-    if (!geckoId) {
-      return null;
-    }
-    if (!this.isFresh()) {
+    if (!geckoId) return null;
+    if (this.freshness.isStale() || this.changes.size() === 0) {
       await this.refreshPrices();
     }
-    return this.changes.get(cleanSymbol);
+    return this.changes.get(cleanSymbol) ?? null;
   }
 
-  /** Cache freshness — true if any populated entry is still inside its TTL. */
-  private isFresh(): boolean {
-    if (this.prices.size() === 0) return false;
-    // Probe any key — TtlCache.get returns null on TTL expiry, evicting stale entries.
-    return this.prices.get('BTC') !== null || this.prices.size() > 0;
+  /** Diagnostics — exposes the freshness clock + cache sizes. */
+  public snapshot(): { isFresh: boolean; ageMs: number | null; priceCount: number } {
+    return {
+      isFresh: !this.freshness.isStale() && this.prices.size() > 0,
+      ageMs: this.freshness.ageMs(),
+      priceCount: this.prices.size(),
+    };
   }
 
   private async refreshPrices(): Promise<void> {
@@ -75,6 +78,7 @@ export class PriceFeedService {
           this.changes.set(symbol, change);
         }
       }
+      this.freshness.touch();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[PRICE SERVICE ERROR] Failed to fetch prices: ${message}`);
