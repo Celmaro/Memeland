@@ -25,6 +25,7 @@ import fs from 'fs';
 import path from 'path';
 import { mainnet, bsc, base as baseChain, robinhood as robinhoodChain } from 'viem/chains';
 import { isDryRun as isDryRunMode } from '../config/config.js';
+import { tryFetchJson } from '../io/try-fetch-json.js';
 import {
   explorerUrlForChain,
   normalizeExecutionChainKey,
@@ -272,37 +273,23 @@ export class LifiExecutor {
   }
 
   private async lifiPost<T>(path: string, body: Record<string, unknown>): Promise<T | null> {
-    try {
-      const res = await this.fetchImpl(`${LIFI_API_BASE}${path}`, {
+      return tryFetchJson<T>(`${LIFI_API_BASE}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
+      }, {
+        fetchImpl: this.fetchImpl,
+        logger: (msg) => console.warn(msg),
+        includeErrorBody: true,
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        console.warn(`[LIFI] ${path} HTTP ${res.status}: ${text.slice(0, 300)}`);
-        return null;
-      }
-      return (await res.json()) as T;
-    } catch (err: unknown) {
-      console.warn(`[LIFI] ${path} network error: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
     }
-  }
 
-  private async lifiGet<T>(path: string): Promise<T | null> {
-    try {
-      const res = await this.fetchImpl(`${LIFI_API_BASE}${path}`);
-      if (!res.ok) {
-        console.warn(`[LIFI] GET ${path} HTTP ${res.status}`);
-        return null;
-      }
-      return (await res.json()) as T;
-    } catch (err: unknown) {
-      console.warn(`[LIFI] GET ${path} network error: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+    private async lifiGet<T>(path: string): Promise<T | null> {
+      return tryFetchJson<T>(`${LIFI_API_BASE}${path}`, undefined, {
+        fetchImpl: this.fetchImpl,
+        logger: (msg) => console.warn(msg),
+      });
     }
-  }
 
   private async quoteRoute(params: {
     fromChain: number;
