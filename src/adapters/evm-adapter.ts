@@ -23,19 +23,6 @@ export interface EVMTradeResult {
   error?: string;
 }
 
-export interface EVMSendRequest {
-  chain: string | number;
-  recipientAddress: string;
-  amountEth: number;
-}
-
-export interface EVMSwapRequest {
-  chain: string | number;
-  fromToken: string;
-  toToken: string;
-  amountEth: number;
-}
-
 export class EVMTradeAdapter {
   private isDryRun: boolean;
   private uniswapKeyPool: ApiKeyPool = loadApiKeyPool('UNISWAP_API_KEY');
@@ -146,107 +133,10 @@ export class EVMTradeAdapter {
   /**
    * Send native ETH directly via WalletService (viem)
    */
-  public async sendToken(request: EVMSendRequest, walletService?: WalletService): Promise<EVMTradeResult> {
-    const chainId = this.parseChainId(request.chain);
-    console.log(`[EVM ADAPTER] Direct Send: ${request.amountEth} native token to ${request.recipientAddress} on Chain #${chainId}`);
-
-    if (this.isDryRun) {
-      const simHash = `0xsim_evm_send_${chainId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      return {
-        success: true,
-        txHash: simHash,
-        explorerUrl: walletService ? walletService.getExplorerUrl(chainId, simHash) : `https://robinhoodchain.blockscout.com/tx/${simHash}`,
-        chain: String(request.chain),
-        inputEth: request.amountEth,
-        outputTokens: request.amountEth,
-        dexUsed: 'Direct Native Transfer',
-        simulated: true,
-      };
-    }
-
-    try {
-      if (!walletService || !walletService.hasWallet('evm')) {
-        throw new Error('EVM wallet not configured. Use /wallet setup or set EVM_PRIVATE_KEY in .env');
-      }
-
-      const result = await walletService.sendEvm(chainId, request.recipientAddress, request.amountEth);
-      return {
-        success: true,
-        txHash: result.txHash,
-        explorerUrl: result.explorerUrl,
-        chain: String(request.chain),
-        inputEth: request.amountEth,
-        outputTokens: request.amountEth,
-        dexUsed: 'Direct Native Transfer',
-        simulated: false,
-      };
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error('[EVM ADAPTER SEND ERROR]', errMsg);
-      return {
-        success: false,
-        chain: String(request.chain),
-        inputEth: request.amountEth,
-        outputTokens: 0,
-        dexUsed: 'Direct Native Transfer',
-        simulated: false,
-        error: errMsg,
-      };
-    }
-  }
 
   /**
    * Swap tokens on EVM (simulated only — live swaps route through the LI.FI executor)
    */
-  public async swapToken(request: EVMSwapRequest, walletService?: WalletService): Promise<EVMTradeResult> {
-    const chainId = this.parseChainId(request.chain);
-    console.log(`[EVM ADAPTER] Direct Swap: ${request.amountEth} ${request.fromToken} -> ${request.toToken} on Chain #${chainId}`);
-
-    if (this.isDryRun) {
-      const simHash = `0xsim_evm_swap_${chainId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      return {
-        success: true,
-        txHash: simHash,
-        explorerUrl: walletService ? walletService.getExplorerUrl(chainId, simHash) : `https://robinhoodchain.blockscout.com/tx/${simHash}`,
-        chain: String(request.chain),
-        inputEth: request.amountEth,
-        outputTokens: request.amountEth * 3200, // Simulated output e.g. ETH -> USDC
-        dexUsed: 'LI.FI / Jumper (simulated)',
-        simulated: true,
-      };
-    }
-
-    try {
-      if (!walletService || !walletService.hasWallet('evm')) {
-        throw new Error('EVM wallet not configured. Use /wallet setup or set EVM_PRIVATE_KEY in .env');
-      }
-
-      // Live swaps now route exclusively through the LI.FI executor
-      // (lifi-executor.ts). The raw EVM adapter no longer quotes/broadcasts via
-      // Relay — fail closed here so nothing bypasses the LI.FI-only layer.
-      return {
-        success: false,
-        chain: String(request.chain),
-        inputEth: request.amountEth,
-        outputTokens: 0,
-        dexUsed: 'LI.FI / Jumper (disabled on raw EVM adapter)',
-        simulated: false,
-        error: 'live EVM swap now routes through the LI.FI executor — raw EVM adapter swap disabled (fail-closed)',
-      };
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error('[EVM ADAPTER SWAP ERROR]', errMsg);
-      return {
-        success: false,
-        chain: String(request.chain),
-        inputEth: request.amountEth,
-        outputTokens: 0,
-        dexUsed: 'LI.FI / Jumper (disabled on raw EVM adapter)',
-        simulated: false,
-        error: errMsg,
-      };
-    }
-  }
 }
 
 /**

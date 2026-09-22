@@ -143,6 +143,27 @@ export class RiskEngineV2 {
     }
   }
 
+/**
+  /**
+   * Single portfolio authority for the execution path (Gemini G-3 fix): one
+   * gate consults the risk-manager limits FIRST, then the kill-switch -
+   * preserving the exact precedence the AUTO path used to apply across two
+   * separate calls, so there is one source of truth for "may this execution
+   * proceed". RiskManager remains as the exposure/drawdown adapter; its
+   * limits are consulted here rather than by callers directly.
+   */
+  public checkExecutionAllowed(
+    amountUsd: number,
+    rm: { isTradeAllowed(amountUsd: number): { allowed: boolean; reason?: string } },
+  ): { allowed: boolean; reason?: string; source: 'risk-manager' | 'kill-switch' } {
+    const portfolio = rm.isTradeAllowed(amountUsd);
+    if (!portfolio.allowed) return { allowed: false, reason: portfolio.reason, source: 'risk-manager' };
+    if (this.checkKillSwitchStatus()) {
+      return { allowed: false, reason: 'emergency kill-switch active', source: 'kill-switch' };
+    }
+    return { allowed: true, source: 'risk-manager' };
+  }
+
   /**
    * Evaluate a proposed new position entry against multi-layer risk policies.
    * The existing enforcement path is unchanged; the PR9 gates run in shadow
@@ -152,7 +173,7 @@ export class RiskEngineV2 {
     proposed: PositionRiskCheck,
     portfolioTotalUsd: number,
     existingPositions: PositionRiskCheck[],
-    currentDrawdownPercent: number
+    currentDrawdownPercent: number,
   ): RiskEvaluationResult {
     const current = this.evaluateLegacyRisk(proposed, portfolioTotalUsd, existingPositions, currentDrawdownPercent);
     const shadow = this.evaluateShadowRisk(proposed, portfolioTotalUsd, existingPositions, currentDrawdownPercent, current);
