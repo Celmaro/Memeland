@@ -154,6 +154,37 @@ export interface OpportunitySighting {
   liquidityUsd?: number;
 }
 
+/** Minimal call-card shape the gate-passed signal path produces (agent-contract CallCardPayload). */
+export interface CallCardSightingSource {
+  payload: {
+    network?: string;
+    contractAddress?: string;
+    symbol?: string;
+    priceUsd?: string | number;
+    liquidityUsd?: number;
+  };
+  channelName: string;
+}
+
+/**
+ * Build an opportunity sighting from a gate-passed call payload (ledger
+ * identity). Returns null when there is no contract address to key on.
+ * Moved here from index.ts so the domain mapping lives next to the ledger.
+ */
+export function sightingFromCallCard(item: CallCardSightingSource): OpportunitySighting | null {
+  const payload = item.payload;
+  if (!payload?.contractAddress) return null;
+  const price = parseFloat(String(payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
+  return {
+    chain: String(payload.network || 'robinhood').toLowerCase(),
+    contractAddress: payload.contractAddress,
+    symbol: payload.symbol,
+    source: item.channelName === 'call-meme-robinhood' ? 'swarm:gate' : 'whale:gate',
+    priceUsd: price > 0 ? price : undefined,
+    liquidityUsd: (payload.liquidityUsd ?? 0) > 0 ? payload.liquidityUsd : undefined,
+  };
+}
+
 export interface OpportunityLedgerState {
   identities: Record<string, OpportunityIdentity>;
   observations: OpportunityObservation[];

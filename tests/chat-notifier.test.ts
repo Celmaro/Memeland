@@ -82,4 +82,28 @@ describe('KC5 / Kernel P — ChatNotifier', () => {
     await sink('a', 'hi');
     expect(send).toHaveBeenCalledWith('hi');
   });
+
+  it('setSink swaps the runtime sink (Kernel S bindDiscordClient path)', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const n = new ChatNotifier({ sink: first, cooldownMs: 0 });
+    await n.post('a', 'one');
+    expect(first).toHaveBeenCalledWith('a', 'one');
+    n.setSink(second);
+    await n.post('b', 'two');
+    expect(second).toHaveBeenCalledWith('b', 'two');
+    expect(first).toHaveBeenCalledTimes(1);
+  });
+
+  it('setSink swaps the runtime sink (Kernel S bindDiscordClient path)', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const n = new ChatNotifier({ sink: first, cooldownMs: 0 });
+    await n.post('a', 'one');
+    expect(first).toHaveBeenCalledWith('a', 'one');
+    n.setSink(second);
+    await n.post('b', 'two');
+    expect(second).toHaveBeenCalledWith('b', 'two');
+    expect(first).toHaveBeenCalledTimes(1);
+  });
 });

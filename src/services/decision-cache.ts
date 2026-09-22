@@ -86,6 +86,15 @@ export class DecisionCache {
   }
 
   /**
+   * Seed a sticky entry directly (hydration of persisted state at boot, e.g.
+   * the 2h signal-dedup timestamps from StateStore). `at` defaults to now and
+   * is used for the TTL boundary exactly like a getSticky write.
+   */
+  primeSticky<T = unknown>(key: string, value: T, at?: number): void {
+    this.sticky.set(key, { value, at: at ?? this.now() });
+  }
+
+  /**
    * Million one-way door: the first successfully resolved immutable fact is kept
    * forever. Once set, later validators cannot change it, even after the long TTL.
    */

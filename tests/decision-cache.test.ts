@@ -164,3 +164,38 @@ describe('DecisionCache.getVolTarget (GARCH walk-forward vol-target cache)', () 
     expect(await boom.getVolTarget('0xTOKEN')).toBeNull();
   });
 });
+
+describe('DecisionCache.primeSticky (Kernel S dedup hydration)', () => {
+  it('primes a sticky entry that getSticky returns within TTL without running the validator', async () => {
+    let t = 1000;
+    const cache = new DecisionCache({ now: () => t });
+    cache.primeSticky('call-meme-robinhood:TOKEN:0xCA', 500);
+    const validator = vi.fn(() => 9999);
+    // Within the default 5-min TTL (primed at 500, now 1000) -> returns 500.
+    const seen = await cache.getSticky<number>('call-meme-robinhood:TOKEN:0xCA', validator);
+    expect(seen).toBe(500);
+    expect(validator).not.toHaveBeenCalled();
+  });
+
+  it('a primed entry expires with the TTL: validator runs and a fresh value is stored', async () => {
+    let t = 1000;
+    const cache = new DecisionCache({ now: () => t });
+    cache.primeSticky('k', 500, 500); // at=500; TTL 5min -> expired once t > 300500
+    t = 400000;
+    const seen = await cache.getSticky<number>('k', () => t, { ttlMs: 5 * 60 * 1000 });
+    expect(seen).toBe(400000);
+  });
+
+  it('boot hydration + dedup: a hit returns the old timestamp (skip), a miss stores and returns now', async () => {
+    let t = 1000;
+    const cache = new DecisionCache({ now: () => t });
+    // boot hydration from persisted state
+    cache.primeSticky('sig:A:0x1', 100, 100);
+    // same cycle: hit -> old ts (100) -> caller skips
+    const hit = await cache.getSticky<number>('sig:A:0x1', () => t);
+    expect(hit).toBe(100);
+    // fresh key: miss -> validator runs -> returns now
+    const fresh = await cache.getSticky<number>('sig:B:0x2', () => t);
+    expect(fresh).toBe(1000);
+  });
+});

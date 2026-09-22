@@ -11,6 +11,7 @@ import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
+import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
 import { SentimentVoter } from '../shared/sentiment-voter.js';
 import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
@@ -164,7 +165,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   public async collectCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
     const evm = chain !== 'sol';
-    const baseFilters = evm ? ['not_honeypot', 'verified', 'is_out_market'] : ['not_honeypot', 'verified', 'renounced', 'is_out_market'];
+    const baseFilters = discoveryFiltersForChain(chain);
     const [rank, trenches, hotSearches] = await Promise.all([
       this.gmgn.fetchRank(chain, {
         interval: '1h',
@@ -202,36 +203,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       for (const address of this.tapeTokenAddresses) {
         const window = await this.tape.readFillTape(address);
         if (!window || window.failOpen || !window.entries || window.entries.length === 0) continue;
-        out.push(this.normalizeTapeWindow(chain, window));
+        out.push(normalizeTapeWindow(chain, window));
       }
       return out;
     } catch (err: any) {
       console.warn(`[ROBINHOOD AGENT] Fill-tape candidates failed (skipped): ${err.message}`);
       return [];
     }
-  }
-
-  private normalizeTapeWindow(chain: Chain, window: FillTapeWindow): GMGNRawToken {
-    const address = window.tokenAddress || '';
-    const symbol = (address.slice(0, 6) || 'TAPE').toUpperCase();
-    return {
-      chain,
-      address,
-      symbol,
-      name: `Tape ${symbol}`,
-      priceUsd: 0, marketCapUsd: 0, volume24hUsd: 0, volume1hUsd: 0, liquidityUsd: 0,
-      buys: 0, sells: 0, swaps: 0, holderCount: 0,
-      top10HolderRate: null, devTeamHoldRate: null, creatorClose: false, creatorTokenStatus: null,
-      smartDegenCount: 0, renownedCount: 0, bundlerRate: null, ratTraderAmountRate: null,
-      rugRatio: null, isWashTrading: false, isHoneypot: null, ctoFlag: false,
-      renouncedMint: false, renouncedFreeze: false, creationTimestamp: null, openTimestamp: null,
-      priceChange1m: null, priceChange5m: null, priceChange1h: null,
-      visitingCount: 0, squareMentions: 0,
-      twitterRenameCount: 0, twitterDelPostCount: 0, twitterCreateTokenCount: 0,
-      buyTax: null, sellTax: null, dexscrBoostFee: 0, dexscrAd: 0, totalFeeNative: null,
-      exchange: null, launchpadPlatform: null, launchpadStatus: null, progress: null,
-      source: 'dexscreener',
-    };
   }
 
   /**
@@ -270,41 +248,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     try {
       const chainId = chainIdFor(chain);
       const tokens = await provider.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
-      return tokens.map((t) => this.normalizeDexToken(chain, t, source));
+      return tokens.map((t) => normalizeDexToken(chain, t, source));
     } catch (err: any) {
       console.warn(`[ROBINHOOD AGENT] ${source} candidates failed (skipped): ${err.message}`);
       return [];
     }
-  }
-
-  private normalizeDexToken(
-    chain: Chain,
-    t: MarketToken,
-    source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika' = 'dexscreener',
-  ): GMGNRawToken {
-    const symbol = t.symbol || 'TOKEN';
-    return {
-      chain,
-      address: t.address,
-      symbol,
-      name: t.name || symbol,
-      priceUsd: t.priceUsd || 0,
-      marketCapUsd: t.mcapUsd ?? t.fdvUsd ?? 0,
-      volume24hUsd: t.volume24hUsd || 0,
-      volume1hUsd: 0,
-      liquidityUsd: t.liquidityUsd || 0,
-      buys: 0, sells: 0, swaps: 0, holderCount: 0,
-      top10HolderRate: null, devTeamHoldRate: null, creatorClose: false, creatorTokenStatus: null,
-      smartDegenCount: 0, renownedCount: 0, bundlerRate: null, ratTraderAmountRate: null,
-      rugRatio: null, isWashTrading: false, isHoneypot: null, ctoFlag: false,
-      renouncedMint: false, renouncedFreeze: false, creationTimestamp: null, openTimestamp: null,
-      priceChange1m: null, priceChange5m: null, priceChange1h: null,
-      visitingCount: 0, squareMentions: 0,
-      twitterRenameCount: 0, twitterDelPostCount: 0, twitterCreateTokenCount: 0,
-      buyTax: null, sellTax: null, dexscrBoostFee: 0, dexscrAd: 0, totalFeeNative: null,
-      exchange: null, launchpadPlatform: null, launchpadStatus: null, progress: null,
-      source,
-    };
   }
 
   /**

@@ -32,7 +32,7 @@ export interface ChatNotifierSnapshot {
 
 export class ChatNotifier {
   private readonly cooldownMs: number;
-  private readonly sink: (key: string, content: string) => Promise<void> | void;
+  private sink: (key: string, content: string) => Promise<void> | void;
   private readonly now: () => number;
   private readonly cooldowns = new Map<string, number>();
 
@@ -75,6 +75,11 @@ export class ChatNotifier {
   /** Drop the cooldown for a key (force the next post through). */
   public reset(key: string): void {
     this.cooldowns.delete(key);
+  }
+
+  /** Swap the sink at runtime (e.g. bind a live Discord client after login). */
+  public setSink(sink: (key: string, content: string) => Promise<void> | void): void {
+    this.sink = sink;
   }
 }
 
