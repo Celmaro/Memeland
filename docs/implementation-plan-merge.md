@@ -136,3 +136,18 @@ PR11 qlo+hesitation              PR12 micro-PRs (safest last, touch manager/cali
 - Re-verify every report line/test name against current master before each PR (report anchored at `afbb2f2`/546 tests; current `989f69f`/547).
 - Totals: ~3,170 LOC, 30 new test files, 12 PRs. Single golden-master risk is PR 3; single shadow-mode risk is PR 9.
 
+## Status: closed
+
+All 12 PRs shipped (PR 1–PR 12) plus the PR 2 wrap-up and the LI.FI multi-chain
+audit fixes (R1–R10, commit `9d5b4c5`). This plan is **complete**; the
+follow-up consolidation review lives in
+[`docs/kernel-consolidation-opportunities.md`](./kernel-consolidation-opportunities.md)
+(KC1–KC9).
+
+- Anchor moved from `afbb2f2`/546 tests to `9d5b4c5`/859 tests at plan-close.
+- Golden-master risk (PR 3): shipped additively; consensus numbers preserved
+  (swarm-consensus + swarm-voters tests unchanged, green).
+- Shadow-mode risk (PR 9): the screening-scheduler + risk hooks shipped; the
+  follow-up KC6 (ScreeningRunner) keeps the full-cycle extraction behind a
+  shadow-mode contract (`ScreeningDeps` in `src/runtime/screening-runner.ts`).
+
