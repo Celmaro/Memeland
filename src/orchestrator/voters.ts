@@ -244,7 +244,7 @@ export function regimeVote(regime: VoterContext['regime']): VoterOpinion {
   const reasons: string[] = [];
   if (regime.riskOff) {
     score = Math.min(score, 45);
-    reasons.push('macro risk-off (whale flows negative)');
+    reasons.push('macro risk-off (BTC/ETH bear/extreme regime)');
   }
   if (regime.volatilityIndex > 70) {
     score -= 10;
