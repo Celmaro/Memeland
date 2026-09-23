@@ -25,12 +25,12 @@ export const FACTORY_ADDRESSES: Record<string, string> = {
   eth: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f', // Uniswap V2
   bsc: '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73', // PancakeSwap V2
   base: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6', // Uniswap V2 on Base (canonical)
-  robinhood: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f', // Uniswap V2-equivalent factory
+  // robinhood deliberately ABSENT: 0x5C69bEe… is the Ethereum factory, NOT an
+  // RH factory. An unverified guess returns empty forever, silently. Add the
+  // RH factory address only once confirmed on-chain.
 };
 
 const CHAIN_TO_POOL: Record<string, 'rh' | 'eth' | 'bsc' | 'base'> = {
-  robinhood: 'rh',
-  rh: 'rh',
   eth: 'eth',
   ethereum: 'eth',
   bsc: 'bsc',
@@ -38,12 +38,37 @@ const CHAIN_TO_POOL: Record<string, 'rh' | 'eth' | 'bsc' | 'base'> = {
   base: 'base',
 };
 
-const CHAIN_ID: Record<string, number> = { eth: 1, bsc: 56, base: 8453, robinhood: 4663, rh: 4663 };
+const CHAIN_ID: Record<string, number> = { eth: 1, bsc: 56, base: 8453 };
 
 interface PairCreatedLog {
   address: string; // factory that emitted
   topics: string[];
   data: string;
+}
+
+/** Extract a 20-byte address from a 32-byte left-padded word (topic or data word). */
+function addressFromWord(word: string): string {
+  return `0x${word.slice(-40).toLowerCase()}`;
+}
+
+/**
+ * Decode a PairCreated log. token0/token1 are INDEXED args in topics[1..2]
+ * (32-byte left-padded); the pair contract is a NON-indexed arg in `data`
+ * (first 32-byte word). Returns null on malformed logs.
+ */
+export function decodePairCreated(log: PairCreatedLog): { token0: string; token1: string; pair: string } | null {
+  const token0 = log.topics[1] ? addressFromWord(log.topics[1]) : '';
+  const token1 = log.topics[2] ? addressFromWord(log.topics[2]) : '';
+  const dataHex = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
+  const pair = dataHex.length >= 64 ? addressFromWord(dataHex.slice(0, 64)) : '';
+  if (
+    !/^0x[0-9a-f]{40}$/.test(token0) ||
+    !/^0x[0-9a-f]{40}$/.test(token1) ||
+    !/^0x[0-9a-f]{40}$/.test(pair)
+  ) {
+    return null;
+  }
+  return { token0, token1, pair };
 }
 
 export class AnkrDiscoveryFeed implements MarketDataProvider {
@@ -67,22 +92,30 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
       try {
         const logs = await this.fetchPairCreated(rpc, factory, chainId);
         for (const log of logs) {
-          const tokenA = log.topics[1]?.slice(0, 66) ?? '';
-          const tokenB = log.topics[2]?.slice(0, 66) ?? '';
-          const pair = log.address;
-          // topic1/topic2 are the two token addresses (indexed). Prefer the
-          // non-zero one; if both are zero (malformed) skip.
-          if (!tokenA || !tokenB) continue;
-          const address = tokenA; // canonical: token0-ish; pair metadata keeps both
-          results.push({
-            address: address.toLowerCase(),
+          const decoded = decodePairCreated(log);
+          if (!decoded) continue;
+          const meta = {
             chainId,
+            pairAddress: decoded.pair,
+            dex: factory.toLowerCase(),
+          };
+          // Emit BOTH sides — token0 is frequently WETH/WBNB; the merge dedupes
+          // by address and prefilter rejects the base side on volume/liquidity.
+          results.push({
+            address: decoded.token0,
             symbol: '',
             priceUsd: 0,
             liquidityUsd: 0,
             volume24hUsd: 0,
-            pairAddress: pair.toLowerCase(),
-            dex: factory.toLowerCase(),
+            ...meta,
+          });
+          results.push({
+            address: decoded.token1,
+            symbol: '',
+            priceUsd: 0,
+            liquidityUsd: 0,
+            volume24hUsd: 0,
+            ...meta,
           });
         }
       } catch {

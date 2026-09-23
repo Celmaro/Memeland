@@ -49,7 +49,7 @@ export function normalizeTapeWindow(chain: Chain, window: FillTapeWindow): GMGNR
 export function normalizeDexToken(
   chain: Chain,
   t: MarketToken,
-  source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' = 'dexscreener',
+  source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' = 'dexscreener',
 ): GMGNRawToken {
   const symbol = t.symbol || 'TOKEN';
   return {

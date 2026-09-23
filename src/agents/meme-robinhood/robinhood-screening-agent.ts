@@ -245,6 +245,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.gecko, 'gecko', 'GECKO_FEED_ENABLED', chain);
   }
 
+  /** B4 on-chain PairCreated discovery candidates. Guarded by ANKR_FEED_ENABLED=true. */
+  public async collectAnkrCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.ankr, 'ankr', 'ANKR_FEED_ENABLED', chain);
+  }
+
   /**
    * Shared keyless-feed collector. Fails open (empty) unless the env gate is on
    * and a provider is injected. Normalizes discovered MarketTokens (filtered to
@@ -252,7 +257,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
@@ -465,10 +470,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const dexscreenerCandidates = await this.collectDexscreenerCandidates(chain);
                   const dexpaprikaCandidates = await this.collectDexpaprikaCandidates(chain);
                   const geckoCandidates = await this.collectGeckoCandidates(chain);
+                  const ankrCandidates = await this.collectAnkrCandidates(chain);
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
                   // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...gmgnDiscovery]) merged.set(t.address.toLowerCase(), t);
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...gmgnDiscovery]) merged.set(t.address.toLowerCase(), t);
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         if (signalBoostMap.size > 0) {
@@ -500,6 +506,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // honeypot/blacklist/tax from the on-chain service. GMGN is the fallback
           // when GoPlus has no data for the chain or the token. Solana stays GMGN
           // (GoPlus chain map is EVM-only).
+          //
+          // Tradeoff (documented): when GoPlus returns data and passes, GMGN's
+          // /v1/token/security is SKIPPED — so GMGN-only audit signals (renounce,
+          // lock, holder concentration from that endpoint) are not dual-checked
+          // on EVM. Honeypot/blacklist/tax are fully covered by GoPlus; holder
+          // concentration is still enforced by the prefilter (top-10 cap) and the
+          // holder-concentration check in the security voter. This is the intended
+          // 429-avoidance speed tradeoff — GMGN audit remains the fallback, not
+          // the dual check.
           const EVM_AUDIT_CHAINS: Record<string, 'base' | 'eth' | 'bsc' | 'robinhood'> = {
             base: 'base', eth: 'eth', bsc: 'bsc', robinhood: 'robinhood',
           };

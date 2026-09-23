@@ -1,5 +1,5 @@
-import { createPublicClient, http } from 'viem';
-import { robinhood } from 'viem/chains';
+import { createPublicClient, http, type Chain } from 'viem';
+import { robinhood, bsc, base, mainnet } from 'viem/chains';
 import { PositionManager } from '../position/position-manager.js';
 import { StateStore } from '../services/state-store.js';
 import { WalletService } from '../services/wallet-service.js';
@@ -7,6 +7,17 @@ import { TradeJournalService } from '../services/trade-journal-service.js';
 import { GMGNAdapter, type GMGNTrackTrade } from '../adapters/gmgn-adapter.js';
 import { globalRPCFailoverManager } from './rpc-failover.js';
 import type { EvmBalanceReader } from './balance-batch-reader.js';
+
+/** Map chain name → viem chain object so reads use the correct chain context. */
+const VIEM_CHAINS: Record<string, Chain> = {
+  robinhood,
+  rh: robinhood,
+  eth: mainnet,
+  ethereum: mainnet,
+  bsc,
+  binance: bsc,
+  base,
+};
 
 /**
  * Kernel T — WalletTracker only (position mirroring + smart-money exit alerts).
@@ -89,7 +100,10 @@ export class WalletTracker {
       const envPin = process.env.EVM_ROBINHOOD_RPC_URL || process.env[`RPC_FAILOVER_${String(poolKey).toUpperCase()}_URL`];
       const rpc = envPin || globalRPCFailoverManager.getActiveRPC(poolKey);
       if (!rpc) return null;
-      const publicClient = createPublicClient({ chain: robinhood, transport: http(rpc) });
+      // Match the viem chain to the actual chain so chain-id checks and
+      // signing/read contexts are right — not hardcoded robinhood.
+      const viemChain = VIEM_CHAINS[String(chain).toLowerCase()] ?? robinhood;
+      const publicClient = createPublicClient({ chain: viemChain, transport: http(rpc) });
       return await publicClient.readContract({
         address: token as `0x${string}`,
         abi: ERC20_BALANCE_ABI,

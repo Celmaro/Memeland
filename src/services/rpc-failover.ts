@@ -96,6 +96,8 @@ export class RPCFailoverManager {
   private endpoints: Record<RpcChainKey, string[]>;
   private status: Record<RpcChainKey, RpcStatus[]>;
   private lastProbeAt = 0;
+  /** URLs reported failed since the last probe (reportRPCFailure memory). */
+  private failedUrls = new Set<string>();
 
   constructor() {
     const configured = (() => {
@@ -168,6 +170,10 @@ export class RPCFailoverManager {
         })
       )
     );
+    // A successful probe pass resets the failed-host memory so a recovered
+    // host can be selected again after the next probe.
+    this.failedUrls.clear();
+    this.lastProbeAt = Date.now();
   }
 
   public getActiveRPC(chain: string): string {
@@ -175,7 +181,12 @@ export class RPCFailoverManager {
     const healthy = this.status[key]
       .filter((s) => s.healthy)
       .sort((a, b) => a.latencyMs - b.latencyMs);
-    return healthy[0]?.url ?? this.endpoints[key][0] ?? '';
+    if (healthy[0]) return healthy[0].url;
+    // No healthy host: prefer a default that has NOT been reported failed
+    // since the last probe, so reportRPCFailure → retry actually moves to a
+    // different host instead of reselecting the one just marked bad.
+    const fallback = this.endpoints[key].find((url) => !this.failedUrls.has(url));
+    return fallback ?? this.endpoints[key][0] ?? '';
   }
 
   public getLastProbeAt(): number {
@@ -186,6 +197,7 @@ export class RPCFailoverManager {
     const key = resolveChainKey(chain);
     const entry = this.status[key].find((s) => s.url === url);
     if (entry) entry.healthy = false;
+    this.failedUrls.add(url);
   }
 }
 
