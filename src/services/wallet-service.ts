@@ -14,9 +14,9 @@ export interface BalanceResult {
   simulated?: boolean;
 }
 
-/** Robinhood Chain configuration */
-const EVM_CHAINS: Record<number, { chain: Chain; rpcEnvKey: string; explorerBase: string }> = {
-  4663: { chain: robinhood, rpcEnvKey: 'EVM_ROBINHOOD_RPC_URL', explorerBase: 'https://robinhoodchain.blockscout.com/tx/' },
+/** Robinhood Chain configuration (multichain EVM extend here with per-chain rpcKey) */
+const EVM_CHAINS: Record<number, { chain: Chain; rpcEnvKey: string; explorerBase: string; rpcKey: string }> = {
+  4663: { chain: robinhood, rpcEnvKey: 'EVM_ROBINHOOD_RPC_URL', explorerBase: 'https://robinhoodchain.blockscout.com/tx/', rpcKey: 'rh' },
 };
 
 /**
@@ -96,7 +96,7 @@ export class WalletService {
     const chainConfig = EVM_CHAINS[chainId];
     if (!chainConfig) throw new Error(`Unsupported EVM chain ID: ${chainId}`);
 
-    const rpcUrl = globalRPCFailoverManager.getActiveRPC('evm') || process.env[chainConfig.rpcEnvKey] || 'https://rpc.mainnet.chain.robinhood.com';
+    const rpcUrl = globalRPCFailoverManager.getActiveRPC(chainConfig.rpcKey) || process.env[chainConfig.rpcEnvKey] || 'https://rpc.mainnet.chain.robinhood.com';
     const account = this.getEvmAccount();
 
     return createWalletClient({
@@ -111,7 +111,7 @@ export class WalletService {
     const chainConfig = EVM_CHAINS[chainId];
     if (!chainConfig) throw new Error(`Unsupported EVM chain ID: ${chainId}`);
 
-    const rpcUrl = globalRPCFailoverManager.getActiveRPC('evm') || process.env[chainConfig.rpcEnvKey] || 'https://rpc.mainnet.chain.robinhood.com';
+    const rpcUrl = globalRPCFailoverManager.getActiveRPC(chainConfig.rpcKey) || process.env[chainConfig.rpcEnvKey] || 'https://rpc.mainnet.chain.robinhood.com';
 
     return createPublicClient({
       chain: chainConfig.chain,

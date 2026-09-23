@@ -26,6 +26,7 @@ import path from 'path';
 import { mainnet, bsc, base as baseChain, robinhood as robinhoodChain } from 'viem/chains';
 import { isDryRun as isDryRunMode } from '../config/config.js';
 import { tryFetchJson } from '../io/try-fetch-json.js';
+import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import {
   explorerUrlForChain,
   normalizeExecutionChainKey,
@@ -129,12 +130,17 @@ const EVM_CHAIN_IDS: Record<Exclude<ExecutionChainKey, 'sol'>, Chain> = {
 };
 
 const EVM_RPC: Record<ExecutionChainKey, string> = {
-  eth: process.env.EVM_ETH_RPC_URL || 'https://ethereum-rpc.publicnode.com',
-  bsc: process.env.EVM_BSC_RPC_URL || 'https://bsc-dataseed.binance.org',
-  base: process.env.EVM_BASE_RPC_URL || 'https://mainnet.base.org',
+  eth: process.env.EVM_ETH_RPC_URL || 'https://ethereum-rpc.publicnode.com/',
+  bsc: process.env.EVM_BSC_RPC_URL || 'https://bsc-rpc.publicnode.com/',
+  base: process.env.EVM_BASE_RPC_URL || 'https://base-rpc.publicnode.com/',
   robinhood: process.env.EVM_ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com',
-  sol: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+  sol: process.env.SOLANA_RPC_URL || 'https://solana-rpc.publicnode.com/',
 };
+
+/** Prefer the verified per-chain failover pool; fall back to env/default. */
+function resolveRpc(chainKey: ExecutionChainKey): string {
+  return globalRPCFailoverManager.getActiveRPC(chainKey) || EVM_RPC[chainKey];
+}
 
 const NATIVE_TOKEN_META: Record<string, { address: string; decimals: number }> = {
   ETH: { address: ZERO_ADDRESS, decimals: 18 },
@@ -356,7 +362,7 @@ export class LifiExecutor {
     this.broadcastNonces.add(nonce);
     this.recordBroadcast(nonce); // R3: persist before broadcast
     const account = this.evmAccount(chainKey);
-    const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(EVM_RPC[chainKey]) });
+    const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(resolveRpc(chainKey)) });
     const txHash = await walletClient.sendTransaction({
       account,
       chain: walletClient.chain || null,
@@ -382,7 +388,7 @@ export class LifiExecutor {
     const transaction = solana.Transaction.from(txBytes);
     if (!transaction.feePayer) transaction.feePayer = keypair.publicKey;
     transaction.sign(keypair);
-    const connection = new solana.Connection(EVM_RPC.sol);
+    const connection = new solana.Connection(resolveRpc('sol'));
     const txHash = await solana.sendAndConfirmTransaction(connection, transaction, [keypair]);
     this.recordBroadcast(nonce, { txHash }); // R3: persist settlement hash
     return txHash;
@@ -538,7 +544,7 @@ export class LifiExecutor {
         if (!this.solanaPrivateKey) throw new Error('SOLANA_PRIVATE_KEY not configured');
         const solana = await import('@solana/web3.js');
         const keypair = solana.Keypair.fromSecretKey(base58.decode(this.solanaPrivateKey));
-        const connection = new solana.Connection(EVM_RPC.sol);
+        const connection = new solana.Connection(resolveRpc('sol'));
         const to = new solana.PublicKey(req.recipientAddress);
         const tx = new solana.Transaction().add(
           solana.SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: to, lamports: Math.round(req.amount * 1e9) })
@@ -550,7 +556,7 @@ export class LifiExecutor {
         throw new Error(`send supports native ${cfg.nativeCoin} only — token transfers via /swap`);
       }
       const account = this.evmAccount(chainKey);
-      const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(EVM_RPC[chainKey]) });
+      const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(resolveRpc(chainKey)) });
       const txHash = await walletClient.sendTransaction({
         account,
         chain: walletClient.chain || null,

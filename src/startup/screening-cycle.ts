@@ -15,6 +15,7 @@
 import { isAutoExecute, isSignalOnly } from '../config/config.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
 import { globalDecisionCache } from '../services/decision-cache.js';
+import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { sellabilityConfigured } from '../services/execution-gates.js';
 
 /**
@@ -96,6 +97,16 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
   const cycleOperationalFunnel = createOperationalFunnel();
   globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: true, lastStartedAt: Date.now() });
   globalOperationalHealth.recordProviderRequest('screening-pass', true);
+  // Refresh RPC failover pools periodically (5-min throttle): pick the fastest
+  // verified host per chain before this pass makes on-chain reads/broadcasts.
+  try {
+    if (Date.now() - globalRPCFailoverManager.getLastProbeAt() > 5 * 60_000) {
+      void globalRPCFailoverManager.probeLatencies().catch((err: any) =>
+        console.warn(`[RPC FAILOVER] latency probe failed: ${err.message}`));
+    }
+  } catch (err: any) {
+    console.warn(`[RPC FAILOVER] probe scheduling failed: ${err.message}`);
+  }
   // Memeland fork: print the actual chain list being scanned this cycle so the
   // operator can confirm the env override (MULTICHAIN_CHAINS) is in effect.
   const memeChains = (robinhoodScreeningAgent as unknown as { chains?: string[] }).chains ?? [];
