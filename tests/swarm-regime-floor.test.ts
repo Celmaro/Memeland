@@ -7,10 +7,9 @@ import {
   type Regime,
 } from '../src/orchestrator/swarm-guards.js';
 
-describe('regimeAwareFloor (Kernel B — prism-insight Adapt)', () => {
-  it('floors a bear market at 0.90 and every other regime at 0.80', () => {
-    expect(regimeAwareFloor('TRENDING_BEAR')).toBe(0.9);
-    for (const r of ['TRENDING_BULL', 'CHOP', 'EXTREME_VOLATILITY'] as Regime[]) {
+describe('regimeAwareFloor (single 80% quorum floor)', () => {
+  it('keeps one 0.80 floor across every regime — regime votes via the regime voter, not a raised floor', () => {
+    for (const r of ['TRENDING_BEAR', 'TRENDING_BULL', 'CHOP', 'EXTREME_VOLATILITY'] as Regime[]) {
       expect(regimeAwareFloor(r)).toBe(0.8);
     }
   });

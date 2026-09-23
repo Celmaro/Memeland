@@ -277,20 +277,21 @@ export class SwarmConsensusEngine {
       }
     }
 
-    // Kernel B — prism-insight regime floor: a bear market raises the bar to 90%.
-    const floor = candidate.regime ? Math.round(regimeAwareFloor(candidate.regime) * 100) : 80;
+    // Single 80% quorum floor in every regime (regimeAwareFloor). The regime
+    // votes through the regime voter, not a raised floor.
+    const floor = Math.round(regimeAwareFloor(candidate.regime ?? 'CHOP') * 100);
     const passed = confidenceScore >= floor && candidate.securityAuditPassed;
 
     const checks = [
       { id: 'confidence', passed: confidenceScore >= floor, reason: `${confidenceScore}% confidence (floor ${floor}%)` },
       { id: 'security', passed: candidate.securityAuditPassed, reason: candidate.securityAuditPassed ? 'audit passed' : 'audit failed' },
     ];
-    if (candidate.regime) checks.push({ id: 'regime', passed: floor === 80 || confidenceScore >= floor, reason: `regime ${candidate.regime}` });
+    if (candidate.regime) checks.push({ id: 'regime', passed: true, reason: `regime ${candidate.regime} scored via regime voter` });
     const decision: DecisionResult<number> = passed
       ? allowDecision(confidenceScore, `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`, checks)
       : refuseDecision(
           `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          candidate.regime && confidenceScore < floor ? RefusalCode.REGIME_REJECTED : RefusalCode.CONSENSUS,
+          (candidate.regime === 'TRENDING_BEAR' || candidate.regime === 'EXTREME_VOLATILITY') && confidenceScore < floor ? RefusalCode.REGIME_REJECTED : RefusalCode.CONSENSUS,
           `Signal rejected (${confidenceScore}% confidence below ${floor}% threshold or security failed).`,
           checks,
         );

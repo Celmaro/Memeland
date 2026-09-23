@@ -19,17 +19,22 @@ function candidate(overrides: Record<string, unknown> = {}) {
 describe('Kernel B guard wiring (swarm-guards -> swarm-consensus)', () => {
   afterEach(() => SwarmConsensusEngine.setStrategyProvider(null));
 
-  it('regime floor: a 85% signal passes normally but is refused as REGIME_REJECTED in a bear market (90% floor)', () => {
+  it('regime no longer raises the floor: 85% passes even in a bear; sub-80 fails as REGIME_REJECTED only in risk-off regimes', () => {
     const normal = new SwarmConsensusEngine();
     expect(normal.evaluateSignal(candidate()).passed).toBe(true);
 
     const bear = new SwarmConsensusEngine();
-    const res = bear.evaluateSignal(candidate({ regime: 'TRENDING_BEAR' }));
+    expect(bear.evaluateSignal(candidate({ regime: 'TRENDING_BEAR' })).passed).toBe(true);
+
+    const lowBear = new SwarmConsensusEngine();
+    const res = lowBear.evaluateSignal(candidate({ symbol: 'LOWB', regime: 'TRENDING_BEAR', confidence: 70 }));
     expect(res.passed).toBe(false);
-    expect(res.decision?.allowed).toBe(false);
-    if (res.decision && !res.decision.allowed) {
-      expect(res.decision.refusal).toBe(RefusalCode.REGIME_REJECTED);
-    }
+    expect(res.decision?.refusal).toBe(RefusalCode.REGIME_REJECTED);
+
+    const lowChop = new SwarmConsensusEngine();
+    const chop = lowChop.evaluateSignal(candidate({ symbol: 'LOWC', regime: 'CHOP', confidence: 70 }));
+    expect(chop.passed).toBe(false);
+    expect(chop.decision?.refusal).toBe(RefusalCode.CONSENSUS);
     expect(res.breakdown.voters ?? res.confidenceScore).toBeDefined();
   });
 

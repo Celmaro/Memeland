@@ -23,9 +23,14 @@ export type RefusalCode =
   | 'PARSER_UNTRUSTWORTHY'
   | 'SELL_NOT_OPENABLE';
 
-/** prism-insight: a bear regime raises the consensus gate; others keep the 80% bar. */
-export function regimeAwareFloor(regime: Regime): number {
-  return regime === 'TRENDING_BEAR' ? 0.9 : 0.8;
+/**
+ * Single consensus floor (80%). The regime is ALREADY an input through the
+ * regime voter (risk-off caps its vote at 45); raising the floor on top of
+ * that double-counted the same signal and made the 80% quorum unreachable in
+ * any risk-off regime.
+ */
+export function regimeAwareFloor(_regime: Regime): number {
+  return 0.8;
 }
 
 export interface DirectionVote {
