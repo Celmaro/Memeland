@@ -17,32 +17,42 @@ market-data API. Ankr is the transport that makes that free-tier feasible.
 - **Advanced API** — enriched multichannel reads (NFTs, token balances/prices,
   transaction history, logs) over `rpc.ankr.com/multichain/{key}`. These are
   indexer-backed answers, not raw RPC.
-- **Demo key** — every interactive panel ships a shared, rate-limited demo key;
-  requests work out of the box before signup.
+- **Freemium plan** — $0/mo with **200M API credits/month**, 30 reqs/sec Node
+  API, 30 reqs/min Advanced API, 50+ chains, 1 project, fixed regions. A
+  personal API token (per project) replaces the old shared demo key.
 - **Chains we care about**: Ethereum (`rpc.ankr.com/eth`), BNB
   (`rpc.ankr.com/bsc`), Base (`rpc.ankr.com/base`), Arbitrum (`rpc.ankr.com/arbitrum`),
   Solana (`rpc.ankr.com/solana`), plus Robinhood Chain if Ankr serves it (4663 is
   an exotic EVM; verify at ankr.com/docs → chains list).
 
-## 2. Cost math (pricing page, 2026-09-23)
+## 2. Cost math (live pricing page, verified 2026-09-23)
 
-| API | Method | Credits/req | USD/req |
-|---|---|---|---|
-| EVM-compatible (all methods) | any | 200 | **$0.00002** |
-| Solana (all methods) | any | 500 | $0.00005 |
-| Advanced API (all methods) | any | 700 | $0.00007 |
+Plans: **Freemium $0** (200M API credits/mo, 30 reqs/sec Node, 30 reqs/min
+Advanced, 50+ chains, 1 project, fixed regions) · **Premium PAYG from $10**
+(100M credits ≈ 500K reqs; 1,500 reqs/sec; 75+ chains; WSS, whitelists,
+statistics) · Premium Deal from $500/mo · Enterprise custom.
 
-- PAYG: 0.10 USD = 1,000,000 API credits → **EVM eth_call/eth_getLogs ≈
-  $0.00002 each**.
-- Budget projection for a 5-min discovery loop:
-  - 5 chains × ~40 RPC reads/pass ≈ 200 reads/pass.
-  - 288 passes/day ≈ 57,600 reads/day ≈ $1.15/day ≈ **$35/mo** at full cadence.
-  - With the TTL cache + quota guard (only refresh pairs that changed), real
-    usage drops to ~10k reads/day ≈ **$6/mo**. Free tier later if Ankr has one
-    (demo key is rate-limited, not quota-less).
+Per-1,000-request pricing (API via RPC/HTTPS):
+
+| API | API Credits / 1k reqs | USD / 1k reqs |
+|---|---|---|
+| Node — EVM-compatible | 200,000 | **$0.02** (= $0.00002/req) |
+| Node — Solana | 500,000 | $0.05 |
+| Node — Beacon / Other | 200,000 | $0.02 |
+| Advanced API (all methods) | 700,000 | $0.07 |
+
+WebSocket: connect+subscribe EVM 200k credits/1k ($0.02); notifications
+EVM/Other 100k credits/1k ($0.01), Solana 500k credits/1k ($0.05). gRPC:
+method calls 10k credits/1k ($0.001), received data $0.5/GB.
+
+- **The free tier covers the planned discovery load.** 5 chains × ~40 RPC
+  reads/pass ≈ 200 reads/pass ≈ 57,600 reads/day ≈ **52M credits/mo** at EVM
+  200/req — under the 200M/mo freemium quota, so **$0/mo at full cadence**.
+  The 30 reqs/sec Node limit is ample for a 5-min loop (≈0.01 reqs/sec).
+- PAYG exists as headroom: 200 EVM reqs = $0.004/pass; $10 buys 100M credits
+  (~500K reqs) if the loop ever outgrows freemium.
 - WSS tier exists (subscription + notification credits) — viable for a
-  real-time `PairCreated` listener later, but the batch REST loop is cheaper to
-  start.
+  real-time `PairCreated` listener later, but the batch REST loop is free-first.
 
 ## 3. What Ankr buys the discovery tier
 
@@ -137,9 +147,10 @@ literally brand-new DEX entries — exactly the meme-token alpha window.
 
 - Key stays in the URL path (Ankr's documented model); that's fine for an app
   secret in env, but never commit it (same rule as GMGN keys).
-- Free/demo tier is rate-limited — the TTL cache + pacing in the feed must hold
-  or the discovery loop 429s. Start with the paid PAYG ($0.00002/read) at low
-  cadence; it is cheaper than a single GMGN 429 ban.
+- Freemium is quota'd (200M credits/mo) and paced (30 reqs/sec Node, 30
+  reqs/min Advanced) — the TTL cache + pacing in the feed must hold or the
+  discovery loop 429s / burns the monthly quota. Start on freemium ($0); move
+  to PAYG only if the 30 reqs/sec or the 1-project / 50-chain limits bind.
 - RPC discovery is EVM-only (eth/bsc/base). **Solana/RH use the REST tier**
   (Gecko/DEXPaprika) — don't block discovery on RPC for chains without factories.
 - `eth_getLogs` on a huge `fromBlock` window is expensive; always scan a small
@@ -148,8 +159,8 @@ literally brand-new DEX entries — exactly the meme-token alpha window.
 
 ## 7. Verdict
 
-Ankr is the right transport for the third discovery leg: keyless-ish (demo key
-works immediately), cheap ($35/mo full blast, ~$6/mo realistic), and it plugs
+Ankr is the right transport for the third discovery leg: keyless, free within
+the 200M-credit/mo freemium quota (projected ~52M credits/mo), and it plugs
 into the existing `EvmAdapter` Kernel E with zero new abstraction. The gap it
 closes — **fresh pair discovery before indexers** — is the one the current
 Gecko/DEXPaprika keyless tier cannot cover (both have indexer latency).
