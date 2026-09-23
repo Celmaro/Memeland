@@ -60,7 +60,12 @@ export function normalizeDexToken(
     priceUsd: t.priceUsd || 0,
     marketCapUsd: t.mcapUsd ?? t.fdvUsd ?? 0,
     volume24hUsd: t.volume24hUsd || 0,
-    volume1hUsd: 0,
+    // Keyless feeds (dexscreener/dexpaprika/codex) only report 24h volume —
+    // no volume_1h field. Without this fallback the prefilter floor
+    // (minVolume1hUsd) would reject every candidate as volume 1h $0.0k,
+    // making the boosters dead code (observed live on Zeabur, 2026-09-23).
+    // Same semantics as gmgn-adapter Fix #2: 1h ≈ 24h/24 when only 24h exists.
+    volume1hUsd: t.volume24hUsd > 0 ? t.volume24hUsd / 24 : 0,
     liquidityUsd: t.liquidityUsd || 0,
     buys: 0, sells: 0, swaps: 0, holderCount: 0,
     top10HolderRate: null, devTeamHoldRate: null, creatorClose: false, creatorTokenStatus: null,
