@@ -46,6 +46,8 @@ export const CHAIN_NAME_TO_ID: Record<string, number> = {
   base: 8453,
   solana: 101,
   sol: 101,
+  eth: 1,
+  ethereum: 1,
 };
 
 export function chainIdFor(name: string | null | undefined): number | undefined {

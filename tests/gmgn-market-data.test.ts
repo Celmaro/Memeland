@@ -67,9 +67,13 @@ describe('gmgnTokenToMarketToken', () => {
     expect(gmgnTokenToMarketToken(token({ chain: 'sol' }))?.chainId).toBe(101);
   });
 
-  it('drops chains outside the discovery map (e.g. eth)', () => {
-    expect(gmgnTokenToMarketToken(token({ chain: 'eth' }))).toBeUndefined();
-  });
+  it('drops chains outside the discovery map (e.g. a made-up chain id)', () => {
+      expect(gmgnTokenToMarketToken(token({ chain: 'narnia' }))).toBeUndefined();
+    });
+
+    it('maps eth to chain id 1 (multichain fork — eth is now a first-class chain)', () => {
+      expect(gmgnTokenToMarketToken(token({ chain: 'eth' }))?.chainId).toBe(1);
+    });
 
   it('omits mcapUsd when marketCapUsd is zero/unknown', () => {
     const t = gmgnTokenToMarketToken(token({ marketCapUsd: 0 }));
@@ -79,8 +83,8 @@ describe('gmgnTokenToMarketToken', () => {
 
 describe('GMGNAdapter.toMarketTokens', () => {
   it('maps a batch and filters unsupported chains', () => {
-    const adapter = new GMGNAdapter();
-    const mapped = adapter.toMarketTokens([token({ chain: 'sol' }), token({ chain: 'eth' }), token({ chain: 'base' })]);
-    expect(mapped.map((t) => t.chainId)).toEqual([101, 8453]);
-  });
+      const adapter = new GMGNAdapter();
+      const mapped = adapter.toMarketTokens([token({ chain: 'sol' }), token({ chain: 'eth' }), token({ chain: 'base' }), token({ chain: 'narnia' })]);
+      expect(mapped.map((t) => t.chainId)).toEqual([101, 1, 8453]);
+    });
 });

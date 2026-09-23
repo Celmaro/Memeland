@@ -15,7 +15,7 @@ import { TtlCache } from '../cache/ttl-cache.js';
 
 export const CODEX_DEFAULT_ENDPOINT = 'https://api.codex.io/graphql';
 
-type FetchLike = (url: string, init?: unknown) => Promise<Pick<Response, 'ok' | 'json'>>;
+type FetchLike = (url: string, init?: unknown) => Promise<Pick<Response, 'ok' | 'json' | 'status'>>;
 
 interface RawMarket {
   baseToken?: { address?: string; symbol?: string; name?: string };
@@ -73,7 +73,15 @@ export class CodexFeed implements MarketDataProvider {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query }),
     });
-    if (!res.ok) throw new Error('codex feed fetch failed');
+    // 2026-09-23 (Zeabur audit): Codex MPP GraphQL now requires payment —
+    // it returns HTTP 402 even for the keyless query that worked when this
+    // adapter was written (research A15). Surface the paywall so the operator
+    // knows it's a billing issue, not a code bug. Feed stays env-gated
+    // (CODEX_FEED_ENABLED) and fails open (empty) as before.
+    if (!res.ok) {
+      if (res.status === 402) throw new Error('codex feed paywalled (HTTP 402 — MPP now requires a key/plan; set CODEX_FEED_ENABLED=false or add CODEX_API_KEY)');
+      throw new Error(`codex feed fetch failed (HTTP ${res.status})`);
+    }
     const body = (await res.json()) as { data?: { markets?: RawMarket[] } };
     const markets = Array.isArray(body?.data?.markets) ? body.data.markets : [];
     const tokens: MarketToken[] = [];
