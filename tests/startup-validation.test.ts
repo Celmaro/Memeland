@@ -72,3 +72,66 @@ describe('startup configuration validation', () => {
     ).toBe(false);
   });
 });
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { printStartupBanner } from '../src/startup/bootstrap.js';
+
+describe('Memeland fork boot banner (logs reflect THIS fork, not the upstream OpenCatz label)', () => {
+  let logs: string[];
+  beforeEach(() => {
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => logs.push(a.join(' ')));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('printStartupBanner reflects the Memeland fork: LI.FI/Jumper, kernels, 10-voter swarm', () => {
+    const prev = { ...process.env };
+    delete process.env.SAFETY_GATE_ENFORCED;
+    delete process.env.AUTO_EXECUTE_ENABLED;
+    process.env.DRY_RUN = 'true';
+    try {
+      printStartupBanner();
+      const joined = logs.join('\n');
+      expect(joined).toContain('Memeland autonomous multi-agent');
+      expect(joined).toContain('exec=DRY_RUN');
+      expect(joined).toContain('execution_layer=LI.FI/Jumper (only)');
+      expect(joined).toContain('autonomy_ladder=Phase 2 APPROVAL');
+      // legacy upstream phrases must NOT appear
+      expect(joined).not.toContain('OpenCatz Execution Mode');
+      expect(joined).not.toContain('Uniswap V3');
+      expect(joined).not.toContain('Primary Swap Venue');
+    } finally {
+      process.env = prev;
+    }
+  });
+
+  it('printStartupBanner names every kernel (A-G + L-R)', () => {
+    logs = [];
+    printStartupBanner();
+    const joined = logs.join('\n');
+    expect(joined).toContain('KERNELS');
+    expect(joined).toContain('A=reputation');
+    expect(joined).toContain('L=ttl-cache');
+    expect(joined).toContain('R=wallet-balance');
+    expect(joined).toContain('SWARM');
+    expect(joined).toContain('voters=10');
+  });
+
+  it('autonomy_ladder reflects env: defaults to Phase 2 APPROVAL when neither AUTO nor SIGNAL_ONLY set', () => {
+    const prev = { ...process.env };
+    delete process.env.AUTO_EXECUTE_ENABLED;
+    delete process.env.SAFETY_GATE_ENFORCED;
+    delete process.env.DRY_RUN;
+    delete process.env.SIGNAL_ONLY;
+    try {
+      process.env.DRY_RUN = 'true';
+      logs = [];
+      printStartupBanner();
+      expect(logs.join('\n')).toContain('autonomy_ladder=Phase 2 APPROVAL');
+    } finally {
+      process.env = prev;
+    }
+  });
+});

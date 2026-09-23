@@ -205,11 +205,13 @@ approvalQueueService.attachStateStore(stateStore);
 
 const loadedSkills = skillLoader.loadAllSkills();
 
-console.log(`[SKILL SYSTEM] Active skills loaded: ${loadedSkills.length} (${loadedSkills.map(s => s.name).join(', ')})`);
-console.log(`[SECURITY SERVICES] GMGN + GoPlus Security Initialized (sol/bsc/base/eth/robinhood).`);
-console.log(`[SCREENING AGENTS] Multi-Chain Meme (7-voter swarm) + ETH Whale Tracking Agents Initialized.`);
-      console.log(`[SCREENING ADAPTERS] GMGN AI + GoPlus + LI.FI + Hyperliquid + EVM Adapters Initialized.`);
-console.log(`[AI SERVICE] Configured with provider: ${aiService.getConfig().provider}, model: ${aiService.getConfig().modelName}`);
+// Memeland fork boot summary. Names the live 10-voter swarm, the only execution
+// layer (LI.FI/Jumper), and the skills the runtime actually loaded. The
+// kernel map (A–G + L–R) is printed earlier by printStartupBanner() in
+// startup/bootstrap.ts — see docs/KERNEL_CATALOG.md for the full surface.
+console.log(`[SWARM] voters=10 (quant/ml/security/sentiment/whale/regime/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED`);
+console.log(`[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork) | adapters=evm-robinhood,gmgn-rest-client,hyperliquid | cycles=${loadedSkills.length} skills loaded (${loadedSkills.map(s => s.name).join(', ')})`);
+console.log(`[AI] provider=${aiService.getConfig().provider} model=${aiService.getConfig().modelName}`);
 
 const discordToken = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -332,7 +334,10 @@ if (discordToken && clientId) {
   console.log('[DISCORD BOT] DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID not set in .env. Running standalone engine.');
 }
 
-console.log('[SYSTEM] Setup complete. All OpenCatz modules ready.');
+// Memeland fork ready. Lists what's live (active domains + the persisted-state
+// counters that survived this restart) so the operator's first log glance
+// answers "what's running" without running a healthcheck.
+console.log(`[SYSTEM] Memeland fork ready | domains=${hub.getActiveDomains().join('+') || 'none'} | openPositions=${stateStore.getAllPositions().length} | alerts=${stateStore.getAllPositions().length === 0 ? 'n/a' : 'see dashboard'} | state-file=database/opencatz_state.json`);
 console.log('[STATE STORE] Persistent state engine active — positions, alerts, and journal survive restarts.');
 
 // Start OpenCatz Telemetry & REST API Server
