@@ -9,7 +9,8 @@ import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
-import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
+import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
+import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
 import { SentimentVoter } from '../shared/sentiment-voter.js';
@@ -101,10 +102,14 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private dexpaprika: MarketDataProvider | null;
   /** SRC-153 keyless GeckoTerminal discovery feed (new_pools + trending). Empty until injected. */
   private gecko: MarketDataProvider | null;
+  /** B4 keyless on-chain PairCreated discovery feed (Ankr-style, pool-backed). Empty until injected. */
+  private ankr: MarketDataProvider | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
   private sellability: SellabilitySimulator;
+  /** Keyless EVM token-security audit (GoPlus) — primary before GMGN. */
+  private goplusService: GoPlusSecurityService;
 
   /** Last pass funnel stats — consumed by index.ts for the Phase-1 [FUNNEL] counters. */
   private lastFunnel: { scanned: number; prefiltered: number; emitted: number } = { scanned: 0, prefiltered: 0, emitted: 0 };
@@ -120,6 +125,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       dexscreener?: MarketDataProvider;
       dexpaprika?: MarketDataProvider;
       gecko?: MarketDataProvider;
+      ankr?: MarketDataProvider | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
     } = {}
@@ -136,8 +142,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.dexscreener = opts.dexscreener ?? null;
     this.dexpaprika = opts.dexpaprika ?? null;
     this.gecko = opts.gecko ?? null;
+    this.ankr = opts.ankr ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
+    this.goplusService = new GoPlusSecurityService();
   }
 
   /**
@@ -488,22 +496,41 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
           const filter = this.preFilter(t, nativePriceUsd);
           if (!filter.ok) { console.log(`[MEME AGENT] ${filter.reason}`); continue; }
-          // GMGN /v1/token/security audit (fail-closed): honeypot, blacklist,
-          // sell-lock, tax. Per-token audit endpoint — mandatory on every chain.
-          const audit = await this.gmgn.fetchTokenSecurity(chain, t.address);
-          // Fix #5: distinguish "audit returned null" (rate-limit / 401 / 429 on
-          // the GMGN endpoint) from "audit ran but token failed the gate". With a
-          // single GMGN key, every audit after the first 429 silently returns null
-          // — without this warn, the operator only sees generic AUDIT FAIL and
-          // can't tell a token-level rejection from a global provider outage.
-          if (!audit) {
-            console.warn(`[MEME AGENT] ${t.symbol}: audit unavailable (likely 429/401 — add GMGN_API_KEY_BACKUPS for key-pool rotation).`);
-            continue;
-          }
-          const sec = securityAuditGate(audit);
-          if (!sec.ok) {
-            console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${sec.reasons.join(' ')}`);
-            continue;
+          // Security audit — GoPlus FIRST on EVM chains (keyless, no 429 wall):
+          // honeypot/blacklist/tax from the on-chain service. GMGN is the fallback
+          // when GoPlus has no data for the chain or the token. Solana stays GMGN
+          // (GoPlus chain map is EVM-only).
+          const EVM_AUDIT_CHAINS: Record<string, 'base' | 'eth' | 'bsc' | 'robinhood'> = {
+            base: 'base', eth: 'eth', bsc: 'bsc', robinhood: 'robinhood',
+          };
+          let auditFailedReason = '';
+          if (EVM_AUDIT_CHAINS[chain]) {
+            const goplus = await this.goplusService.auditToken(EVM_AUDIT_CHAINS[chain], t.address);
+            const goSec = goPlusAuditGate(goplus);
+            if (goSec.source === 'goplus') {
+              if (!goSec.ok) {
+                console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — GoPlus ${goSec.reasons.join(' ')}`);
+                continue;
+              }
+            } else {
+              // GoPlus had no data — GMGN fallback (single call, may be null on 429)
+              const gmgnAudit = await this.gmgn.fetchTokenSecurity(chain, t.address);
+              const sec = securityAuditGate(gmgnAudit);
+              if (!sec.ok) {
+                auditFailedReason = `GMGN ${sec.reasons.join(' ')}`;
+                console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${auditFailedReason}`);
+                continue;
+              }
+            }
+          } else {
+            // Solana: GMGN only
+            const gmgnAudit = await this.gmgn.fetchTokenSecurity(chain, t.address);
+            const sec = securityAuditGate(gmgnAudit);
+            if (!sec.ok) {
+              auditFailedReason = `GMGN ${sec.reasons.join(' ')}`;
+              console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${auditFailedReason}`);
+              continue;
+            }
           }
           prefiltered += 1;
 
@@ -595,6 +622,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             securityPenalties.push(...rugFeature.penalties);
             if (typeof t.bytecode === 'string') {
               const scan = this.bytecodeScanner.scan(t.bytecode);
+              securityPenalties.push(...scan.findings);
+            } else if (EVM_AUDIT_CHAINS[chain]) {
+              // No hex from GMGN (enrichment 429/absent) — fetch deployed code
+              // from the RPC pool (keyless, fail-soft) and scan it. Extra leg,
+              // never a gate: transport errors return an empty scan.
+              const scan = await this.bytecodeScanner.scanContract(chain, t.address);
               securityPenalties.push(...scan.findings);
             }
             const sellCheck = await this.sellability.check(t.sellTrade ?? { liquidityUsd: t.liquidityUsd });

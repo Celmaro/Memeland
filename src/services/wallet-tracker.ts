@@ -5,6 +5,7 @@ import { StateStore } from '../services/state-store.js';
 import { WalletService } from '../services/wallet-service.js';
 import { TradeJournalService } from '../services/trade-journal-service.js';
 import { GMGNAdapter, type GMGNTrackTrade } from '../adapters/gmgn-adapter.js';
+import { globalRPCFailoverManager } from './rpc-failover.js';
 import type { EvmBalanceReader } from './balance-batch-reader.js';
 
 /**
@@ -81,9 +82,13 @@ export class WalletTracker {
     this.exitSLTightenPct = deps.exitSLTightenPct ?? 0.2;
   }
 
-  private defaultEvmBalanceReader: EvmBalanceReader = async (_chain, token, owner) => {
+  private defaultEvmBalanceReader: EvmBalanceReader = async (chain, token, owner) => {
     try {
-      const rpc = process.env.EVM_ROBINHOOD_RPC_URL || undefined;
+      // Per-chain failover pool (env pin wins, then fastest healthy host).
+      const poolKey = chain === 'robinhood' || chain === 'rh' ? 'rh' : chain;
+      const envPin = process.env.EVM_ROBINHOOD_RPC_URL || process.env[`RPC_FAILOVER_${String(poolKey).toUpperCase()}_URL`];
+      const rpc = envPin || globalRPCFailoverManager.getActiveRPC(poolKey);
+      if (!rpc) return null;
       const publicClient = createPublicClient({ chain: robinhood, transport: http(rpc) });
       return await publicClient.readContract({
         address: token as `0x${string}`,

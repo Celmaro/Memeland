@@ -21,6 +21,7 @@ import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-scree
 import { DexScreenerFeed } from './adapters/dexscreener-feed.js';
 import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
 import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
+import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
 import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
@@ -189,6 +190,9 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     // SRC-153 GeckoTerminal keyless discovery tier (new_pools + trending).
     // Inert unless GECKO_FEED_ENABLED=true. Self-paced to the 30/min budget.
     gecko: new GeckoDiscoveryFeed(),
+    // B4: on-chain PairCreated discovery through the RPC pool (keyless, Ankr-style).
+    // Inert unless ANKR_FEED_ENABLED=true — closes the sub-indexer freshness gap.
+    ankr: process.env.ANKR_FEED_ENABLED === 'true' ? new AnkrDiscoveryFeed() : null,
   },
 );
 const hyperliquidAdapter = new HyperliquidAdapter();

@@ -101,8 +101,21 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
   // verified host per chain before this pass makes on-chain reads/broadcasts.
   try {
     if (Date.now() - globalRPCFailoverManager.getLastProbeAt() > 5 * 60_000) {
-      void globalRPCFailoverManager.probeLatencies().catch((err: any) =>
-        console.warn(`[RPC FAILOVER] latency probe failed: ${err.message}`));
+      void globalRPCFailoverManager.probeLatencies()
+        .then(() => {
+          // A7: log the active host per chain so the operator sees failover
+          // actually working (which host won, per pool) without scraping probes.
+          const active = (['rh', 'eth', 'bsc', 'base', 'sol'] as const)
+            .map((k) => {
+              const url = globalRPCFailoverManager.getActiveRPC(k);
+              const short = url.replace(/^https?:\/\//, '').split('/')[0] || url;
+              return `${k}=${short}`;
+            })
+            .join(' ');
+          console.log(`[RPC FAILOVER] active hosts: ${active}`);
+        })
+        .catch((err: any) =>
+          console.warn(`[RPC FAILOVER] latency probe failed: ${err.message}`));
     }
   } catch (err: any) {
     console.warn(`[RPC FAILOVER] probe scheduling failed: ${err.message}`);

@@ -200,6 +200,34 @@ export function securityAuditGate(
   return { ok: reasons.length === 0, reasons };
 }
 
+/**
+ * GoPlus security gate (EVM chains, keyless): honeypot + blacklist + buy/sell tax
+ * from the on-chain security service. This is the PRIMARY EVM audit — GMGN stays
+ * the fallback so a GMGN 429 can never fail-closed the whole pass.
+ */
+export interface GoPlusGateInput {
+  isHoneypot: boolean;
+  buyTaxPct: number;
+  sellTaxPct: number;
+  isBlacklisted: boolean;
+}
+
+export function goPlusAuditGate(
+  goplus: GoPlusGateInput | null,
+  opts: SecurityAuditGateOptions = {}
+): { ok: boolean; reasons: string[]; source: 'goplus' | 'none' } {
+  const o = { ...SECURITY_AUDIT_GATE_DEFAULTS, ...opts };
+  if (!goplus) return { ok: false, reasons: ['GoPlus audit unavailable (fail-closed).'], source: 'none' };
+  const reasons: string[] = [];
+  if (goplus.isHoneypot) reasons.push('honeypot detected.');
+  if (goplus.isBlacklisted) reasons.push('blacklist.');
+  if (o.enableTaxGate) {
+    if (goplus.buyTaxPct > o.maxTaxPct) reasons.push(`buy tax ${goplus.buyTaxPct}% > ${o.maxTaxPct}%.`);
+    if (goplus.sellTaxPct > o.maxTaxPct) reasons.push(`sell tax ${goplus.sellTaxPct}% > ${o.maxTaxPct}%.`);
+  }
+  return { ok: reasons.length === 0, reasons, source: 'goplus' };
+}
+
 /** Concise GMGN audit label for the card (available fields only). */
 export function tokenSecurityAuditLabel(audit: GMGNSecurityAudit | null): string {
   if (!audit) return '⚠️ Not audited (GMGN)';

@@ -23,6 +23,8 @@ import { TxLock } from './rh-execution-core.js';
 import { assessSellability } from './rh-execution-core.js';
 import { EvmAdapter } from '../adapters/evm-adapter.js';
 import { evmAdapterToQuoterCall } from '../adapters/quoter-call-adapter.js';
+import { chainIdFor } from '../adapters/market-data-provider.js';
+import { globalRPCFailoverManager } from './rpc-failover.js';
 import { sizePosition } from '../orchestrator/position-sizing.js';
 import { CostGate } from './cost-gating.js';
 import { simulateFill } from './fill-simulation.js';
@@ -89,40 +91,84 @@ const SELLABILITY_QUOTER_ADDRESS = () => process.env.SELLABILITY_QUOTER_ADDRESS?
 const SELLABILITY_QUOTER_RPC_URL = () => process.env.SELLABILITY_QUOTER_RPC_URL?.trim() || '';
 
 /**
+ * Resolve the Quoter transport: explicit SELLABILITY_QUOTER_RPC_URL env wins
+ * (operator-pinned), otherwise the per-chain RPC failover pool for the token's
+ * chain. A host that fails mid-call is reported (reportRPCFailure) and the next
+ * attempt gets the next-healthiest host — request-level failover, not just the
+ * 5-min probe.
+ */
+function quoterTransportFor(chain: string): { url: string; chainId: number } | null {
+  const chainId = chainIdFor(chain) ?? 4663;
+  const pinned = SELLABILITY_QUOTER_RPC_URL();
+  if (pinned.length > 0) return { url: pinned, chainId };
+  const url = globalRPCFailoverManager.getActiveRPC(chain === 'robinhood' || chain === 'rh' ? 'rh' : chain);
+  if (!url) return null;
+  return { url, chainId };
+}
+
+async function quoterCallOnce(
+  url: string,
+  chainId: number,
+  quoterAddress: string,
+  tokenAddress: string,
+): Promise<{ sellable: boolean; reason: string }> {
+  const adapter = new EvmAdapter({ hosts: [{ url }] });
+  const call = evmAdapterToQuoterCall(adapter, { to: quoterAddress, chain: chainId });
+  return assessSellability(call, quoteSinglePayload(tokenAddress));
+}
+
+/**
  * Quoter-honeypot sellability gate. Returns a real transport-backed check when a
- * Quoter eth_call transport is configured (SELLABILITY_QUOTER_ADDRESS +
- * SELLABILITY_QUOTER_RPC_URL); otherwise it reports "not configured" and the gate
- * FAILS CLOSED (sellable: false) so execution is refused rather than silently
- * passing on an unenforceable claim. The call site decides whether to pass the
- * gate at all (see sellabilityConfigured()).
+ * Quoter address is configured (SELLABILITY_QUOTER_ADDRESS); transport is the
+ * failover pool per chain, or SELLABILITY_QUOTER_RPC_URL if pinned. A failed
+ * call marks the host unhealthy (reportRPCFailure) and retries once on the next
+ * healthy host. Without a configured Quoter the gate FAILS CLOSED (sellable:
+ * false) so execution is refused rather than passing on an unenforceable claim.
  */
 export function gateSellability() {
   const quoterAddress = SELLABILITY_QUOTER_ADDRESS();
   const rpcUrl = SELLABILITY_QUOTER_RPC_URL();
-  const transportConfigured = quoterAddress.length > 0 && rpcUrl.length > 0;
+  const transportConfigured = quoterAddress.length > 0 && (rpcUrl.length > 0 || true); // pool is always available
   return {
     check: transportConfigured
-      ? async (tokenAddress: string): Promise<{ sellable: boolean; reason: string }> => {
-          const adapter = new EvmAdapter({
-            hosts: [{ url: rpcUrl }],
-          });
-          const call = evmAdapterToQuoterCall(adapter, { to: quoterAddress, chain: 4663 });
-          // Quoter payload: quoteExactInputSingle((tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96)).
-          // tokenIn = native USDC placeholder on robinhood; callers override via env when they have
-          // the real pool that the token trades against. If the call fails or returns empty,
-          // assessSellability fails closed (cannot sell).
-          return assessSellability(call, quoteSinglePayload(tokenAddress));
+      ? async (tokenAddress: string, chain = 'robinhood'): Promise<{ sellable: boolean; reason: string }> => {
+          const transport = quoterTransportFor(chain);
+          if (!transport) {
+            return { sellable: false, reason: `sellability check not configured — fail-closed (token ${tokenAddress}). Set SELLABILITY_QUOTER_ADDRESS.` };
+          }
+          let lastReason = 'unknown';
+          try {
+            const res = await quoterCallOnce(transport.url, transport.chainId, quoterAddress, tokenAddress);
+            if (res.sellable) return res;
+            lastReason = res.reason;
+          } catch (e) {
+            // Transport-level failure: mark this host dead for the cycle and retry
+            // once on the next-healthiest host before failing closed.
+            globalRPCFailoverManager.reportRPCFailure(chain, transport.url);
+            const next = quoterTransportFor(chain);
+            if (next && next.url !== transport.url) {
+              try {
+                return await quoterCallOnce(next.url, next.chainId, quoterAddress, tokenAddress);
+              } catch (e2) {
+                lastReason = e2 instanceof Error ? e2.message : 'quoter call failed on retry';
+              }
+            } else {
+              lastReason = e instanceof Error ? e.message : 'quoter call failed';
+            }
+          }
+          return { sellable: false, reason: `sellability gate failed closed (token ${tokenAddress}): ${lastReason}` };
         }
       : async (tokenAddress: string): Promise<{ sellable: boolean; reason: string }> => ({
           sellable: false,
-          reason: `sellability check not configured — fail-closed (token ${tokenAddress}). Set SELLABILITY_QUOTER_ADDRESS + SELLABILITY_QUOTER_RPC_URL to enforce.`,
+          reason: `sellability check not configured — fail-closed (token ${tokenAddress}). Set SELLABILITY_QUOTER_ADDRESS to enforce.`,
         }),
   };
 }
 
-/** True when a Quoter eth_call transport is configured (execution-gates can wire the gate). */
+/** True when a Quoter eth_call transport can resolve (address set; pool always available). */
 export function sellabilityConfigured(): boolean {
-  return SELLABILITY_QUOTER_ADDRESS().length > 0 && SELLABILITY_QUOTER_RPC_URL().length > 0;
+  const quoterAddress = SELLABILITY_QUOTER_ADDRESS();
+  return quoterAddress.length > 0;
 }
 
 /**

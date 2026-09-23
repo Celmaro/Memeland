@@ -362,16 +362,42 @@ export class LifiExecutor {
     this.broadcastNonces.add(nonce);
     this.recordBroadcast(nonce); // R3: persist before broadcast
     const account = this.evmAccount(chainKey);
-    const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(resolveRpc(chainKey)) });
-    const txHash = await walletClient.sendTransaction({
-      account,
-      chain: walletClient.chain || null,
-      to: String(tx.to) as `0x${string}`,
-      data: String(tx.data ?? '0x') as `0x${string}`,
-      value: BigInt(String(tx.value ?? 0)),
-    });
-    this.recordBroadcast(nonce, { txHash }); // R3: persist settlement hash
-    return txHash;
+    const firstUrl = resolveRpc(chainKey);
+    try {
+      const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(firstUrl) });
+      const txHash = await walletClient.sendTransaction({
+        account,
+        chain: walletClient.chain || null,
+        to: String(tx.to) as `0x${string}`,
+        data: String(tx.data ?? '0x') as `0x${string}`,
+        value: BigInt(String(tx.value ?? 0)),
+      });
+      this.recordBroadcast(nonce, { txHash }); // R3: persist settlement hash
+      return txHash;
+    } catch (err) {
+      // Mid-cycle host death: mark this host unhealthy and retry once on the
+      // next-healthiest pool host before surfacing the failure. The nonce guard
+      // already prevents any double-broadcast of the same execution.
+      globalRPCFailoverManager.reportRPCFailure(chainKey, firstUrl);
+      const retryUrl = resolveRpc(chainKey);
+      if (retryUrl && retryUrl !== firstUrl) {
+        try {
+          const walletClient = createWalletClient({ account, chain: EVM_CHAIN_IDS[chainKey], transport: http(retryUrl) });
+          const txHash = await walletClient.sendTransaction({
+            account,
+            chain: walletClient.chain || null,
+            to: String(tx.to) as `0x${string}`,
+            data: String(tx.data ?? '0x') as `0x${string}`,
+            value: BigInt(String(tx.value ?? 0)),
+          });
+          this.recordBroadcast(nonce, { txHash }); // R3: persist settlement hash
+          return txHash;
+        } catch (err2) {
+          throw new Error(`EVM broadcast failed on retry host ${retryUrl}: ${err2 instanceof Error ? err2.message : String(err2)}`);
+        }
+      }
+      throw new Error(`EVM broadcast failed on ${firstUrl}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   private async broadcastSolana(tx: Record<string, unknown>, nonce: string): Promise<string> {
