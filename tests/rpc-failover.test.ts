@@ -21,7 +21,10 @@ describe('RPCFailoverManager', () => {
     expect(mgr.getRpcUrls('rh')[0]).toBe('https://rpc.mainnet.chain.robinhood.com');
     expect(mgr.getRpcUrls('eth')).toContain('https://ethereum-rpc.publicnode.com/');
     expect(mgr.getRpcUrls('bsc')).toContain('https://public-bsc.nownodes.io/');
+    // sol: 6 hosts
+    expect(mgr.getRpcUrls('sol').length).toBeGreaterThanOrEqual(2);
     expect(mgr.getRpcUrls('sol')).toContain('https://solana-rpc.publicnode.com/');
+    expect(mgr.getRpcUrls('sol')).toContain('https://solana-mainnet.gateway.tatum.io/');
   });
 
   it('measures real latencies and picks the fastest healthy RPC', async () => {

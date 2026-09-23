@@ -24,8 +24,8 @@ interface ChainRpcSpec {
  * - eth: publicnode + drpc + nownodes all OK (0x1)
  * - bsc: publicnode + drpc + nownodes all OK (0x38); binance-dataseed TIMED OUT → not a default
  * - base: publicnode + drpc + official base.org all OK (0x2105)
- * - sol: publicnode OK (solana-core 4.2.2); official api.mainnet-beta TIMED OUT → not a default;
- *         drpc sol is paid-only → not a default
+ * - sol: publicnode + tatum + pocket + vibestation + leorpc + uniblock (verified 4.x) — official
+ *         api.mainnet-beta/api.mainnet TIMED OUT, dRPC sol is paid-only → not defaults
  */
 const CHAIN_RPC_SPEC: Record<RpcChainKey, ChainRpcSpec> = {
   rh: {
@@ -70,7 +70,17 @@ const CHAIN_RPC_SPEC: Record<RpcChainKey, ChainRpcSpec> = {
   },
   sol: {
     envVar: 'SOLANA_RPC_URL',
-    defaults: ['https://solana-rpc.publicnode.com/'],
+    // Verified live via getVersion 2026-09-23. publicnode + tatum + pocket +
+    // vibestation + leorpc + uniblock all responded; api.mainnet.solana.com
+    // timed out (same family as api.mainnet-beta), dRPC sol is paid-only.
+    defaults: [
+      'https://solana-rpc.publicnode.com/',
+      'https://solana-mainnet.gateway.tatum.io/',
+      'https://solana.api.pocket.network',
+      'https://public.rpc.solanavibestation.com',
+      'https://solana.leorpc.com/?api_key=FREE',
+      'https://api.uniblock.dev/uni/v1/json-rpc?chainId=solana',
+    ],
     chainId: undefined, // getVersion, no chain id check
   },
 };
