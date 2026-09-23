@@ -73,6 +73,11 @@ const DEFAULT_CONFIG: RobinhoodScreeningConfig = {
 };
 
 export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> {
+  // Memeland fork: the agent class is still named after its origin (Robinhood) but it now
+  // runs on the full 5-chain scope (sol,bsc,base,eth,robinhood). Log prefix [MEME AGENT]
+  // (was [ROBINHOOD AGENT]) so the cycle output reflects the fork's multichain identity,
+  // not the legacy single-chain brand. The 'meme-robinhood' domain key is preserved
+  // because Discord channels, funnel state-store keys, and runtime config all key on it.
   readonly domain = 'meme-robinhood';
   private gmgn: GMGNAdapter;
   private priceFeed = globalPriceFeedService;
@@ -143,7 +148,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     const { applied, rejected } = validateMemeConfigUpdate(partial);
     this.config = { ...this.config, ...applied };
     if (Object.keys(applied).length > 0) {
-      console.log(`[ROBINHOOD AGENT] Config updated: ${JSON.stringify(applied)}`);
+      console.log(`[MEME AGENT] Config updated: ${JSON.stringify(applied)}`);
     }
     return { applied, rejected };
   }
@@ -207,7 +212,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       }
       return out;
     } catch (err: any) {
-      console.warn(`[ROBINHOOD AGENT] Fill-tape candidates failed (skipped): ${err.message}`);
+      console.warn(`[MEME AGENT] Fill-tape candidates failed (skipped): ${err.message}`);
       return [];
     }
   }
@@ -250,7 +255,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       const tokens = await provider.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
       return tokens.map((t) => normalizeDexToken(chain, t, source));
     } catch (err: any) {
-      console.warn(`[ROBINHOOD AGENT] ${source} candidates failed (skipped): ${err.message}`);
+      console.warn(`[MEME AGENT] ${source} candidates failed (skipped): ${err.message}`);
       return [];
     }
   }
@@ -269,7 +274,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       const events = await this.gmgn.fetchTokenSignals(chain, this.config.signalTypes);
       return buildSignalBoostMap(events);
     } catch (err: any) {
-      console.warn(`[ROBINHOOD AGENT] Signal booster failed (skipped): ${err.message}`);
+      console.warn(`[MEME AGENT] Signal booster failed (skipped): ${err.message}`);
       return new Map();
     }
   }
@@ -287,10 +292,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         this.gmgn.fetchTrackTrades(chain, 'kol'),
       ]);
       const acc = buildTrackAccumulation([...sm, ...kol]);
-      if (acc.size > 0) console.log(`[ROBINHOOD AGENT] Track feed: ${acc.size} tokens with smart-money/KOL activity.`);
+      if (acc.size > 0) console.log(`[MEME AGENT] Track feed: ${acc.size} tokens with smart-money/KOL activity.`);
       return acc;
     } catch (err: any) {
-      console.warn(`[ROBINHOOD AGENT] Track feed failed (skipped): ${err.message}`);
+      console.warn(`[MEME AGENT] Track feed failed (skipped): ${err.message}`);
       return new Map();
     }
   }
@@ -317,7 +322,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       } catch { /* this token is skipped — it does not affect the others */ }
     }
     if (out.length > 0) {
-      console.log(`[ROBINHOOD AGENT] New track candidates: ${out.length} tokens (smart-money accumulation, passed threshold).`);
+      console.log(`[MEME AGENT] New track candidates: ${out.length} tokens (smart-money accumulation, passed threshold).`);
     }
     return out;
   }
@@ -407,29 +412,31 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
   /** Full pass: for each configured chain → collect → prefilter (audit GMGN) → detect → voters → report */
     public async runScreeningPass(): Promise<AgentReport<RobinhoodSignal>[]> {
-      console.log('[ROBINHOOD AGENT] Screening pass started (GMGN OpenAPI)...');
+      console.log('[MEME AGENT] Screening pass started (GMGN OpenAPI)...');
       const reports: AgentReport<RobinhoodSignal>[] = [];
       let scanned = 0;
       let prefiltered = 0;
 
-      // Chains from env (MULTICHAIN_CHAINS=sol,bsc,base,eth), default robinhood — the running
-      // bot keeps its provisioned keys until the user enables new chains.
-      const chains: Chain[] = (process.env.MULTICHAIN_CHAINS || 'robinhood')
+      // Chains from env (MULTICHAIN_CHAINS), default = the fork's full 5-chain scope.
+      // Operators narrow with `MULTICHAIN_CHAINS=sol,bsc,robinhood` etc.; an empty
+      // env var still yields the full scope. Provision per-chain GMGN keys (R1) before
+      // enabling chains — without a key, every audit on that chain fails (Fix #5).
+      const chains: Chain[] = (process.env.MULTICHAIN_CHAINS || 'sol,bsc,base,eth,robinhood')
         .split(',')
         .map((s) => s.trim().toLowerCase())
         .filter((s): s is Chain => (['sol', 'bsc', 'base', 'eth', 'robinhood'] as string[]).includes(s));
 
       for (const chain of chains) {
         const nativeSymbol = chain === 'sol' ? 'SOL' : 'ETH';
-        console.log(`[ROBINHOOD AGENT] ── chain=${chain} ──`);
+        console.log(`[MEME AGENT] ── chain=${chain} ──`);
 
         // 0. Live native price — once per chain per pass (fee gate conversion; cached 60s)
         let nativePriceUsd: number | null = null;
         try {
           nativePriceUsd = await this.priceFeed.getPrice(nativeSymbol);
-          console.log(`[ROBINHOOD AGENT] ${nativeSymbol} price: ${nativePriceUsd !== null ? '$' + nativePriceUsd.toFixed(2) : 'UNAVAILABLE (fee gate will reject all)'}`);
+          console.log(`[MEME AGENT] ${nativeSymbol} price: ${nativePriceUsd !== null ? '$' + nativePriceUsd.toFixed(2) : 'UNAVAILABLE (fee gate will reject all)'}`);
         } catch (err: any) {
-          console.warn(`[ROBINHOOD AGENT] Failed to fetch ${nativeSymbol} price: ${err.message}`);
+          console.warn(`[MEME AGENT] Failed to fetch ${nativeSymbol} price: ${err.message}`);
         }
 
         // 1. Collect candidates from 3 sources + signal booster overlay + track feed
@@ -452,7 +459,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         if (signalBoostMap.size > 0) {
-          console.log(`[ROBINHOOD AGENT] ${chain}: signal overlay ${signalBoostMap.size} tokens with smart-money/KOL/CTO events.`);
+          console.log(`[MEME AGENT] ${chain}: signal overlay ${signalBoostMap.size} tokens with smart-money/KOL/CTO events.`);
         }
 
         // Sentiment voter: ONE batch pass per chain (X search once per batch, on-chain fields otherwise)
@@ -460,9 +467,9 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         if (this.voterSwarm && allCandidates.length > 0) {
           try {
             sentimentMap = await this.sentimentVoter.evaluateBatch(allCandidates);
-            console.log(`[ROBINHOOD AGENT] ${chain}: sentiment scored ${sentimentMap.size} candidates.`);
+            console.log(`[MEME AGENT] ${chain}: sentiment scored ${sentimentMap.size} candidates.`);
           } catch (err: any) {
-            console.warn(`[ROBINHOOD AGENT] ${chain}: sentiment batch failed (neutral votes): ${err.message}`);
+            console.warn(`[MEME AGENT] ${chain}: sentiment batch failed (neutral votes): ${err.message}`);
           }
         }
 
@@ -470,12 +477,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         for (const t of allCandidates) {
           // Graduated-only: reject tokens still on the bonding curve (exchange='pump')
           if (!isGraduatedToken(t)) {
-            console.log(`[ROBINHOOD AGENT] ⛔ ${t.symbol}: not yet graduated (bonding curve).`);
+            console.log(`[MEME AGENT] ⛔ ${t.symbol}: not yet graduated (bonding curve).`);
             continue;
           }
 
           const filter = this.preFilter(t, nativePriceUsd);
-          if (!filter.ok) { console.log(`[ROBINHOOD AGENT] ${filter.reason}`); continue; }
+          if (!filter.ok) { console.log(`[MEME AGENT] ${filter.reason}`); continue; }
           // GMGN /v1/token/security audit (fail-closed): honeypot, blacklist,
           // sell-lock, tax. Per-token audit endpoint — mandatory on every chain.
           const audit = await this.gmgn.fetchTokenSecurity(chain, t.address);
@@ -485,12 +492,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // — without this warn, the operator only sees generic AUDIT FAIL and
           // can't tell a token-level rejection from a global provider outage.
           if (!audit) {
-            console.warn(`[ROBINHOOD AGENT] ${t.symbol}: audit unavailable (likely 429/401 — add GMGN_API_KEY_BACKUPS for key-pool rotation).`);
+            console.warn(`[MEME AGENT] ${t.symbol}: audit unavailable (likely 429/401 — add GMGN_API_KEY_BACKUPS for key-pool rotation).`);
             continue;
           }
           const sec = securityAuditGate(audit);
           if (!sec.ok) {
-            console.log(`[ROBINHOOD AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${sec.reasons.join(' ')}`);
+            console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${sec.reasons.join(' ')}`);
             continue;
           }
           prefiltered += 1;
@@ -507,7 +514,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             };
           }
           if (det.type === 'NONE' || det.confidence < this.config.passThreshold) {
-            console.log(`[ROBINHOOD AGENT] ⚪ ${t.symbol}: ${det.type} ${det.confidence}% < ${this.config.passThreshold}% (${det.reasons.join(' | ')})`);
+            console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${det.confidence}% < ${this.config.passThreshold}% (${det.reasons.join(' | ')})`);
             continue;
           }
 
@@ -537,7 +544,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                 gmgn: { ...toStrategyGmgn(t), native_price_usd: nativePriceUsd },
               });
               if (ev?.recommendedAction === 'SKIP') {
-                console.log(`[ROBINHOOD AGENT] ⛔ ${t.symbol}: strategy rejected (${ev.reason})`);
+                console.log(`[MEME AGENT] ⛔ ${t.symbol}: strategy rejected (${ev.reason})`);
                 continue;
               }
               if (ev && typeof ev.confidence === 'number') {
@@ -545,11 +552,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                 strategyReason = ev.reason || '';
               }
             }
-          } catch (err: any) { console.warn(`[ROBINHOOD AGENT] Strategy failed: ${err.message}`); }
+          } catch (err: any) { console.warn(`[MEME AGENT] Strategy failed: ${err.message}`); }
 
           // Fail-closed: the 80 gate must hold on the FINAL blended confidence
           if (confidence < this.config.passThreshold) {
-            console.log(`[ROBINHOOD AGENT] ⚪ ${t.symbol}: ${det.type} ${confidence}% < ${this.config.passThreshold}% (post-strategy)`);
+            console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${confidence}% < ${this.config.passThreshold}% (post-strategy)`);
             continue;
           }
 
@@ -644,7 +651,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               try {
                 opinions.push(await this.criticVoter.evaluate({ token: t, chain, thesis, reasons: det.reasons }));
               } catch (err: any) {
-                console.warn(`[ROBINHOOD AGENT] Critic failed (neutral): ${err.message}`);
+                console.warn(`[MEME AGENT] Critic failed (neutral): ${err.message}`);
                 opinions.push({ voter: 'critic', score: 50, reasons: ['critic error — neutral'] });
               }
             }
@@ -653,11 +660,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
           const signal: RobinhoodSignal = { token: t, signalType: det.type, confidence, reasons: det.reasons };
           reports.push({ passed: true, signal, reason: thesis, confidence, payload });
-          console.log(`[ROBINHOOD AGENT] 🎯 ${det.type} ${t.symbol} ${confidence}% (${chain})`);
+          console.log(`[MEME AGENT] 🎯 ${det.type} ${t.symbol} ${confidence}% (${chain})`);
         }
       }
 
-      console.log(`[ROBINHOOD AGENT] Pass complete. ${reports.length} signals passed.`);
+      console.log(`[MEME AGENT] Pass complete. ${reports.length} signals passed.`);
       this.lastFunnel = { scanned, prefiltered, emitted: reports.length };
       console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length}`);
       return reports;

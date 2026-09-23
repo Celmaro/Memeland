@@ -96,7 +96,10 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
   const cycleOperationalFunnel = createOperationalFunnel();
   globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: true, lastStartedAt: Date.now() });
   globalOperationalHealth.recordProviderRequest('screening-pass', true);
-  console.log(`[SCREENING CYCLE] tick=${Date.now()} domains=${hub.getActiveDomains().join('+') || 'none'}`);
+  // Memeland fork: print the actual chain list being scanned this cycle so the
+  // operator can confirm the env override (MULTICHAIN_CHAINS) is in effect.
+  const memeChains = (robinhoodScreeningAgent as unknown as { chains?: string[] }).chains ?? [];
+  console.log(`[SCREENING CYCLE] tick=${Date.now()} domains=${hub.getActiveDomains().join('+') || 'none'} meme.chains=${memeChains.join('+') || '(see [FUNNEL] line)'}`);
   try {
     // Register heartbeats AT THE START of each pass so agents are marked alive while the
     // loop is running (loop interval 5m > watcher timeout, so end-of-pass heartbeats alone

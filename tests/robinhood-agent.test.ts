@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RobinhoodScreeningAgent, RobinhoodSignal } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import { createDedupe, volume24hOf, buildSignalBoostMap, applySignalBoost } from '../src/agents/shared/gmgn-meme-helpers.js';
 import type { GMGNRawToken } from '../src/adapters/gmgn-adapter.js';
@@ -24,7 +24,10 @@ const mkToken = (over: Partial<GMGNRawToken> = {}): GMGNRawToken => ({
 });
 
 describe('RobinhoodScreeningAgent', () => {
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.GMGN_API_KEY; delete process.env.X_API_BEARER_TOKEN; });
+  // Memeland fork defaults MULTICHAIN_CHAINS to all 5 chains. These tests were
+  // authored single-chain; pin robinhood so the existing mocks stay valid.
+  beforeEach(() => { process.env.MULTICHAIN_CHAINS = 'robinhood'; });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.GMGN_API_KEY; delete process.env.X_API_BEARER_TOKEN; delete process.env.MULTICHAIN_CHAINS; });
 
   const securityResponse = {
     code: 0,

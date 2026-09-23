@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { RhFillTapeReader, FillTapeWindow } from '../src/adapters/rh-fill-tape.js';
 import type { MarketDataProvider } from '../src/adapters/market-data-provider.js';
@@ -57,11 +57,15 @@ const makeDex = (tokens: { address: string }[]): MarketDataProvider => ({
 });
 
 describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sources', () => {
+  // Memeland fork defaults MULTICHAIN_CHAINS to all 5 chains. These tests were
+  // authored single-chain; pin robinhood so the existing mocks stay valid.
+  beforeEach(() => { process.env.MULTICHAIN_CHAINS = 'robinhood'; });
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env.RH_TAPE_ENABLED;
     delete process.env.DEXSCREENER_FEED_ENABLED;
     delete process.env.GMGN_API_KEY;
+    delete process.env.MULTICHAIN_CHAINS;
   });
 
   it('(a) flags off → pass returns exactly the prior candidates (no change)', async () => {
