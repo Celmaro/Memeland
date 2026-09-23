@@ -479,6 +479,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // GMGN /v1/token/security audit (fail-closed): honeypot, blacklist,
           // sell-lock, tax. Per-token audit endpoint — mandatory on every chain.
           const audit = await this.gmgn.fetchTokenSecurity(chain, t.address);
+          // Fix #5: distinguish "audit returned null" (rate-limit / 401 / 429 on
+          // the GMGN endpoint) from "audit ran but token failed the gate". With a
+          // single GMGN key, every audit after the first 429 silently returns null
+          // — without this warn, the operator only sees generic AUDIT FAIL and
+          // can't tell a token-level rejection from a global provider outage.
+          if (!audit) {
+            console.warn(`[ROBINHOOD AGENT] ${t.symbol}: audit unavailable (likely 429/401 — add GMGN_API_KEY_BACKUPS for key-pool rotation).`);
+            continue;
+          }
           const sec = securityAuditGate(audit);
           if (!sec.ok) {
             console.log(`[ROBINHOOD AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${sec.reasons.join(' ')}`);

@@ -383,4 +383,80 @@ describe('GMGNAdapter (OpenAPI)', () => {
     expect(res).toHaveLength(1);
     expect(res[0].symbol).toBe('ROT');
   });
+
+  it('Fix #2: rank interval=1h with no volume_1h and no `volume` field falls back to volume24hUsd/24 (avoids prefilter=0)', async () => {
+    process.env.GMGN_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => null },
+      json: async () => ({ code: 0, data: { data: { rank: [{
+        chain: 'robinhood', address: 'abc', symbol: 'PURR', name: 'Purr',
+        price: '0.001', market_cap: 100000,
+        // realistic live-runtime shape: GMGN /v1/market/rank on Robinhood / low-vol
+        // tokens often returns ONLY a 24h volume (volume_1h absent, bare volume absent).
+        volume_24h: 240000,
+        liquidity: 30000, creation_timestamp: 1786000000,
+      }] } } }),
+    }));
+    const adapter = new GMGNAdapter();
+    const [t] = await adapter.fetchRank('robinhood', { interval: '24h' });
+    expect(t.volume24hUsd).toBe(240000);
+    // NEW: without this fallback, volume1hUsd was 0 (and the prefilter rejected
+    // every token as volume_1h < minVolume1hUsd). Now it falls back to 24h/24.
+    expect(t.volume1hUsd).toBe(10000);
+  });
+
+  it('Fix #2: rank interval=24h with no volume_1h and no `volume` still produces volume1hUsd=volume24hUsd/24', async () => {
+    process.env.GMGN_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => null },
+      json: async () => ({ code: 0, data: { data: { rank: [{
+        chain: 'robinhood', address: 'abc', symbol: 'PURR', name: 'Purr',
+        price: '0.001', market_cap: 100000,
+        volume_24h: 240000, // 24h explicit; no volume_1h; no bare `volume`
+        liquidity: 30000, creation_timestamp: 1786000000,
+      }] } } }),
+    }));
+    const adapter = new GMGNAdapter();
+    const [t] = await adapter.fetchRank('robinhood', { interval: '24h' });
+    expect(t.volume24hUsd).toBe(240000);
+    expect(t.volume1hUsd).toBe(10000); // falls back to 240000/24
+  });
+
+  it('Fix #2: when volume_24h is also null/0, volume1hUsd stays 0 (does not fabricate)', async () => {
+    process.env.GMGN_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => null },
+      json: async () => ({ code: 0, data: { data: { rank: [{
+        chain: 'robinhood', address: 'abc', symbol: 'PURR', name: 'Purr',
+        price: '0.001', market_cap: 100000,
+        // both volume_1h, volume_24h and bare volume absent — truly dead token.
+        liquidity: 30000, creation_timestamp: 1786000000,
+      }] } } }),
+    }));
+    const adapter = new GMGNAdapter();
+    const [t] = await adapter.fetchRank('robinhood', { interval: '1h' });
+    expect(t.volume1hUsd).toBe(0);
+    expect(t.volume24hUsd).toBe(0);
+  });
+
+  it('Fix #2: explicit volume_1h still wins (no fallback when the real value is present)', async () => {
+    process.env.GMGN_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => null },
+      json: async () => ({ code: 0, data: { data: { rank: [{
+        chain: 'robinhood', address: 'abc', symbol: 'PURR', name: 'Purr',
+        price: '0.001', market_cap: 100000,
+        volume_1h: 8888, volume_24h: 240000, // real 1h present
+        liquidity: 30000, creation_timestamp: 1786000000,
+      }] } } }),
+    }));
+    const adapter = new GMGNAdapter();
+    const [t] = await adapter.fetchRank('robinhood', { interval: '1h' });
+    expect(t.volume1hUsd).toBe(8888);
+    expect(t.volume24hUsd).toBe(240000);
+  });
 });

@@ -201,9 +201,21 @@ export class GMGNAdapter extends GmgnRestClient implements MarketDataProvider {
   ): GMGNRawToken {
     const has24h = raw.volume_24h !== undefined && raw.volume_24h !== null;
     const has1h = raw.volume_1h !== undefined && raw.volume_1h !== null;
+    const hasBare = raw.volume !== undefined && raw.volume !== null && Number(raw.volume) > 0;
     const bareVolume = Number(raw.volume ?? 0);
     const volume24hUsd = has24h ? Number(raw.volume_24h) : (bareVolumeWindow === '24h' ? bareVolume : 0);
-    const volume1hUsd = has1h ? Number(raw.volume_1h) : (bareVolumeWindow === '1h' ? bareVolume : 0);
+    // Fix #2 (Zeabur log audit): when the API gives us NO volume_1h AND NO bare
+    // `volume` field (GMGN's /v1/market/rank + /v1/market/hot_searches on Robinhood /
+    // low-volume tokens omit both), fall back to volume24hUsd/24 — without this
+    // fallback, volume1hUsd stays 0 and the prefilter floor (minVolume1hUsd)
+    // rejects every token as volume_1h < threshold. When `volume` IS present we
+    // trust it for its own window — the original behaviour. (The
+    // bareVolumeWindow==='1h' branch stays bareVolume, exactly as before.)
+    const volume1hUsd = has1h
+      ? Number(raw.volume_1h)
+      : (bareVolumeWindow === '1h'
+          ? bareVolume
+          : (!hasBare && volume24hUsd > 0 ? volume24hUsd / 24 : 0));
     return {
       chain,
       address: raw.address || raw.contract_address || '',

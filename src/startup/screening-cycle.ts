@@ -158,15 +158,20 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     const preGateCount = dispatchedPayloads.length;
     dispatchedPayloads = dispatchedPayloads.filter((item) => gateSignal(item.payload));
     const postGateCount = dispatchedPayloads.length;
-    stateStore.incrementFunnel('meme-robinhood', 'scanned', robinhoodScreeningAgent.getLastFunnelStats().scanned);
+    const memeStats = robinhoodScreeningAgent.getLastFunnelStats();
+    stateStore.incrementFunnel('meme-robinhood', 'scanned', memeStats.scanned);
     stateStore.incrementFunnel('meme-robinhood', 'consensus', postGateCount);
     cycleOperationalFunnel.sourcesQueried += Math.max(1, hub.getActiveDomains().length);
-    cycleOperationalFunnel.candidatesDiscovered += robinhoodScreeningAgent.getLastFunnelStats().scanned;
-    cycleOperationalFunnel.candidatesNormalized += robinhoodScreeningAgent.getLastFunnelStats().prefiltered;
+    cycleOperationalFunnel.candidatesDiscovered += memeStats.scanned;
+    cycleOperationalFunnel.candidatesNormalized += memeStats.prefiltered;
     cycleOperationalFunnel.candidatesEnriched += preGateCount;
     cycleOperationalFunnel.candidatesRejectedByGate += Math.max(0, preGateCount - postGateCount);
     cycleOperationalFunnel.signalsEmitted += postGateCount;
-    console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
+    // Fix #4: include the meme agent's own upstream counters (scan/prefilter/emit)
+    // in the same line so `beforeGate=0 afterGate=0` is no longer ambiguous —
+    // if memeStats.prefiltered=0, every reader of the log can see "prefilter
+    // is the upstream dead end" without running the 7-bucket checklist in their head.
+    console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} meme.scan=${memeStats.scanned} meme.prefilter=${memeStats.prefiltered} meme.emit=${memeStats.emitted} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
 
     // Register real heartbeats for every active agent that ran this pass
     for (const domain of hub.getActiveDomains()) {
