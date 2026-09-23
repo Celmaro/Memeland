@@ -19,8 +19,8 @@ import { GMGNAdapter } from './adapters/gmgn-adapter.js';
 import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
 import { DexScreenerFeed } from './adapters/dexscreener-feed.js';
-import { CodexFeed } from './adapters/codex-feed.js';
 import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
+import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
 import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
@@ -130,7 +130,10 @@ function bindDiscordClient(client: any): void {
     discordChannelSink(client);
 }
 
-const SCREENING_TIMEOUT_MS = Math.max(1000, Number(process.env.SCREENING_TIMEOUT_MS) || 60000);
+// 5-chain keyless-first scope needs ~90-120s per pass (discovery + per-token
+// GMGN audits at 600ms spacing); the legacy 60s default silently discarded
+// every pass (funnel beforeGate=0). Default 180s; env can still override.
+const SCREENING_TIMEOUT_MS = Math.max(1000, Number(process.env.SCREENING_TIMEOUT_MS) || 180000);
 // withScreeningTimeout imported from src/runtime/screening-runner.js (KC6).
 // Semantics identical to the legacy inline helper: fail-closed, resolves []
 // when a pass exceeds SCREENING_TIMEOUT_MS, timer cleared on settle.
@@ -182,9 +185,10 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     critic: new CriticVoter(aiService),
     // Q06 keyless DexScreener booster feed. Inert unless DEXSCREENER_FEED_ENABLED=true.
     dexscreener: new DexScreenerFeed(),
-    // PR7 keyless Codex.io / DEXPaprika booster feeds. Inert unless their env gates are on.
-    codex: new CodexFeed(),
     dexpaprika: new DexpaprikaFeed(),
+    // SRC-153 GeckoTerminal keyless discovery tier (new_pools + trending).
+    // Inert unless GECKO_FEED_ENABLED=true. Self-paced to the 30/min budget.
+    gecko: new GeckoDiscoveryFeed(),
   },
 );
 const hyperliquidAdapter = new HyperliquidAdapter();

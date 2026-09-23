@@ -97,10 +97,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private tapeTokenAddresses: string[];
   /** Q06 keyless DexScreener feed. Empty until injected. */
   private dexscreener: MarketDataProvider | null;
-  /** PR7 keyless Codex.io feed. Empty until injected. */
-  private codex: MarketDataProvider | null;
   /** PR7 keyless DEXPaprika feed. Empty until injected. */
   private dexpaprika: MarketDataProvider | null;
+  /** SRC-153 keyless GeckoTerminal discovery feed (new_pools + trending). Empty until injected. */
+  private gecko: MarketDataProvider | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -118,8 +118,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       tape?: RhFillTapeReader;
       tapeTokenAddresses?: string[];
       dexscreener?: MarketDataProvider;
-      codex?: MarketDataProvider;
       dexpaprika?: MarketDataProvider;
+      gecko?: MarketDataProvider;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
     } = {}
@@ -134,8 +134,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.tape = opts.tape ?? null;
     this.tapeTokenAddresses = opts.tapeTokenAddresses ?? [];
     this.dexscreener = opts.dexscreener ?? null;
-    this.codex = opts.codex ?? null;
     this.dexpaprika = opts.dexpaprika ?? null;
+    this.gecko = opts.gecko ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
   }
@@ -227,14 +227,14 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.dexscreener, 'dexscreener', 'DEXSCREENER_FEED_ENABLED', chain);
   }
 
-  /** PR7 Codex.io keyless feed candidates (BOOSTER). Guarded by CODEX_FEED_ENABLED=true. */
-  public async collectCodexCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
-    return this.collectProviderCandidates(this.codex, 'codex', 'CODEX_FEED_ENABLED', chain);
-  }
-
   /** PR7 DEXPaprika keyless feed candidates (BOOSTER). Guarded by DEXPAPRIKA_FEED_ENABLED=true. */
   public async collectDexpaprikaCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
     return this.collectProviderCandidates(this.dexpaprika, 'dexpaprika', 'DEXPAPRIKA_FEED_ENABLED', chain);
+  }
+
+  /** SRC-153 GeckoTerminal keyless discovery candidates. Guarded by GECKO_FEED_ENABLED=true. */
+  public async collectGeckoCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.gecko, 'gecko', 'GECKO_FEED_ENABLED', chain);
   }
 
   /**
@@ -244,7 +244,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
@@ -439,23 +439,28 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           console.warn(`[MEME AGENT] Failed to fetch ${nativeSymbol} price: ${err.message}`);
         }
 
-        // 1. Collect candidates from 3 sources + signal booster overlay + track feed
-        const [candidates, signalBoostMap, trackAcc] = await Promise.all([
+        // 1. Priority flip (keyless-first): DEXPaprika/Gecko/DexScreener feed the
+        // prefilter FIRST — they are keyless, budget-free, and cover all 5 chains.
+        // GMGN rank/trenches/hot is merged LAST (enrichment-only surface): its
+        // per-token audit/klines/smart-money (lines below) stay the enrichment
+        // layer, but GMGN discovery no longer gates the funnel. GMGN remains
+        // ratelimited (429) under 5-chain scope, so candidates must NOT depend on
+        // it — the keyless feeds are the discovery tier, GMGN just enriches them.
+        const [gmgnDiscovery, signalBoostMap, trackAcc] = await Promise.all([
           this.collectCandidates(chain),
           this.collectSignalBoostMap(chain),
           this.collectTrackAccumulation(chain),
                   ]);
                   const trackCandidates = await this.collectTrackCandidates(trackAcc, chain);
-                  // Additional candidate sources (Q04 fill-tape + Q06 DexScreener), each
-                  // self-guarded by env flags and fail-open empty when off/unconfigured.
+                  // Keyless discovery tier (all self-guarded, fail-open empty when off).
                   const tapeCandidates = await this.collectTapeCandidates(chain);
                   const dexscreenerCandidates = await this.collectDexscreenerCandidates(chain);
-                  const codexCandidates = await this.collectCodexCandidates(chain);
                   const dexpaprikaCandidates = await this.collectDexpaprikaCandidates(chain);
-                  // Merge by address (candidates already deduped in collectCandidates; this
-                  // merge must not hit the 60s dedupe cooldown — plain by-address dedupe only).
+                  const geckoCandidates = await this.collectGeckoCandidates(chain);
+                  // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
+                  // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
-                  for (const t of [...candidates, ...trackCandidates, ...tapeCandidates, ...dexscreenerCandidates, ...codexCandidates, ...dexpaprikaCandidates]) merged.set(t.address.toLowerCase(), t);
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...gmgnDiscovery]) merged.set(t.address.toLowerCase(), t);
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         if (signalBoostMap.size > 0) {

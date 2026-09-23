@@ -14,7 +14,15 @@ view: `[FUNNEL] cycle: … meme.scan=N meme.prefilter=N …`.
 | `[ROBINHOOD AGENT] ⛔ SYM: AUDIT FAIL — GMGN audit unavailable (fail-closed)` — is this a token issue or a global outage? | No signal distinguishing rate-limit from real audit failure | **Fix #5** (code, shipped): `audit-unavailable` path now warns with the rate-limit hint instead of a generic fail |
 | Only one chain (`[FUNNEL] meme chains=robinhood`) is scanned | Booster feeds default OFF + agent `chains: ['robinhood']` is the live default | **Fix #3** (env-only): `CODEX_FEED_ENABLED=true`, `DEXPAPRIKA_FEED_ENABLED=true`, `DEXSCREENER_FEED_ENABLED=true` |
 
+| `[SCREENING TIMEOUT] MEME-ROBINHOOD pass exceeded 60000ms — discarded` then `[FUNNEL] meme.emit=8 beforeGate=0` | The 5-chain keyless-first pass runs ~90-120s; the 60s `withScreeningTimeout` discarded it, then the orphaned pass finished and wrote its stats — `emit` is from the PREVIOUS pass, `beforeGate=0` proves THIS pass never reached the gate | **Fix #6 (code, shipped)**: default `SCREENING_TIMEOUT_MS` 60s → 180s (`src/index.ts`); env override still wins — Zeabur must drop its `SCREENING_TIMEOUT_MS=60000` or raise it |
+| `beforeGate=0` + `meme.emit>0` every cycle, NO timeout line visible | Log window too short to catch the timeout line; same root cause | Same fix; check log at cycle-start boundary (timeout fires ~60s into a ~90s pass) |
+
 ## The 7-bucket diagnostic checklist (legacy)
+
+**⚠️ Check the timeout FIRST.** Since the 5-chain keyless-first flip, the #1
+cause of `emit>0, beforeGate=0` is `withScreeningTimeout` discarding the pass
+(60s budget vs ~90-120s actual). `SCREENING_TIMEOUT_MS` raised to 180s in code;
+the 7-bucket walk below applies only once the pass completes.
 
 When `[FUNNEL] cycle` shows `beforeGate=X afterGate=Y` with `meme.scan=A meme.prefilter=B meme.emit=C`, walk through this in order:
 

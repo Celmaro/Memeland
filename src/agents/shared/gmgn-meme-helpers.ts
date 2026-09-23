@@ -43,10 +43,10 @@ export interface MemeSignalResult {
  * - DexScreener pairs are by definition already on DEX. Unknown/null = fail-closed reject.
  */
 export function isGraduatedToken(t: GMGNRawToken): boolean {
-  // Keyless DEX-pool feeds (dexscreener/dexpaprika/codex) only list pools that
+  // Keyless DEX-pool feeds (dexscreener/dexpaprika) only list pools that
   // already exist — 'pump' (bonding-curve) state is GMGN-only. Treat them as
   // graduated by construction; the volume/liquidity prefilter still applies.
-  if (t.source === 'dexscreener' || t.source === 'dexpaprika' || t.source === 'codex') return true;
+  if (t.source === 'dexscreener' || t.source === 'dexpaprika') return true;
   const ex = t.exchange?.toLowerCase();
   if (!ex) return false;
   if (ex.startsWith('0x')) return true;

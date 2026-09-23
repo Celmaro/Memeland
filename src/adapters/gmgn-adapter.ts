@@ -70,7 +70,7 @@ export interface GMGNRawToken {
   launchpadStatus: string | null;
   /** Bonding curve progress 0-1 (trenches/signal snapshot). */
   progress: number | null;
-  source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika';
+  source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko';
   /** Optional EVM deployed bytecode for BytecodeScanner wiring (EVM-only). */
   bytecode?: string;
   /** Optional round-trip sell proof input for SellabilitySimulator wiring (EVM-only). */

@@ -1,7 +1,7 @@
 /**
  * Q06 - Shared market-data provider interface (SRC-025/222/010/023).
  * A small interface so GMGN is one of several interchangeable discovery paths
- * (DexScreener, dexpaprika, codex.io GraphQL, ...). Implementations are keyless
+ * (DexScreener, dexpaprika, ...). Implementations are keyless
  * REST clients behind a TTL cache and must normalize to a common shape.
  */
 

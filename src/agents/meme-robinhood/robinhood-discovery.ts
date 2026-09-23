@@ -49,7 +49,7 @@ export function normalizeTapeWindow(chain: Chain, window: FillTapeWindow): GMGNR
 export function normalizeDexToken(
   chain: Chain,
   t: MarketToken,
-  source: 'gmgn' | 'dexscreener' | 'codex' | 'dexpaprika' = 'dexscreener',
+  source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' = 'dexscreener',
 ): GMGNRawToken {
   const symbol = t.symbol || 'TOKEN';
   return {
@@ -60,7 +60,7 @@ export function normalizeDexToken(
     priceUsd: t.priceUsd || 0,
     marketCapUsd: t.mcapUsd ?? t.fdvUsd ?? 0,
     volume24hUsd: t.volume24hUsd || 0,
-    // Keyless feeds (dexscreener/dexpaprika/codex) only report 24h volume —
+    // Keyless feeds (dexscreener/dexpaprika) only report 24h volume —
     // no volume_1h field. Without this fallback the prefilter floor
     // (minVolume1hUsd) would reject every candidate as volume 1h $0.0k,
     // making the boosters dead code (observed live on Zeabur, 2026-09-23).

@@ -22,7 +22,7 @@ added L–R. Files are listed with their primary public surface.
 | **D** | Sellability | `src/services/sellability/` | bytecode scanner + next-close simulator | `tests/sellability-*.test.ts` |
 | **E** | Result\<T,E\> + EVM RPC two-lane | `src/adapters/result.ts`, `src/adapters/evm-adapter.ts`, `src/adapters/quoter-call-adapter.ts` | `Result` type, `call()` (read lane), quoter bridge | `tests/evm-adapter.v2.test.ts`, `tests/quoter-call-adapter.test.ts` |
 | **F** | Decision Cache | `src/services/decision-cache.ts` | TTL decision cache | `tests/decision-cache.test.ts` |
-| **G** | Discovery feeds | `src/adapters/codex-feed.ts`, `dexpaprika-feed.ts`, `dexscreener-feed.ts` | `MarketDataProvider` implementations | `tests/codex-feed.test.ts` + siblings |
+| **G** | Discovery feeds | `dexpaprika-feed.ts`, `dexscreener-feed.ts`, `gecko-discovery-feed.ts` | `MarketDataProvider` implementations | `tests/dexpaprika-feed.test.ts` + siblings |
 
 ## Kernels (L–R, from the consolidation review)
 
