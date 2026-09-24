@@ -10,6 +10,7 @@ import { SellabilitySimulator } from '../../services/sellability/sellability-sim
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
+import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
@@ -110,6 +111,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private sellability: SellabilitySimulator;
   /** Keyless EVM token-security audit (GoPlus) — primary before GMGN. */
   private goplusService: GoPlusSecurityService;
+  /** I0-1 Blockscout BuyEvent producer for the convergence voter (env-gated). */
+  private blockscout: BlockscoutFeed | null;
 
   /** Last pass funnel stats — consumed by index.ts for the Phase-1 [FUNNEL] counters. */
   private lastFunnel: { scanned: number; prefiltered: number; emitted: number } = { scanned: 0, prefiltered: 0, emitted: 0 };
@@ -128,6 +131,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       ankr?: MarketDataProvider | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
+      blockscout?: BlockscoutFeed | null;
     } = {}
   ) {
     this.gmgn = new GMGNAdapter();
@@ -146,6 +150,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
+    this.blockscout = opts.blockscout ?? null;
   }
 
   /**
@@ -675,6 +680,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             );
             // Q05 flow-convergence voter — neutral when the agent didn't accumulate any buy flow.
             // Kernel F owner-dedup: one actor's N wallets count as one confirmation.
+            // I0-1: hydrate convergence from the Blockscout feed (env-gated) for
+            // this finalist only — the voter stops being permanently neutral.
+            if (this.blockscout && blockscoutFeedEnabled()) {
+              const chainId = chainIdFor(chain);
+              if (chainId !== undefined && !(t as any).convergence) {
+                const buys = await this.blockscout.getBuyEvents(chainId, t.address);
+                if (buys.length > 0) (t as any).convergence = { buys };
+              }
+            }
             opinions.push(await ownerDedupedConvergenceVote(globalDecisionCache, { ...baseCtx, convergence: (t as any).convergence }));
             // Q12 risk-rubric voter (portable rubric) — neutral when no rubric metrics present.
             opinions.push(rubricVote({ ...baseCtx, rubricMetrics: (t as any).rubricMetrics }));
