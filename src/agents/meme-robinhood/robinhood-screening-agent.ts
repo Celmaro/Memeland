@@ -15,6 +15,7 @@ import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSigna
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
 import { SentimentVoter } from '../shared/sentiment-voter.js';
+import { DexScreenerBoostsFeed } from '../../adapters/dexscreener-boosts.js';
 import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
@@ -140,7 +141,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.strategyParams = strategyParams;
     this.voterSwarm = opts.voterSwarm ?? process.env.VOTER_SWARM_ENABLED === 'true';
     this.criticVoter = opts.critic ?? null;
-    this.sentimentVoter = new SentimentVoter();
+    this.sentimentVoter = new SentimentVoter(
+      undefined,
+      process.env.DEXSCREENER_BOOSTS_ENABLED === 'true' ? new DexScreenerBoostsFeed() : null,
+    );
     this.tape = opts.tape ?? null;
     this.tapeTokenAddresses = opts.tapeTokenAddresses ?? [];
     this.dexscreener = opts.dexscreener ?? null;
@@ -693,7 +697,20 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             // Q12 risk-rubric voter (portable rubric) — neutral when no rubric metrics present.
             opinions.push(rubricVote({ ...baseCtx, rubricMetrics: (t as any).rubricMetrics }));
             const sent = sentimentMap.get(t.address.toLowerCase());
-            if (sent) opinions.push(sent);
+            if (sent) {
+              // I2-1: sentiment is a veto/tiebreak, not an additive vote that must
+              // cross the 80% floor. A contradiction (paid hype / strong mentions
+              // with NO on-chain buy flow) is a hard demerit — sentiment cannot
+              // independently lift a candidate over the security/liquidity gates.
+              const s = sent as { contradiction?: boolean };
+              if (s.contradiction) {
+                opinions.push({ ...sent, score: Math.max(0, Math.min(100, sent.score - 30)), reasons: [...sent.reasons, 'sentiment contradiction veto'] });
+              } else {
+                // Tiebreak only: strong organic sentiment breaks close calls but
+                // never independently lifts a weak candidate into PASS.
+                opinions.push(sent);
+              }
+            }
             const trk = trackAcc.get(t.address.toLowerCase());
             const trackTrades: VoterContext['trackTrades'] = [];
             if (trk) {
