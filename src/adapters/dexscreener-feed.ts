@@ -114,15 +114,24 @@ export class DexScreenerFeed implements MarketDataProvider {
       try {
         const url = `${this.baseUrl}${DEXSCREENER_TOKEN_PATH}/${slice.join(',')}`;
         const res = await this.fetch(url);
-        if (!res.ok) continue;
+        if (!res.ok) {
+          // I1-4: transport failure — mark this batch's tokens sourceUnavailable
+          // so the prefilter sees "feed down", not "these tokens have no volume".
+          this.markBatchUnavailable(out, slice, byAddress);
+          continue;
+        }
         const body = (await res.json()) as { pairs?: RawPair[] };
         const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
+        // Track which slice addresses were actually enriched; the rest stay
+        // zero AND unavailable (the provider had no data for them this cycle).
+        const enriched = new Set<string>();
         for (const p of pairs) {
           const addr = (p.baseToken?.address ?? '').toLowerCase();
           const idx = byAddress.get(addr);
           if (idx === undefined) continue;
           const chainId = chainIdFor(p.chainId);
           if (chainId === undefined) continue;
+          enriched.add(addr);
           // Pick the reported pair's best fields (already provider-ranked).
           out[idx] = {
             ...out[idx]!,
@@ -133,13 +142,28 @@ export class DexScreenerFeed implements MarketDataProvider {
             fdvUsd: p.fdv || 0,
             pairAddress: p.pairAddress,
             dex: p.dexId,
+            sourceUnavailable: undefined, // got real data
           };
         }
+        for (const addr of slice) {
+          if (!enriched.has(addr)) {
+            const idx = byAddress.get(addr);
+            if (idx !== undefined) out[idx] = { ...out[idx]!, sourceUnavailable: true };
+          }
+        }
       } catch {
-        // fail-soft: this batch keeps its zero fields; prefilter rejects them.
+        // I1-4: exception — mark the whole batch unavailable, never a real zero.
+        this.markBatchUnavailable(out, slice, byAddress);
       }
     }
     return out;
+  }
+
+  private markBatchUnavailable(out: MarketToken[], slice: string[], byAddress: Map<string, number>): void {
+    for (const addr of slice) {
+      const idx = byAddress.get(addr);
+      if (idx !== undefined) out[idx] = { ...out[idx]!, sourceUnavailable: true };
+    }
   }
 
   private async fetchProfiles(): Promise<MarketToken[]> {

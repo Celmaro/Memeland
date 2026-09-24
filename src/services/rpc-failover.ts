@@ -1,4 +1,5 @@
 import { getEnvString } from '../config/config.js';
+import { globalRateLimiter } from './provider-rate-limiter.js';
 
 export type RpcChainKey = 'rh' | 'eth' | 'bsc' | 'base' | 'sol';
 export const RPC_CHAINS: RpcChainKey[] = ['rh', 'eth', 'bsc', 'base', 'sol'];
@@ -146,11 +147,27 @@ export class RPCFailoverManager {
       RPC_CHAINS.flatMap((chain) =>
         this.status[chain].map(async (s) => {
           const start = Date.now();
+          // I1-1: skip hosts whose circuit is open (429 storm paused them) —
+          // they stay unhealthy WITHOUT a fresh request until backoff elapses.
+          if (globalRateLimiter.isOpen(s.url)) {
+            s.healthy = false;
+            return;
+          }
           try {
             const body = CHAIN_RPC_SPEC[chain].chainId
               ? '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
               : '{"jsonrpc":"2.0","method":"getVersion","params":[],"id":1}';
             const res = await fetch(s.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+            if (res.status === 429) {
+              // 429 → open this host's circuit (backoff), do NOT count against the
+              // host as a permanent failure (provider outage ≠ dead endpoint).
+              const retryAfter = res.headers.get('retry-after');
+              globalRateLimiter.recordFailure(s.url, '429', retryAfter ? Number(retryAfter) * 1000 : undefined);
+              s.latencyMs = Infinity;
+              s.healthy = false;
+              return;
+            }
+            globalRateLimiter.recordSuccess(s.url);
             // Even a 2xx can be a JSON-RPC error (e.g. "method unsupported"); treat those as unhealthy.
             let healthy = res.ok;
             if (healthy && CHAIN_RPC_SPEC[chain].chainId) {

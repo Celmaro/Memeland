@@ -129,6 +129,12 @@ export function preFilterToken(
   opts: { securityGate?: SecurityGateOptions } = {}
 ): { ok: boolean; reason: string } {
   const fail = (reason: string) => ({ ok: false as const, reason: `⛔ ${t.symbol}: ${reason}` });
+  // I1-4: a source that failed to supply market data must be distinguishable
+  // from a real zero-volume token. Fail-closed either way, but attribute the
+  // cause honestly so an outage doesn't look like "no candidates have volume".
+  if (t.sourceUnavailable && t.volume1hUsd === 0) {
+    return fail(`market data unavailable (${t.source} feed down) — not a volume rejection.`);
+  }
   if (t.source === 'dexscreener') {
     // DexScreener fallback lacks GMGN social/CTO fields — allow only volume-based Momentum
     if (t.volume1hUsd < config.minVolume1hUsd) return fail(`volume 1h $${(t.volume1hUsd/1000).toFixed(1)}k < $${config.minVolume1hUsd/1000}k.`);

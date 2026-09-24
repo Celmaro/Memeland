@@ -71,6 +71,8 @@ export interface GMGNRawToken {
   /** Bonding curve progress 0-1 (trenches/signal snapshot). */
   progress: number | null;
   source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr';
+  /** I1-4: true when the source feed failed to supply market data. */
+  sourceUnavailable?: boolean;
   /** Optional EVM deployed bytecode for BytecodeScanner wiring (EVM-only). */
   bytecode?: string;
   /** Optional round-trip sell proof input for SellabilitySimulator wiring (EVM-only). */
