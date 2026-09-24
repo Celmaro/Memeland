@@ -7,10 +7,10 @@ import { OpportunityStrategist, type OpportunityStrategistConfig } from '../src/
 const dbPaths: string[] = [];
 const ledgers: OpportunityLedger[] = [];
 
-function newLedger(): OpportunityLedger {
+function newLedger(now?: () => Date): OpportunityLedger {
   const p = path.join(process.cwd(), 'database', `test_opportunity_strategist_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`);
   dbPaths.push(p);
-  const l = new OpportunityLedger(p);
+  const l = new OpportunityLedger(p, now);
   ledgers.push(l);
   return l;
 }
@@ -246,10 +246,13 @@ describe('OpportunityStrategist', () => {
   });
 
   it('parked RISK_REJECTED opportunities expire after the expiry window', () => {
-    const ledger = newLedger();
+    // Fixed clock so firstSeenAt (stamped on ingest) aligns with the injected
+    // decide() dates — the ledger's real clock made this drift with wall time.
+    const T0 = new Date('2026-09-19T00:00:00Z');
+    const ledger = newLedger(() => T0);
     const s = strategist(ledger, { expireAfterMs: DAY_MS });
     const id = s.ingest({ chain: 'sol', contractAddress: '0xEXP', source: 'rank', liquidityUsd: 200, volume24hUsd: 50 }).opportunityId;
-    s.decide(new Date('2026-09-19T00:00:00Z')); // RISK_REJECTED
+    s.decide(T0); // RISK_REJECTED
     expect(ledger.get(id)?.currentState).toBe('RISK_REJECTED');
 
     // Well past the 1-day expiry, still not recovered.

@@ -215,8 +215,11 @@ export class OpportunityLedger {
   private events: OpportunityEvent[] = [];
   private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly DEBOUNCE_MS = 250;
+  /** Injectable clock for deterministic tests; defaults to real time. */
+  private readonly now: () => Date;
 
-  constructor(filePath?: string) {
+  constructor(filePath?: string, now?: () => Date) {
+    this.now = now ?? (() => new Date());
     const dbDir = path.resolve(process.cwd(), 'database');
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
@@ -231,7 +234,7 @@ export class OpportunityLedger {
       throw new Error('[OPPORTUNITY LEDGER] ensureOpportunity requires a contractAddress');
     }
     const id = opportunityIdFor(sighting.chain, sighting.contractAddress);
-    const now = new Date().toISOString();
+    const now = this.now().toISOString();
     const existing = this.identities[id];
     if (existing) return existing;
 
@@ -258,7 +261,7 @@ export class OpportunityLedger {
     const record: OpportunityObservation = {
       ...observation,
       id: this.uniqueId('OBS'),
-      observedAt: new Date().toISOString(),
+      observedAt: this.now().toISOString(),
     };
     this.observations.push(record);
     if (this.observations.length > MAX_OBSERVATIONS) {
@@ -278,7 +281,7 @@ export class OpportunityLedger {
     if (TERMINAL_STATES.has(from)) return { ok: false, reason: `state '${from}' is terminal` };
     if (!sm.canTransitionTo(to)) return { ok: false, reason: `invalid transition '${from}' -> '${to}'` };
     identity.currentState = to;
-    identity.stateUpdatedAt = new Date().toISOString();
+    identity.stateUpdatedAt = this.now().toISOString();
     // Capture the evaluation-window entry (first admission to WATCHING) exactly once.
     // The post-mortem measures trajectory from this admission window, not the token's
     // first-ever tick, so a pre-evaluation spike can never be misread as a profitable miss.
@@ -324,7 +327,7 @@ export class OpportunityLedger {
     const sm = new StateMachine<OpportunityState>(from, OPPORTUNITY_TRANSITIONS);
     if (from !== target && !TERMINAL_STATES.has(from) && sm.canTransitionTo(target)) {
       identity.currentState = target;
-      identity.stateUpdatedAt = new Date().toISOString();
+      identity.stateUpdatedAt = this.now().toISOString();
       to = target;
     }
     this.emitEvent(identity, type, { from, to, reason });
@@ -400,7 +403,7 @@ export class OpportunityLedger {
       from: params.from,
       to: params.to,
       reason: params.reason,
-      at: new Date().toISOString(),
+      at: this.now().toISOString(),
     });
     if (this.events.length > MAX_EVENTS) {
       this.events = this.events.slice(-MAX_EVENTS);
