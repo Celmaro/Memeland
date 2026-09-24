@@ -18,6 +18,13 @@ export interface MarketToken {
   change24hPct?: number;
   pairAddress?: string;
   dex?: string;
+  /**
+   * I1-4: true when the source feed FAILED to supply market data (transport /
+   * rate-limit), as opposed to a genuine zero-volume observation. A feed that
+   * returns nothing must be distinguishable from a token that trades nothing —
+   * otherwise a provider outage looks like "no candidates have volume".
+   */
+  sourceUnavailable?: boolean;
 }
 
 export type MarketSort = 'volume24hUsd' | 'liquidityUsd' | 'fdvUsd';

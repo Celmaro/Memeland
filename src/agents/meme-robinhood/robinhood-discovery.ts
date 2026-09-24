@@ -60,6 +60,10 @@ export function normalizeDexToken(
     priceUsd: t.priceUsd || 0,
     marketCapUsd: t.mcapUsd ?? t.fdvUsd ?? 0,
     volume24hUsd: t.volume24hUsd || 0,
+    // I1-4: a feed that FAILED to supply market data must not look like a real
+    // zero-volume observation. Carry the unavailable flag through so the
+    // prefilter can distinguish "feed down" from "token trades nothing".
+    sourceUnavailable: t.sourceUnavailable ?? undefined,
     // Keyless feeds (dexscreener/dexpaprika) only report 24h volume —
     // no volume_1h field. Without this fallback the prefilter floor
     // (minVolume1hUsd) would reject every candidate as volume 1h $0.0k,
