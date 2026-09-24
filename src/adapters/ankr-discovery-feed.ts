@@ -71,17 +71,47 @@ export function decodePairCreated(log: PairCreatedLog): { token0: string; token1
   return { token0, token1, pair };
 }
 
+export interface AnkrDiscoveryOptions extends MarketDiscoveryOptions {
+  /** Blocks to scan back from head (default 300). Scanned in chunks. */
+  lookbackBlocks?: number;
+  /** Initial chunk size (blocks per eth_getLogs). Default 100. */
+  chunkBlocks?: number;
+  /** Min chunk before giving up on range-too-wide (default 5). */
+  minChunkBlocks?: number;
+  /** Confirmation depth: never scan the last N blocks (default 12). */
+  confirmations?: number;
+}
+
+export interface AnkrDiscoveryResult {
+  tokens: MarketToken[];
+  /** True only when every chunk in the window completed; false on partial. */
+  isComplete: boolean;
+  /** Per-chain scan report for diagnostics (blocks covered / chunk backoffs). */
+  chains: Record<string, { fromBlock: number; toBlock: number; chunks: number; isComplete: boolean }>;
+}
+
 export class AnkrDiscoveryFeed implements MarketDataProvider {
   readonly id = 'ankr-pair-created';
 
   /**
-   * Discover pairs created since the given block (default: last 300 blocks ≈
-   * recent window on fast chains; caller may raise for slower chains).
-   * Fail-soft: transport errors → [].
+   * Scan PairCreated over a bounded lookback window in CHUNKS, because free
+   * RPCs reject wide eth_getLogs ranges. On a provider range-too-wide error the
+   * chunk halves (down to minChunkBlocks); each chunk is one eth_getLogs call.
+   * `isComplete` is honest: false when a chunk could not be scanned.
    */
-  async discover(options: MarketDiscoveryOptions = {}): Promise<MarketToken[]> {
+  async discover(options: AnkrDiscoveryOptions = {}): Promise<MarketToken[]> {
+    return (await this.discoverDetailed(options)).tokens;
+  }
+
+  async discoverDetailed(options: AnkrDiscoveryOptions = {}): Promise<AnkrDiscoveryResult> {
     const chainIds = options.chainIds ?? Object.keys(FACTORY_ADDRESSES).map((c) => CHAIN_ID[c]);
-    const results: MarketToken[] = [];
+    const lookback = options.lookbackBlocks ?? 300;
+    const confirmations = options.confirmations ?? 12;
+    const startChunk = options.chunkBlocks ?? 100;
+    const minChunk = options.minChunkBlocks ?? 5;
+    const tokens: MarketToken[] = [];
+    const chains: AnkrDiscoveryResult['chains'] = {};
+
     for (const chainId of chainIds) {
       const chain = Object.keys(CHAIN_ID).find((c) => CHAIN_ID[c] === chainId && FACTORY_ADDRESSES[c]);
       if (!chain) continue;
@@ -89,50 +119,64 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
       const poolKey = CHAIN_TO_POOL[chain];
       const rpc = globalRPCFailoverManager.getActiveRPC(poolKey);
       if (!rpc) continue;
+
+      let coveredFrom = 0;
+      let coveredTo = 0;
+      let chunks = 0;
+      let done = false;
       try {
-        const logs = await this.fetchPairCreated(rpc, factory, chainId);
-        for (const log of logs) {
-          const decoded = decodePairCreated(log);
-          if (!decoded) continue;
-          const meta = {
-            chainId,
-            pairAddress: decoded.pair,
-            dex: factory.toLowerCase(),
-          };
-          // Emit BOTH sides — token0 is frequently WETH/WBNB; the merge dedupes
-          // by address and prefilter rejects the base side on volume/liquidity.
-          results.push({
-            address: decoded.token0,
-            symbol: '',
-            priceUsd: 0,
-            liquidityUsd: 0,
-            volume24hUsd: 0,
-            ...meta,
-          });
-          results.push({
-            address: decoded.token1,
-            symbol: '',
-            priceUsd: 0,
-            liquidityUsd: 0,
-            volume24hUsd: 0,
-            ...meta,
-          });
+        const headHex = (await this.rpcCall(rpc, 'eth_blockNumber', [])) as string;
+        let to = BigInt(headHex) - BigInt(confirmations);
+        if (to < 1n) continue;
+        let from = to - BigInt(lookback);
+        if (from < 1n) from = 1n;
+        let chunk = BigInt(startChunk);
+        coveredFrom = Number(from);
+        coveredTo = Number(to);
+
+        while (from < to) {
+          chunks += 1;
+          const chunkEndExcl = from + chunk;
+          const toBlock = chunkEndExcl > to ? to : chunkEndExcl;
+          try {
+            const logs = await this.fetchPairCreated(rpc, factory, from, toBlock);
+            for (const log of logs) {
+              const decoded = decodePairCreated(log);
+              if (!decoded) continue;
+              const meta = { chainId, pairAddress: decoded.pair, dex: factory.toLowerCase() };
+              tokens.push({ address: decoded.token0, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, ...meta });
+              tokens.push({ address: decoded.token1, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, ...meta });
+            }
+            from = toBlock; // advance on success
+          } catch (err) {
+            // Range-too-wide → halve, then retry same window; floor at minChunk.
+            if (chunk > BigInt(minChunk)) {
+              chunk /= 2n;
+              if (chunk < BigInt(minChunk)) chunk = BigInt(minChunk);
+              continue;
+            }
+            // Below min chunk and still failing → mark incomplete, stop this chain.
+            break;
+          }
         }
+        done = from >= to;
       } catch {
-        // fail-soft: one chain's RPC hiccup must not drop the whole discovery
+        // fail-soft: a transport error on head fetch leaves this chain empty but
+        // does not drop the other chains.
+        done = false;
       }
+      chains[chain] = { fromBlock: coveredFrom, toBlock: coveredTo, chunks, isComplete: done };
     }
-    return results;
+
+    const allComplete = Object.keys(chains).every((c) => chains[c]!.isComplete);
+    return { tokens, isComplete: allComplete, chains };
   }
 
-  /** eth_getLogs for PairCreated on the factory, last 300 blocks. */
-    private async fetchPairCreated(rpc: string, factory: string, _chainId: number): Promise<PairCreatedLog[]> {
-    const head = (await this.rpcCall(rpc, 'eth_blockNumber', [])) as string;
-    const latest = BigInt(head);
-    const fromBlock = `0x${(latest - 300n).toString(16)}`;
+  /** eth_getLogs for PairCreated on the factory over [fromBlock, toBlock] (chunk). */
+  private async fetchPairCreated(rpc: string, factory: string, fromBlock: bigint, toBlock: bigint): Promise<PairCreatedLog[]> {
     const payload = {
-      fromBlock,
-      toBlock: 'latest',
+      fromBlock: `0x${fromBlock.toString(16)}`,
+      toBlock: `0x${toBlock.toString(16)}`,
       address: factory,
       topics: [PAIR_CREATED_TOPIC0],
     };

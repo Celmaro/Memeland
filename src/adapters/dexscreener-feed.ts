@@ -16,6 +16,9 @@ import { TtlCache } from '../cache/ttl-cache.js';
 
 export const DEXSCREENER_DEFAULT_BASE = 'https://api.dexscreener.com';
 export const DEXSCREENER_PROFILES_PATH = '/token-profiles/latest/v1';
+// Token-lookup endpoint returns real market fields (priceUsd, liquidityUsd,
+// volume24hUsd, fdv) for a known address — the same address the profile listed.
+export const DEXSCREENER_TOKEN_PATH = '/latest/dex/tokens';
 
 type FetchLike = (url: string) => Promise<Pick<Response, 'ok' | 'json'>>;
 
@@ -24,6 +27,21 @@ interface RawProfile {
   chainId?: string;
   tokenAddress?: string;
   symbol?: string;
+}
+
+/**
+ * DexScreener pair object returned by /latest/dex/tokens/{address} — carries the
+ * market fields the profile listing lacks. One pair per listed pair on a chain.
+ */
+interface RawPair {
+  chainId?: string;
+  pairAddress?: string;
+  dexId?: string;
+  baseToken?: { address?: string; symbol?: string; name?: string };
+  priceUsd?: string;
+  liquidity?: { usd?: number };
+  volume?: { h24?: number };
+  fdv?: number;
 }
 
 export interface DexScreenerFeedOptions {
@@ -40,7 +58,7 @@ export class DexScreenerFeed implements MarketDataProvider {
   private readonly fetch: FetchLike;
   private readonly baseUrl: string;
   private readonly ttlMs: number;
-  private readonly supportedChains: Set<string>;
+  private readonly supportedChainIds: Set<number>;
   private readonly cache: TtlCache<MarketToken[]>;
 
     constructor(opts: DexScreenerFeedOptions = {}) {
@@ -49,8 +67,11 @@ export class DexScreenerFeed implements MarketDataProvider {
     this.baseUrl = opts.baseUrl ?? DEXSCREENER_DEFAULT_BASE;
     this.ttlMs = opts.ttlMs ?? 60_000;
     this.cache = new TtlCache<MarketToken[]>({ ttlMs: this.ttlMs });
-    this.supportedChains = new Set(
-    (opts.supportedChains ?? ['robinhood', 'bsc', 'base', 'solana']).map((c) => c.toLowerCase())
+    this.supportedChainIds = new Set(
+      // Resolve each supported name to its canonical id; unknown names are dropped.
+      (opts.supportedChains ?? ['robinhood', 'bsc', 'base', 'solana', 'eth'])
+        .map((c) => chainIdFor(c))
+        .filter((id): id is number => id !== undefined)
     );
   }
 
@@ -66,8 +87,59 @@ export class DexScreenerFeed implements MarketDataProvider {
     const cached = this.cache.get(key);
     if (cached) return cached;
     const tokens = await this.fetchProfiles();
-    this.cache.set(key, tokens);
-    return tokens;
+    // I0-2: enrich listed addresses with real market fields (price/liquidity/
+    // volume/fdv) via /latest/dex/tokens — profiles alone carry none, so every
+    // candidate hit the prefilter with volume1hUsd=0 and died at the floor.
+    const enriched = await this.enrichProfiles(tokens);
+    this.cache.set(key, enriched);
+    return enriched;
+  }
+
+  /**
+   * Batch-enrich discovered addresses with market data. The /latest/dex/tokens
+   * endpoint accepts up to 30 comma-separated addresses per call and returns
+   * the pair list with price/liquidity/volume/fdv. Fail-soft: a batch that fails
+   * leaves that slice with its zero fields (the prefilter then rejects them),
+   * never throws and never drops the whole discovery pass.
+   */
+  private async enrichProfiles(profiles: MarketToken[]): Promise<MarketToken[]> {
+    if (profiles.length === 0) return profiles;
+    const out: MarketToken[] = [...profiles];
+    const byAddress = new Map<string, number>();
+    profiles.forEach((p, i) => byAddress.set(p.address.toLowerCase(), i));
+    const addresses = [...byAddress.keys()];
+    const BATCH = 30;
+    for (let s = 0; s < addresses.length; s += BATCH) {
+      const slice = addresses.slice(s, s + BATCH);
+      try {
+        const url = `${this.baseUrl}${DEXSCREENER_TOKEN_PATH}/${slice.join(',')}`;
+        const res = await this.fetch(url);
+        if (!res.ok) continue;
+        const body = (await res.json()) as { pairs?: RawPair[] };
+        const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
+        for (const p of pairs) {
+          const addr = (p.baseToken?.address ?? '').toLowerCase();
+          const idx = byAddress.get(addr);
+          if (idx === undefined) continue;
+          const chainId = chainIdFor(p.chainId);
+          if (chainId === undefined) continue;
+          // Pick the reported pair's best fields (already provider-ranked).
+          out[idx] = {
+            ...out[idx]!,
+            chainId,
+            priceUsd: Number(p.priceUsd) || 0,
+            liquidityUsd: p.liquidity?.usd || 0,
+            volume24hUsd: p.volume?.h24 || 0,
+            fdvUsd: p.fdv || 0,
+            pairAddress: p.pairAddress,
+            dex: p.dexId,
+          };
+        }
+      } catch {
+        // fail-soft: this batch keeps its zero fields; prefilter rejects them.
+      }
+    }
+    return out;
   }
 
   private async fetchProfiles(): Promise<MarketToken[]> {
@@ -85,15 +157,21 @@ export class DexScreenerFeed implements MarketDataProvider {
 
   private normalizeProfile(p: RawProfile): MarketToken | undefined {
     const chainId = chainIdFor(p.chainId);
-    if (chainId === undefined || !this.supportedChains.has(String(p.chainId).toLowerCase())) return undefined;
+    // Fix (I0-2 review): compare against the CANONICAL chain-id, not the raw
+    // DexScreener chainId string. chainIdFor('ethereum')→1, chainIdFor('base')→8453,
+    // but supportedChains held raw names ('bsc','base','solana','robinhood') — so
+    // 'ethereum' candidates (and often RH) were silently DROPPED. Now we test the
+    // resolved id against the supported set by chain-id.
+    if (chainId === undefined) return undefined;
+    if (!this.supportedChainIds.has(chainId)) return undefined;
     if (!p.tokenAddress || !p.symbol) return undefined;
     return {
-    address: p.tokenAddress,
-    chainId,
-    symbol: p.symbol,
-    priceUsd: 0,
-    liquidityUsd: 0,
-    volume24hUsd: 0,
+      address: p.tokenAddress,
+      chainId,
+      symbol: p.symbol,
+      priceUsd: 0,
+      liquidityUsd: 0,
+      volume24hUsd: 0,
     };
   }
 
