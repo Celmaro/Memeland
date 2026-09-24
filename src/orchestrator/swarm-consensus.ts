@@ -297,7 +297,16 @@ export class SwarmConsensusEngine {
         );
 
     // Kernel B — record the outcome so repeated failures trip the circuit breaker.
-    this.registerConsensusOutcome(!passed);
+    // NOTE (2026-09-24, live-log audit): do NOT auto-record normal gate
+    // rejections here. The >=80% floor is an intentional filter — most
+    // candidates legitimately score below it, and with the keyless-feed
+    // discovery tier now delivering 10-16 candidates/cycle, 3 quick rejections
+    // opened the breaker and silently discarded every subsequent candidate for
+    // an hour (observed live: all gate refusals became CIRCUIT_OPEN 0%).
+    // The breaker is for SYSTEM-level failures (provider outage, exception
+    // storm) — trip it explicitly via registerConsensusOutcome(true) from the
+    // caller when the consensus ENGINE itself fails, not on ordinary rejects.
+    // this.registerConsensusOutcome(!passed);
 
     const result: ConsensusResult = {
       passed,

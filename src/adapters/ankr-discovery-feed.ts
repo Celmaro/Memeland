@@ -126,7 +126,7 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
   }
 
   /** eth_getLogs for PairCreated on the factory, last 300 blocks. */
-  private async fetchPairCreated(rpc: string, factory: string, chainId: number): Promise<PairCreatedLog[]> {
+    private async fetchPairCreated(rpc: string, factory: string, _chainId: number): Promise<PairCreatedLog[]> {
     const head = (await this.rpcCall(rpc, 'eth_blockNumber', [])) as string;
     const latest = BigInt(head);
     const fromBlock = `0x${(latest - 300n).toString(16)}`;

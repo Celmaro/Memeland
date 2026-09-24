@@ -38,19 +38,37 @@ describe('Kernel B guard wiring (swarm-guards -> swarm-consensus)', () => {
     expect(res.breakdown.voters ?? res.confidenceScore).toBeDefined();
   });
 
-  it('circuit breaker: three consecutive failures trip the circuit and refuse the next signal as CIRCUIT_OPEN', () => {
-    const swarm = new SwarmConsensusEngine();
-    const fail = () => swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 50 }));
-    fail();
-    fail();
-    fail(); // third failure trips the breaker
-    const res = swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 90 }));
-    expect(res.passed).toBe(false);
-    expect(res.decision?.allowed).toBe(false);
-    if (res.decision && !res.decision.allowed) {
-      expect(res.decision.refusal).toBe(RefusalCode.CIRCUIT_OPEN);
-    }
-  });
+  it('circuit breaker: ordinary gate rejections do NOT trip it (2026-09-24 fix) — a later strong signal is still scored', () => {
+      const swarm = new SwarmConsensusEngine();
+      // 3 ordinary rejects (below the 80% floor) — the old code auto-recorded
+      // these toward the breaker, which opened the circuit after the 3rd and
+      // silently discarded every candidate for an hour. Now they leave the
+      // breaker untouched: a later 90%-confidence signal is scored normally.
+      swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 50 }));
+      swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 50 }));
+      swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 50 }));
+      const res = swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 90 }));
+      expect(res.passed).toBe(true); // scored, not CIRCUIT_OPEN
+      if (res.decision && !res.decision.allowed) {
+        expect(res.decision.refusal).not.toBe(RefusalCode.CIRCUIT_OPEN);
+      }
+    });
+
+    it('circuit breaker: explicit system failures (registerConsensusOutcome(true) x3) trip it and refuse the next signal as CIRCUIT_OPEN', () => {
+      const swarm = new SwarmConsensusEngine();
+      // System-level failures (provider outage / engine exception) trip the
+      // breaker explicitly from the caller — the documented trip path.
+      swarm.registerConsensusOutcome(true);
+      swarm.registerConsensusOutcome(true);
+      swarm.registerConsensusOutcome(true);
+      const res = swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 90 }));
+      expect(res.passed).toBe(false);
+      expect(res.confidenceScore).toBe(0);
+      expect(res.decision?.allowed).toBe(false);
+      if (res.decision && !res.decision.allowed) {
+        expect(res.decision.refusal).toBe(RefusalCode.CIRCUIT_OPEN);
+      }
+    });
 
   it('asymmetric conflict: 1BUY + 2SELL is vetoed as ASYMMETRIC_CONFLICT before scoring', () => {
     const swarm = new SwarmConsensusEngine();
