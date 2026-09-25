@@ -155,12 +155,19 @@ describe('Fresh-pair lane (recency fix)', () => {
     };
   }
 
-  it('freshLane raw pair survives the low fresh floor (would die at mature $50k)', () => {
+  it('freshLane raw pair (zero market data) bypasses volume/liq/mcap — young, not dead', () => {
+    const r = preFilterToken(mkT({ freshLane: true, volume1hUsd: 0, liquidityUsd: 0, marketCapUsd: 0 }), matureCfg as any);
+    // Un-gated on market data (it is younger than the measurement windows);
+    // security fields are null → fail-open per field → passes.
+    expect(r.ok).toBe(true);
+  });
+
+  it('freshLane with SOME volume uses the low fresh floor, not the mature $50k', () => {
     const r = preFilterToken(mkT({ freshLane: true, volume1hUsd: 8000, liquidityUsd: 12000, marketCapUsd: 200000 }), matureCfg as any);
     expect(r.ok).toBe(true);
   });
 
-  it('freshLane with volume below even the fresh floor still rejects (fail-closed)', () => {
+  it('freshLane below even the fresh floor still rejects (fail-closed)', () => {
     const r = preFilterToken(mkT({ freshLane: true, volume1hUsd: 500, liquidityUsd: 12000, marketCapUsd: 200000 }), matureCfg as any);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('volume 1h $0.5k < $3k');

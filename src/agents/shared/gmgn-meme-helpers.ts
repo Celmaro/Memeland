@@ -132,10 +132,14 @@ export function preFilterToken(
   opts: { securityGate?: SecurityGateOptions } = {}
 ): { ok: boolean; reason: string } {
   const fail = (reason: string) => ({ ok: false as const, reason: `⛔ ${t.symbol}: ${reason}` });
-  // Fresh-pair lane (recency fix): raw new-pair candidates (ankr PairCreated /
-  // gecko new_pools) carry zero market data at birth. They pass the volume gate
-  // at the LOW fresh floor so fresh launches survive prefilter and get
-  // re-checked by later cycles — instead of dying at $25k volume unseen.
+  // Fresh-pair lane (recency fix): a raw PairCreated/new_pool pair is younger
+  // than the market-data measurement windows — it legitimately has $0 volume /
+  // $0 liquidity / $0 mcap at birth, which is NOT the same as "dead". Fresh
+  // pairs with zero market data bypass the volume/liq/mcap gates (still fully
+  // security-gated below — fail-closed on what matters) and are re-checked by
+  // later cycles once they accumulate data. Pairs with SOME data use the low
+  // fresh volume floor instead of the mature $25k floor.
+  const isFreshAtBirth = t.freshLane === true && t.volume1hUsd === 0 && t.liquidityUsd === 0 && t.marketCapUsd === 0;
   const volumeFloor = t.freshLane ? config.minFreshVolume1hUsd : config.minVolume1hUsd;
   // I1-4: a source that failed to supply market data must be distinguishable
   // from a real zero-volume token. Fail-closed either way, but attribute the
@@ -158,13 +162,18 @@ export function preFilterToken(
     if (ageHours < config.minAgeHours) return fail(`age ${ageHours.toFixed(1)}h < ${config.minAgeHours}h.`);
   }
   // Real 1-HOUR volume (not 24h) — the token must be active RIGHT NOW, not yesterday.
-  // Fresh-pair lane passes at the low fresh floor (raw pairs have zero volume at birth).
-  if (t.volume1hUsd < volumeFloor) return fail(`volume 1h $${(t.volume1hUsd/1000).toFixed(1)}k < $${volumeFloor/1000}k.`);
-  if (t.liquidityUsd < config.minLiquidityUsd) return fail(`liq $${(t.liquidityUsd/1000).toFixed(1)}k < $${config.minLiquidityUsd/1000}k.`);
-  // Market cap gate (fail-closed: 0/unknown = reject) — must be above the threshold.
-  if (t.marketCapUsd < config.minMarketCapUsd) return fail(`market cap $${(t.marketCapUsd/1000).toFixed(1)}k < $${config.minMarketCapUsd/1000}k.`);
+  // Fresh-at-birth pairs bypass the volume/liq/mcap gates (younger than the
+  // measurement windows, $0 is expected not dead); the security gate below is
+  // ALWAYS enforced — fail-closed on what matters, recency on what's fresh.
+  if (!isFreshAtBirth) {
+    if (t.volume1hUsd < volumeFloor) return fail(`volume 1h $${(t.volume1hUsd/1000).toFixed(1)}k < $${volumeFloor/1000}k.`);
+    if (t.liquidityUsd < config.minLiquidityUsd) return fail(`liq $${(t.liquidityUsd/1000).toFixed(1)}k < $${config.minLiquidityUsd/1000}k.`);
+    // Market cap gate (fail-closed: 0/unknown = reject) — must be above the threshold.
+    if (t.marketCapUsd < config.minMarketCapUsd) return fail(`market cap $${(t.marketCapUsd/1000).toFixed(1)}k < $${config.minMarketCapUsd/1000}k.`);
+  }
   // GMGN security gate (honeypot, tax, rug, insider, top-10, wash) — shared
-  // with the LP agent so security thresholds stay in one source.
+  // with the LP agent so security thresholds stay in one source. Runs for
+  // fresh pairs too — a honeypot is a honeypot at birth.
   const sec = securityGateToken(t, opts.securityGate);
   if (!sec.ok) return fail(sec.reasons.join(' '));
   // Total fees gate OPTIONAL: only checked when minTotalFeeUsd > 0. 0 = off (alpha early;
