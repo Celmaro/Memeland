@@ -43,6 +43,7 @@ export interface RobinhoodScreeningConfig {
   maxRatTraderRate: number;  // 0.3
   maxTop10HolderRate: number;// 0.4
   minTotalFeeUsd: number;    // 500 — active fee gate: tokens without organic activity (unrecorded fee) rejected
+  minFreshVolume1hUsd: number; // 3000 — fresh-pair lane floor (ankr/gecko raw pairs)
   passThreshold: number;     // 80
   signalTypes: number[];     // smart-money/KOL/CTO/price events (overlay boost)
   rankLimit: number;         // 100 (trending, 1h)
@@ -63,6 +64,7 @@ const DEFAULT_CONFIG: RobinhoodScreeningConfig = {
   maxRatTraderRate: 0.3,
   maxTop10HolderRate: 0.4,
   minTotalFeeUsd: 500,
+  minFreshVolume1hUsd: 3000,
   passThreshold: 80,
   // 6 PriceUp, 7 PriceATH, 8 McpKeyLevel, 11 Cto, 12 SmartDegenBuy, 13/19 PlatformCall, 20 KOLBuy
   signalTypes: [6, 7, 8, 11, 12, 13, 19, 20],

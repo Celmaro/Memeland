@@ -25,6 +25,11 @@ export interface MarketToken {
    * otherwise a provider outage looks like "no candidates have volume".
    */
   sourceUnavailable?: boolean;
+  /**
+   * Fresh-pair lane (see GMGNRawToken.freshLane). Market providers can mark
+   * raw new-pair discoveries so the prefilter uses the fresh floor.
+   */
+  freshLane?: boolean;
 }
 
 export type MarketSort = 'volume24hUsd' | 'liquidityUsd' | 'fdvUsd';

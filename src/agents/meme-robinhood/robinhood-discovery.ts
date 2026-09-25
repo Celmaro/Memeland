@@ -64,6 +64,7 @@ export function normalizeDexToken(
     // zero-volume observation. Carry the unavailable flag through so the
     // prefilter can distinguish "feed down" from "token trades nothing".
     sourceUnavailable: t.sourceUnavailable ?? undefined,
+    freshLane: t.freshLane ?? undefined,
     // Keyless feeds (dexscreener/dexpaprika) only report 24h volume —
     // no volume_1h field. Without this fallback the prefilter floor
     // (minVolume1hUsd) would reject every candidate as volume 1h $0.0k,
