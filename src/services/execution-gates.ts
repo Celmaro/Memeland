@@ -188,15 +188,34 @@ export function quoteSinglePayload(tokenOut: string, fee = 3000, amountIn = 1000
 
 // ── Q07/Q08/Q13/Q11 providers (wired into executeMemeBuy via the live call sites) ──
 
-/** Q07 multi-constraint sizer — clamps to the binding constraint, refuses below floor. */
+/** Q07 multi-constraint sizer — clamps to the binding constraint, refuses below floor.
+ *  #5 edge→sizing: the caller passes calibrated confidence + liquidity and the
+ *  sizer SCALES DOWN weak conviction / thin depth inside the risk envelope —
+ *  it never raises size beyond maxNotionalUsd. Fail-closed: missing confidence
+ *  or liquidity sizes at the floor multiplier (conservative). */
 export function gateSizer() {
   const maxNotionalUsd = envNum('MAX_NOTIONAL_USD', 2000);
   const minUsd = envNum('MIN_TRADE_USD', 0);
   return {
-    clamp(desiredUsd: number): { allowed: boolean; amountUsd: number; reason?: string } {
-      const r = sizePosition(desiredUsd, { maxNotionalUsd, minUsd });
+    /**
+     * @param desiredUsd base size the caller computed (before edge scaling)
+     * @param confidence 0-100 calibrated confidence (>=80 at the gate); <80 → scaled down
+     * @param liquidityUsd pool liquidity — thin pools size down toward min
+     */
+    clamp(desiredUsd: number, opts: { confidence?: number; liquidityUsd?: number } = {}): { allowed: boolean; amountUsd: number; reason?: string } {
+      // Edge scale: confidence 80 → 0.5x, 95 → 1.0x, monotonic; floor 0.5 below 80.
+      const conf = typeof opts.confidence === 'number' && Number.isFinite(opts.confidence) ? opts.confidence : 0;
+      const confScale = Math.max(0.5, Math.min(1.0, (conf - 70) / 25));
+      // Liquidity scale: >= $50k full, linear down to min $5k → 0.5x.
+      const liq = typeof opts.liquidityUsd === 'number' && Number.isFinite(opts.liquidityUsd) ? opts.liquidityUsd : 0;
+      const liqScale = liq >= 50_000 ? 1.0 : liq <= 5_000 ? 0.5 : 0.5 + ((liq - 5_000) / 45_000) * 0.5;
+      const scaled = Math.round(desiredUsd * confScale * liqScale);
+      const r = sizePosition(scaled, { maxNotionalUsd, minUsd });
       if (r.refused) return { allowed: false, amountUsd: 0, reason: r.reason || `constraint ${r.constraint}` };
-      return { allowed: true, amountUsd: r.sizeUsd };
+      const reasons: string[] = [];
+      if (confScale < 1.0) reasons.push(`edge scale ${confScale.toFixed(2)} (confidence ${Math.round(conf)})`);
+      if (liqScale < 1.0) reasons.push(`liq scale ${liqScale.toFixed(2)} (depth $${(liq / 1000).toFixed(0)}k)`);
+      return { allowed: true, amountUsd: r.sizeUsd, reason: reasons.length > 0 ? reasons.join(', ') : undefined };
     },
   };
 }

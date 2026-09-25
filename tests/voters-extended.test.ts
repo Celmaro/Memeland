@@ -129,20 +129,20 @@ describe('existing voters exports remain intact and new ids are weighted', () =>
     expect(typeof rubricVote).toBe('function');
   });
 
-  it('registers the new voter ids in VOTER_IDS and DEFAULT_VOTER_WEIGHTS', () => {
-    for (const id of ['wallet', 'convergence', 'rubric'] as const) {
+  it('registers the consolidated voter ids in VOTER_IDS and DEFAULT_VOTER_WEIGHTS', () => {
+    for (const id of ['momentum', 'flow', 'security', 'sentiment', 'critic'] as const) {
       expect(VOTER_IDS).toContain(id);
       expect(typeof DEFAULT_VOTER_WEIGHTS[id]).toBe('number');
     }
   });
 
-  it('aggregateVoterScores still weights the new voter ids', () => {
-    // If wallet were not weighted, {quant:100, wallet:0} would collapse to quant alone => 100.
-    const { score, breakdown } = aggregateVoterScores({ quant: 100, wallet: 0 });
+  it('aggregateVoterScores still weights the consolidated voter ids', () => {
+    // If flow were not weighted, {momentum:100, flow:0} would collapse to momentum alone => 100.
+    const { score, breakdown } = aggregateVoterScores({ momentum: 100, flow: 0 });
     expect(score).toBeLessThan(100);
-    expect(breakdown['wallet']).toBe(0);
-    // Lone new voters aggregate to their own clamped score.
-    expect(aggregateVoterScores({ convergence: 80 }).score).toBe(80);
-    expect(aggregateVoterScores({ rubric: 60 }).score).toBe(60);
+    expect(breakdown['flow']).toBe(0);
+    // Lone consolidated voters aggregate to their own clamped score.
+    expect(aggregateVoterScores({ flow: 80 }).score).toBe(80);
+    expect(aggregateVoterScores({ critic: 60 }).score).toBe(60);
   });
 });

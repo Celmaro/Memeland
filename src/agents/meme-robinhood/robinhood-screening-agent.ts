@@ -4,6 +4,7 @@ import { chainIdFor, type MarketDataProvider } from '../../adapters/market-data-
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
 import { globalRugScoring } from '../../services/rug-scoring.js';
+import { antiFoolingRisk, antiFoolingPenalties } from '../../services/anti-fooling.js';
 import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
@@ -18,7 +19,7 @@ import { DexScreenerBoostsFeed } from '../../adapters/dexscreener-boosts.js';
 import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
-  type VoterOpinion, type VoterContext, scoresFromOpinions,
+  type VoterOpinion, type VoterContext, consolidateOpinions,
   whaleVote, securityVote, walletVote, rubricVote,
   reputationAwareSecurityVote, reputationAwareWalletVote, reputationContextFromToken,
   stickyQuantVote, ownerDedupedConvergenceVote,
@@ -655,6 +656,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             }
             const sellCheck = await this.sellability.check(t.sellTrade ?? { liquidityUsd: t.liquidityUsd });
             if (!sellCheck.sellable) securityPenalties.push(...sellCheck.reasons);
+            // #3 deterministic anti-fooling: cross-source contradictions the
+            // heuristics wouldn't flag alone (sellability contradiction, launch-
+            // bundle forensics, honeypot deny-list). fooled → hard security demerit.
+            const fooling = antiFoolingRisk(t, {
+              sellable: sellCheck.sellable,
+              sellReasons: sellCheck.reasons,
+              claimedLiquidityUsd: t.liquidityUsd ?? undefined,
+            });
+            securityPenalties.push(...antiFoolingPenalties(fooling));
             const baseCtx: VoterContext = {
               token: t,
               chain,
@@ -733,7 +743,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                 opinions.push({ voter: 'critic', score: 50, reasons: ['critic error — neutral'] });
               }
             }
-            payload.voterScores = scoresFromOpinions(opinions);
+            payload.voterScores = consolidateOpinions(opinions);
           }
 
           const signal: RobinhoodSignal = { token: t, signalType: det.type, confidence, reasons: det.reasons };

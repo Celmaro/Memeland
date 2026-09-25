@@ -17,16 +17,16 @@ import { DecisionCache } from '../src/services/decision-cache.js';
 
 // ── voters.ts ──────────────────────────────────────────────────────────────
 
-describe('7-voter swarm aggregation', () => {
-  it('weights average only the voters that rendered a score (missing voters ignored, never 0)', () => {
-    const { score, breakdown } = aggregateVoterScores({ quant: 100, security: 100, ml: 50 });
-    // weights: quant .1695 + security .2119 + ml .1271 = .5085 → (16.95 + 21.19 + 6.36)/.5085 = 87.50 → 88
-    expect(score).toBe(88);
+describe('5-slot swarm aggregation (consolidated)', () => {
+  it('weights average only the slots that rendered (missing ignored, never 0)', () => {
+    const { score, breakdown } = aggregateVoterScores({ momentum: 100, security: 100, flow: 50 });
+    // weights: momentum .30 + security .25 + flow .20 = .75 → (30 + 25 + 10)/.75 = 86.67 → 87
+    expect(score).toBe(87);
     expect(breakdown['sentiment']).toBeUndefined();
   });
 
   it('clamps scores to 0-100', () => {
-    const { score } = aggregateVoterScores({ quant: 500, security: -10 });
+    const { score } = aggregateVoterScores({ momentum: 500, security: -10 });
     expect(score).toBeGreaterThanOrEqual(0);
     expect(score).toBeLessThanOrEqual(100);
   });
@@ -338,7 +338,7 @@ describe('Swarm consensus voter path', () => {
   it('re-derives confidence from the weighted voter average when voterScores present', () => {
     const res = engine.evaluateSignal({
       ...baseCandidate,
-      voterScores: { quant: 90, ml: 85, security: 100, sentiment: 80, whale: 70, regime: 60, critic: 85 },
+      voterScores: { momentum: 90, flow: 80, security: 100, sentiment: 80, critic: 85 },
     });
     expect(res.passed).toBe(true);
     expect(res.confidenceScore).toBeGreaterThanOrEqual(80);
@@ -346,10 +346,10 @@ describe('Swarm consensus voter path', () => {
     expect(res.reason).toContain('Swarm');
   });
 
-  it('voter-weighted confidence below 80 rejects even when quant is 100 (swarm has final word)', () => {
+  it('voter-weighted confidence below 80 rejects even when momentum is 100 (swarm has final word)', () => {
     const res = engine.evaluateSignal({
       ...baseCandidate,
-      voterScores: { quant: 100, ml: 10, security: 0, sentiment: 20, whale: 10, regime: 5, critic: 10 },
+      voterScores: { momentum: 100, flow: 20, security: 30, sentiment: 20, critic: 10 },
     });
     expect(res.passed).toBe(false);
     expect(res.confidenceScore).toBeLessThan(80);
