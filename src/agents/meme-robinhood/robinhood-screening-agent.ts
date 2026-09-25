@@ -379,36 +379,40 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   }
 
   /**
-   * Fetch real market data for a single fresh-pair address from DexScreener
-   * /latest/dex/tokens/{address}. Fail-soft: null on any transport/parse error —
-   * the fresh pair then keeps its zeros and the volume-ranked feeds re-surface
-   * it later. Keyless; 30-address batch is what the dexscreener feed uses, we
-   * fetch per-address here because fresh pairs are few per cycle.
+   * Batch-fetch real market data for fresh-pair addresses from DexScreener
+   * /latest/dex/tokens/{addresses} (up to 30 comma-separated per call — the
+   * endpoint's documented batch limit). Fail-soft per batch: a failed call
+   * leaves that slice unenriched (null) so fresh pairs keep their zeros and
+   * the volume-ranked feeds re-surface them later. Keyless.
    */
-  private async freshPairMarketData(
-    chain: string,
-    address: string,
-  ): Promise<{ priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string } | null> {
-    if (!address) return null;
-    try {
-      const url = `https://api.dexscreener.com/latest/dex/tokens/${address}`;
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const body = (await res.json()) as { pairs?: Array<{ chainId?: string; priceUsd?: string; liquidity?: { usd?: number }; volume?: { h24?: number }; baseToken?: { symbol?: string } }> };
-      const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
-      if (pairs.length === 0) return null;
-      // Pick the pair on this chain (or the first with any data).
-      const pair = pairs.find((p) => p.chainId === chain) ?? pairs[0];
-      if (!pair) return null;
-      return {
-        priceUsd: pair.priceUsd ? Number(pair.priceUsd) || undefined : undefined,
-        liquidityUsd: pair.liquidity?.usd,
-        volume24hUsd: pair.volume?.h24,
-        symbol: pair.baseToken?.symbol,
-      };
-    } catch {
-      return null; // fail-soft: fresh pair stays zero-data, re-surfaced later
+  private async batchFreshMarketData(
+    addresses: string[],
+  ): Promise<Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string }>> {
+    const out = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string }>();
+    const uniq = [...new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean))];
+    const BATCH = 30;
+    for (let s = 0; s < uniq.length; s += BATCH) {
+      const slice = uniq.slice(s, s + BATCH);
+      try {
+        const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${slice.join(',')}`);
+        if (!res.ok) continue;
+        const body = (await res.json()) as { pairs?: Array<{ chainId?: string; priceUsd?: string; liquidity?: { usd?: number }; volume?: { h24?: number }; baseToken?: { address?: string; symbol?: string } }> };
+        const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
+        for (const pair of pairs) {
+          const addr = (pair.baseToken?.address ?? '').toLowerCase();
+          if (!addr || !slice.includes(addr)) continue;
+          out.set(addr, {
+            priceUsd: pair.priceUsd ? Number(pair.priceUsd) || undefined : undefined,
+            liquidityUsd: pair.liquidity?.usd,
+            volume24hUsd: pair.volume?.h24,
+            symbol: pair.baseToken?.symbol,
+          });
+        }
+      } catch {
+        // fail-soft: this slice stays unenriched; re-surfaced later
+      }
     }
+    return out;
   }
 
   /** Detect signal type + deterministic confidence (0-100) */
@@ -530,6 +534,23 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   }
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
+        // Fresh-pair enrichment (batched, gap fix): collect every freshLane
+        // candidate that carries zero market data, batch-fetch real
+        // price/liquidity/volume from DexScreener /latest/dex/tokens (30 per
+        // call), and hydrate them BEFORE the loop so fresh discoveries actually
+        // score momentum in the same cycle instead of dying data-less. The
+        // prefilter bypass still sees zeros (fresh-at-birth semantics); once
+        // enriched, the candidate competes on real numbers.
+        const freshEnrichMap = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string }>();
+        const freshZero = allCandidates.filter((t) => t.freshLane === true && t.volume1hUsd === 0 && t.liquidityUsd === 0 && t.marketCapUsd === 0);
+        if (freshZero.length > 0) {
+          try {
+            const batched = await this.batchFreshMarketData(freshZero.map((t) => t.address));
+            for (const [addr, data] of batched) freshEnrichMap.set(addr, data);
+          } catch (enrichErr: any) {
+            console.warn(`[FRESH LANE] batch enrichment failed (fresh pairs stay zero-data): ${enrichErr.message}`);
+          }
+        }
         // #3 fresh-pair promotion: track freshLane candidates across cycles and
         // log the ones that matured (volume/liquidity accumulated) — fresh
         // discoveries become visible instead of sitting in the lane silently.
@@ -540,8 +561,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               console.log(`[FRESH LANE] ${m.symbol} (${m.chain}) matured: vol1h $${((m.volume1hUsd ?? 0) / 1000).toFixed(1)}k liq $${((m.liquidityUsd ?? 0) / 1000).toFixed(1)}k — now eligible at the mature floor.`);
             }
           }
+          // NOTE: `active` is the GLOBAL watchlist size (all chains), not this
+          // chain's count — log it as the global total so operators don't read
+          // "robinhood: N" as an RH-specific number (RH has no factory feed).
           if (active > 0 && matured.length === 0) {
-            console.log(`[FRESH LANE] ${chain}: ${active} fresh pair(s) tracked, ${matured.length} matured this cycle.`);
+            console.log(`[FRESH LANE] total ${active} fresh pair(s) across all chains, ${matured.length} matured this cycle.`);
           }
         } catch (watchErr: any) {
           console.warn(`[FRESH LANE] watchlist failed (non-fatal): ${watchErr.message}`);
@@ -573,27 +597,21 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           if (!filter.ok) { console.log(`[MEME AGENT] ${filter.reason}`); continue; }
           // Fresh-pair enrichment (gap fix): a freshLane candidate passed the
           // low/bypass floor but carries ZERO market data — it can never score
-          // momentum or mature that way. Batch-fetch real price/liquidity/volume
-          // from DexScreener /latest/dex/tokens so fresh discoveries actually
-          // compete for emit instead of dying data-less (observed live: 213
-          // tracked, 0 matured — the volume-ranked feeds only surface tokens
-          // AFTER they have volume, so nothing ever promoted them).
+          // momentum or mature that way. Hydrate from the batched pre-pass map
+          // (30 addresses/call) so fresh discoveries actually compete for emit
+          // instead of dying data-less (observed live: 213 tracked, 0 matured).
           if (t.freshLane === true) {
-            try {
-              const fresh = await this.freshPairMarketData(t.chain, t.address);
-              if (fresh) {
-                t.priceUsd = fresh.priceUsd ?? t.priceUsd;
-                t.liquidityUsd = fresh.liquidityUsd ?? t.liquidityUsd;
-                const vol24 = fresh.volume24hUsd ?? 0;
-                t.volume24hUsd = vol24;
-                t.volume1hUsd = vol24 > 0 ? vol24 / 24 : t.volume1hUsd;
-                if (fresh.symbol) t.symbol = fresh.symbol;
-                if (t.volume1hUsd >= this.config.minFreshVolume1hUsd) {
-                  console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k`);
-                }
+            const fresh = freshEnrichMap.get(t.address.toLowerCase());
+            if (fresh) {
+              t.priceUsd = fresh.priceUsd ?? t.priceUsd;
+              t.liquidityUsd = fresh.liquidityUsd ?? t.liquidityUsd;
+              const vol24 = fresh.volume24hUsd ?? 0;
+              t.volume24hUsd = vol24;
+              t.volume1hUsd = vol24 > 0 ? vol24 / 24 : t.volume1hUsd;
+              if (fresh.symbol) t.symbol = fresh.symbol;
+              if (t.volume1hUsd >= this.config.minFreshVolume1hUsd) {
+                console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k`);
               }
-            } catch (enrichErr: any) {
-              console.warn(`[FRESH LANE] enrichment failed for ${t.address.slice(0, 10)}: ${enrichErr.message}`);
             }
           }
           // Security audit — GoPlus FIRST on EVM chains (keyless, no 429 wall):
