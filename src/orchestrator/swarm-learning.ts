@@ -25,17 +25,13 @@ export interface SwarmWeights {
   twitterWeight: number;    // default 0.20
 }
 
-/** Baseline voter weights — mirror of DEFAULT_VOTER_WEIGHTS in voters.ts. */
+/** Baseline voter weights — mirror of DEFAULT_VOTER_WEIGHTS in voters.ts (5 consolidated slots). */
 const BASE_VOTER_WEIGHTS: Record<VoterId, number> = {
-  quant: 0.2,
-  ml: 0.15,
+  momentum: 0.30,
+  flow: 0.20,
   security: 0.25,
   sentiment: 0.15,
-  whale: 0.1,
-  critic: 0.1,
-  wallet: 0.08,
-  convergence: 0.06,
-  rubric: 0.09,
+  critic: 0.10,
 };
 
 const LEARNING_DEFAULTS = {
@@ -217,9 +213,9 @@ export class SwarmLearningEngine {
   }
 
   /**
-   * Bridge recalibrated learning weights into the 7-voter aggregation. Maps the
-   * learning emphasis back onto its corresponding voter (smartMoney→whale,
-   * liquidity→quant, devHolding→security, twitter→sentiment), bounded to a
+   * Bridge recalibrated learning weights into the 5-slot aggregation. Maps the
+   * learning emphasis back onto its corresponding slot (smartMoney→flow,
+   * liquidity→momentum, devHolding→security, twitter→sentiment), bounded to a
    * ±30% swing around baseline and renormalized to sum ~1.0 so it can never
    * destabilize the >=80 gate.
    */
@@ -228,11 +224,10 @@ export class SwarmLearningEngine {
     const swing = (val: number, base: number): number =>
       Math.max(0.7, Math.min(1.3, base > 0 ? val / base : 1));
     const adj: Partial<Record<VoterId, number>> = {
-      quant: BASE_VOTER_WEIGHTS.quant * swing(w.liquidityWeight, LEARNING_DEFAULTS.liquidity),
-      ml: BASE_VOTER_WEIGHTS.ml,
+      momentum: BASE_VOTER_WEIGHTS.momentum * swing(w.liquidityWeight, LEARNING_DEFAULTS.liquidity),
+      flow: BASE_VOTER_WEIGHTS.flow * swing(w.smartMoneyWeight, LEARNING_DEFAULTS.smartMoney),
       security: BASE_VOTER_WEIGHTS.security * swing(w.devHoldingWeight, LEARNING_DEFAULTS.devHolding),
       sentiment: BASE_VOTER_WEIGHTS.sentiment * swing(w.twitterWeight, LEARNING_DEFAULTS.twitter),
-      whale: BASE_VOTER_WEIGHTS.whale * swing(w.smartMoneyWeight, LEARNING_DEFAULTS.smartMoney),
       critic: BASE_VOTER_WEIGHTS.critic,
     };
     const out = {} as Record<VoterId, number>;

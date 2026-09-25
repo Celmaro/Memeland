@@ -274,6 +274,47 @@ export class SwarmConsensusEngine {
       }
     }
 
+    // Arch-3 consolidation (#1): SECURITY IS A HARD GATE, not just a vote. A
+    // finalist whose security voter fell below 70 (penalties: rug risk, holder
+    // concentration, bot risk, dev-closed, sellability failure) is refused
+    // BEFORE any weighted-average math — hype can never trade off against
+    // safety at the final gate.
+    const securityHardFloor = 70;
+    const securityVoteScore = voterBreakdown?.security ?? (candidate.securityAuditPassed ? 100 : 0);
+    if (securityVoteScore < securityHardFloor) {
+      const id = `CONSENSUS_${candidate.domain}_${symbolKey}_SECURITY_${Date.now()}`;
+      const result: ConsensusResult = {
+        passed: false,
+        confidenceScore: Math.round(securityVoteScore),
+        decision: refuseDecision(
+          id,
+          RefusalCode.SECURITY,
+          `Security hard-gate: security vote ${Math.round(securityVoteScore)} < ${securityHardFloor}.`,
+          [{ id: 'securityHardGate', passed: false, reason: `security vote ${Math.round(securityVoteScore)} < ${securityHardFloor}` }],
+        ),
+        breakdown: { quantScore, catalystScore, securityScore: Math.round(securityVoteScore), reputationMultiplier, ...(voterBreakdown ? { voters: voterBreakdown } : {}) },
+        reason: `🛑 **Security Gate:** security vote ${Math.round(securityVoteScore)} < ${securityHardFloor} — refused before consensus averaging.`,
+      };
+      if (this.stateStore) {
+        this.stateStore.appendSignalLedger({
+          id: `SIG_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          timestamp: new Date().toISOString(),
+          sourceAgent: candidate.domain,
+          domain: candidate.domain,
+          symbol: candidate.symbol,
+          contractAddress: candidate.contractAddress || '',
+          quantScore,
+          catalystScore,
+          securityScore: Math.round(securityVoteScore),
+          totalConfidence: Math.round(securityVoteScore),
+          passed: false,
+          reason: result.reason,
+          rawPayloadJson: JSON.stringify(candidate),
+        });
+      }
+      return result;
+    }
+
     // Single flat 80% quorum floor (regime voter removed — no edge; the floor
     // is a constant, never regime-aware).
     const floor = Math.round(CONSENSUS_FLOOR * 100);

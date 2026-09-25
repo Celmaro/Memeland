@@ -20,28 +20,32 @@ import { flowConvergenceScore, type BuyEvent, type FlowConvergenceConfig } from 
 import { securityMetricFactors, computeRubric } from '../services/risk-rubric.js';
 import type { DecisionCache } from '../services/decision-cache.js';
 
-export type VoterId = 'quant' | 'ml' | 'security' | 'sentiment' | 'whale' | 'critic' | 'wallet' | 'convergence' | 'rubric';
+export type VoterId = 'momentum' | 'flow' | 'security' | 'sentiment' | 'critic';
 
-export const VOTER_IDS: VoterId[] = ['quant', 'ml', 'security', 'sentiment', 'whale', 'critic', 'wallet', 'convergence', 'rubric'];
+export const VOTER_IDS: VoterId[] = ['momentum', 'flow', 'security', 'sentiment', 'critic'];
 
 /**
- * Default relative weights (sum ≈ 1.0). Security carries the most weight —
- * consistent with the fail-closed ethos.
+ * Arch-3 consolidated weights (5 slots, sum ≈ 1.0). Security now carries the
+ * most weight in the AVERAGE, but it is ALSO a hard pre-gate in swarm-consensus
+ * (securityScore < 70 → refuse) so hype can never trade off against safety at
+ * the final gate. Flow = whale+wallet+convergence merged; momentum = quant+ml.
  */
 export const DEFAULT_VOTER_WEIGHTS: Record<VoterId, number> = {
-  quant: 0.1695,
-  ml: 0.1271,
-  security: 0.2119,
-  sentiment: 0.1271,
-  whale: 0.0847,
-  critic: 0.0847,
-  wallet: 0.0677,
-  convergence: 0.0509,
-  rubric: 0.0763,
+  momentum: 0.30,
+  flow: 0.20,
+  security: 0.25,
+  sentiment: 0.15,
+  critic: 0.10,
 };
 
 export interface VoterOpinion {
-  voter: VoterId;
+  /**
+   * Fine-grained voter id (quant/ml/whale/wallet/convergence/rubric/security/
+   * sentiment/critic). Emitters still produce these; consolidateOpinions()
+   * maps them into the 5 gate slots (momentum/flow/security/sentiment/critic)
+   * before the swarm average runs.
+   */
+  voter: string;
   /** 0-100. Neutral = 50 (no information), never fabricated. */
   score: number;
   /** Relative weight in the consensus average; falls back to DEFAULT_VOTER_WEIGHTS. */
@@ -232,10 +236,38 @@ export function whaleVote(
   return { voter: 'whale', score: capped, reasons };
 }
 
-/** Build a full VoterScores map from opinions that actually rendered. */
-export function scoresFromOpinions(opinions: VoterOpinion[]): VoterScores {
-  const out: VoterScores = {};
+/** Build a full VoterScores map from opinions that actually rendered (fine-grained keys). */
+export function scoresFromOpinions(opinions: VoterOpinion[]): Record<string, number> {
+  const out: Record<string, number> = {};
   for (const o of opinions) out[o.voter] = o.score;
+  return out;
+}
+
+/**
+ * Arch-3 consolidation (#4): map the fine-grained voter opinions into the 5
+ * gate slots. momentum = quant+ml blended; flow = whale+wallet+convergence
+ * blended; security = security (also a hard pre-gate); sentiment = sentiment;
+ * critic = critic + rubric blended. Only rendered slots appear — missing stays
+ * missing (aggregate ignores absent voters, never treats them as 0).
+ */
+export function consolidateOpinions(opinions: VoterOpinion[]): Partial<Record<VoterId, number>> {
+  const raw = scoresFromOpinions(opinions);
+  const pick = (...ids: string[]): number | undefined => {
+    const present = ids.map((id) => raw[id]).filter((s) => typeof s === 'number' && Number.isFinite(s));
+    if (present.length === 0) return undefined;
+    return Math.round(present.reduce((a, b) => a + b, 0) / present.length);
+  };
+  const out: Partial<Record<VoterId, number>> = {};
+  const momentum = pick('quant', 'ml');
+  const flow = pick('whale', 'wallet', 'convergence');
+  const security = raw['security'];
+  const sentiment = raw['sentiment'];
+  const critic = pick('critic', 'rubric');
+  if (momentum !== undefined) out.momentum = momentum;
+  if (flow !== undefined) out.flow = flow;
+  if (typeof security === 'number') out.security = security;
+  if (typeof sentiment === 'number') out.sentiment = sentiment;
+  if (critic !== undefined) out.critic = critic;
   return out;
 }
 
