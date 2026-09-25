@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { goPlusAuditGate } from '../src/agents/shared/gmgn-meme-helpers.js';
+import { preFilterToken } from '../src/agents/shared/gmgn-meme-helpers.js';
 import { BytecodeScanner } from '../src/services/bytecode-scanner.js';
 import { AnkrDiscoveryFeed, PAIR_CREATED_TOPIC0, decodePairCreated, FACTORY_ADDRESSES } from '../src/adapters/ankr-discovery-feed.js';
 import { RPCFailoverManager } from '../src/services/rpc-failover.js';
@@ -121,6 +122,54 @@ describe('decodePairCreated (B4 decode fixture)', () => {
       data: '0x', // no pair word
     } as any);
     expect(d).toBeNull();
+  });
+});
+
+describe('Fresh-pair lane (recency fix)', () => {
+  const matureCfg = {
+    minVolume1hUsd: 50000,
+    minLiquidityUsd: 10000,
+    minMarketCapUsd: 100000,
+    minAgeHours: 0,
+    maxRugRatio: 0.3,
+    maxRatTraderRate: 0.3,
+    maxTop10HolderRate: 0.4,
+    minTotalFeeUsd: 0,
+    minFreshVolume1hUsd: 3000,
+  };
+
+  function mkT(overrides: Record<string, unknown>): any {
+    return {
+      chain: 'bsc', address: '0xF', symbol: 'F', name: 'F', priceUsd: 0, marketCapUsd: 0,
+      volume24hUsd: 0, volume1hUsd: 0, liquidityUsd: 0, buys: 0, sells: 0, swaps: 0,
+      holderCount: 0, top10HolderRate: null, devTeamHoldRate: null, creatorClose: false,
+      creatorTokenStatus: null, smartDegenCount: 0, renownedCount: 0, bundlerRate: null,
+      ratTraderAmountRate: null, rugRatio: null, isWashTrading: false, isHoneypot: null,
+      ctoFlag: false, renouncedMint: false, renouncedFreeze: false, creationTimestamp: null,
+      openTimestamp: null, priceChange1m: null, priceChange5m: null, priceChange1h: null,
+      visitingCount: 0, squareMentions: 0, twitterRenameCount: 0, twitterDelPostCount: 0,
+      twitterCreateTokenCount: 0, buyTax: null, sellTax: null, dexscrBoostFee: 0,
+      dexscrAd: false, totalFeeNative: null, exchange: null, launchpadPlatform: null,
+      launchpadStatus: null, progress: null, source: 'ankr',
+      ...overrides,
+    };
+  }
+
+  it('freshLane raw pair survives the low fresh floor (would die at mature $50k)', () => {
+    const r = preFilterToken(mkT({ freshLane: true, volume1hUsd: 8000, liquidityUsd: 12000, marketCapUsd: 200000 }), matureCfg as any);
+    expect(r.ok).toBe(true);
+  });
+
+  it('freshLane with volume below even the fresh floor still rejects (fail-closed)', () => {
+    const r = preFilterToken(mkT({ freshLane: true, volume1hUsd: 500, liquidityUsd: 12000, marketCapUsd: 200000 }), matureCfg as any);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('volume 1h $0.5k < $3k');
+  });
+
+  it('mature (non-fresh) token still needs the mature $50k floor — no recency bypass', () => {
+    const r = preFilterToken(mkT({ freshLane: undefined, volume1hUsd: 8000, liquidityUsd: 12000, marketCapUsd: 200000 }), matureCfg as any);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('volume 1h $8.0k < $50k');
   });
 });
 

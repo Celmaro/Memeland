@@ -144,8 +144,11 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
               const decoded = decodePairCreated(log);
               if (!decoded) continue;
               const meta = { chainId, pairAddress: decoded.pair, dex: factory.toLowerCase() };
-              tokens.push({ address: decoded.token0, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, ...meta });
-              tokens.push({ address: decoded.token1, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, ...meta });
+              // freshLane: raw on-chain pairs have zero market data at birth —
+              // they pass the LOW fresh floor so new launches are actually seen
+              // by the funnel (recency fix), then re-checked on later cycles.
+              tokens.push({ address: decoded.token0, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, freshLane: true, ...meta });
+              tokens.push({ address: decoded.token1, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, freshLane: true, ...meta });
             }
             from = toBlock; // advance on success
           } catch (err) {

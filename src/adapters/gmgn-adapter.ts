@@ -73,6 +73,14 @@ export interface GMGNRawToken {
   source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr';
   /** I1-4: true when the source feed failed to supply market data. */
   sourceUnavailable?: boolean;
+  /**
+   * Fresh-pair lane: true for raw on-chain pairs (ankr PairCreated / gecko
+   * new_pools) that have zero market data at birth. These pass a LOW volume
+   * floor (freshLane floor) instead of the mature volume floor, so genuinely
+   * new launches survive prefilter and are re-checked by later cycles instead
+   * of dying at $25k volume before ever being seen.
+   */
+  freshLane?: boolean;
   /** Optional EVM deployed bytecode for BytecodeScanner wiring (EVM-only). */
   bytecode?: string;
   /** Optional round-trip sell proof input for SellabilitySimulator wiring (EVM-only). */
