@@ -25,7 +25,10 @@
     "uninstall": "node scripts/uninstall.mjs",
     "clean": "node scripts/uninstall.mjs",
     "doctor": "tsx src/cli/doctor.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test",
+    "typecheck": "tsc --noEmit",
+    "audit": "npm audit --audit-level=high"
   },
   "repository": {
     "type": "git",

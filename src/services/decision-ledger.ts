@@ -21,6 +21,42 @@ import { ApprovalGovernance, type ApprovalOrder } from './exec-governance.js';
 export type ReconcileState = 'confirmed' | 'failed' | 'unknown' | 'replaced';
 export type SendOutcome = 'confirmed' | 'failed';
 
+/**
+ * Execution lifecycle (item 1): the explicit state machine a trade plan moves
+ * through. Agents PROPOSE plans; only the deterministic gate chain may promote
+ * them — never free-form model output straight to broadcast.
+ */
+export type TradeLifecycleState =
+  | 'planned'       // agent proposal recorded
+  | 'approved'      // risk gates passed (safety, sellability, sizer, fillSim, cost, governance)
+  | 'simulated'     // fill/sellability simulation done
+  | 'submitted'     // broadcast initiated
+  | 'pending'       // tx in flight (not yet confirmed)
+  | 'confirmed'     // on-chain success
+  | 'rejected'      // a gate refused it
+  | 'failed'        // broadcast/execution error
+  | 'timed_out'     // executor timeout
+  | 'replaced'      // nonce superseded
+  | 'partially_filled'
+  | 'reconciled';   // settlement verified against expectation
+
+export interface TradePlan {
+  agent: string;
+  nonce: string;
+  symbol: string;
+  chain: string;
+  side: 'BUY' | 'SELL';
+  tokenAddress: string;
+  amountUsd: number;
+  maxAmountUsd: number;
+  expectedOutTokens?: number;
+  quoteUsd?: number;
+  slippageTolerancePct?: number;
+  confidence: number;
+  timestamp: string;
+  lifecycle: TradeLifecycleState;
+}
+
 export interface RiskCheck {
   id: string;
   label: string;
@@ -48,7 +84,7 @@ export interface WeightResult {
 }
 
 export interface LedgerEvent {
-  kind: 'proposed' | 'veto' | 'reserved' | 'receipt_issued' | 'receipt_rejected' | 'send' | 'replaced';
+  kind: 'proposed' | 'veto' | 'reserved' | 'receipt_issued' | 'receipt_rejected' | 'send' | 'replaced' | 'lifecycle';
   seq: number;
   nonce?: string;
   agent?: string;
@@ -56,6 +92,8 @@ export interface LedgerEvent {
   chain?: string;
   outcome?: SendOutcome;
   reason?: string;
+  lifecycle?: TradeLifecycleState;
+  txHash?: string;
 }
 
 export interface DecisionLedgerIO {
@@ -112,6 +150,26 @@ export class DecisionLedger {
     const r = this.gov.reserve(order);
     if (r.reserved) this.emit({ kind: 'reserved', nonce: order.nonce });
     return r;
+  }
+
+  /**
+   * Item 1: record a trade-plan lifecycle transition. Append-only, per nonce.
+   * The execution pipeline calls this at every gate boundary (planned → approved
+   * → simulated → submitted → confirmed/rejected/failed/timed_out/replaced…)
+   * so the audit trail is the single source of truth for reconciliation.
+   */
+  recordLifecycle(plan: TradePlan, state: TradeLifecycleState, extra?: { reason?: string; txHash?: string }): number {
+    const ev: Omit<LedgerEvent, 'seq'> = {
+      kind: 'lifecycle',
+      nonce: plan.nonce,
+      agent: plan.agent,
+      symbol: plan.symbol,
+      chain: plan.chain,
+      lifecycle: state,
+      reason: extra?.reason,
+      txHash: extra?.txHash,
+    };
+    return this.emit(ev);
   }
 
   /** Hash-locked receipt — only valid when the payload matches the reservation. */

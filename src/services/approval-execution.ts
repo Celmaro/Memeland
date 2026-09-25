@@ -7,7 +7,7 @@
 import type { EVMTradeAdapter } from '../adapters/evm-adapter.js';
 import type { WalletService } from './wallet-service.js';
 import type { TradeJournalService } from './trade-journal-service.js';
-import { DecisionLedger, type TradeProposal } from './decision-ledger.js';
+import { DecisionLedger, type TradeProposal, type TradePlan, type TradeLifecycleState } from './decision-ledger.js';
 import { confidenceToFraction } from './confidence.js';
 import { EXECUTION_CHAIN_KEYS, normalizeExecutionChainKey } from '../config/execution-registry.js';
 
@@ -87,14 +87,41 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   };
   opts.ledger?.recordProposed(proposal);
 
+  // ── Item 1: explicit trade-plan + lifecycle state machine ──────────────
+  // Agents propose plans; the deterministic gates below are the ONLY promotion
+  // path. Every transition is recorded (planned → approved → simulated →
+  // submitted → confirmed | rejected/failed/timed_out) for reconciliation.
+  const plan: TradePlan = {
+    agent: proposal.agent,
+    nonce,
+    symbol: opts.symbol || 'TOKEN',
+    chain,
+    side: 'BUY',
+    tokenAddress: opts.contractAddress || '',
+    amountUsd: opts.amountEth * (opts.entryPriceUsd || 0),
+    maxAmountUsd: opts.amountEth * (opts.entryPriceUsd || 0),
+    quoteUsd: opts.entryPriceUsd * (opts.amountEth || 0),
+    slippageTolerancePct: 1.5,
+    confidence: proposal.confidence,
+    timestamp: new Date().toISOString(),
+    lifecycle: 'planned',
+  };
+  const lifecycle = (state: TradeLifecycleState, extra?: { reason?: string; txHash?: string }) =>
+    opts.ledger?.recordLifecycle({ ...plan, lifecycle: state }, state, extra);
+
+  const reject = (state: 'rejected' | 'failed' | 'timed_out', reason: string): ExecuteMemeBuyResult => {
+    lifecycle(state, { reason });
+    return { success: false, simulated: false, outputTokens: 0, error: reason };
+  };
+
+  lifecycle('planned');
+
   // ── Q15 fail-closed safety gate ─────────────────────────────────────────
   // When a safe-config registry is injected, an explicit-safe config must be
   // in force or the fill is refused (read-only default; remediate to enable).
   if (opts.safety) {
     const s = opts.safety.isSafe();
-    if (!s.safe) {
-      return { success: false, simulated: false, outputTokens: 0, error: `safety gate refused: ${s.reason}` };
-    }
+    if (!s.safe) return reject('rejected', `safety gate refused: ${s.reason}`);
   } else {
     console.warn('[EXEC] no safety gate injected — fills proceed unguarded (tests / unconfigured only)');
   }
@@ -102,9 +129,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   // ── Quoter-honeypot sellability proof (fail-closed) ─────────────────────
   if (opts.sellability) {
     const s = await opts.sellability.check(opts.contractAddress);
-    if (!s.sellable) {
-      return { success: false, simulated: false, outputTokens: 0, error: `sellability gate refused: ${s.reason}` };
-    }
+    if (!s.sellable) return reject('rejected', `sellability gate refused: ${s.reason}`);
   }
 
   // ── Q07 multi-constraint sizing (USD notional clamp) ────────────────────
@@ -112,44 +137,37 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   let effectiveAmountEth = opts.amountEth;
   if (opts.sizer) {
     const s = opts.sizer.clamp(desiredUsd);
-    if (!s.allowed) {
-      return { success: false, simulated: false, outputTokens: 0, error: `sizing gate refused: ${s.reason}` };
-    }
+    if (!s.allowed) return reject('rejected', `sizing gate refused: ${s.reason}`);
     if (s.amountUsd > 0 && opts.entryPriceUsd > 0) effectiveAmountEth = s.amountUsd / opts.entryPriceUsd;
   }
 
   // ── Q08 fill simulation (impact / liquidity proof, fail-closed) ─────────
+  lifecycle('approved'); // non-sim approval gates passed (safety/sellability/sizer)
   if (opts.fillSim) {
     const s = opts.fillSim.check({ amountUsd: desiredUsd, midPriceUsd: opts.entryPriceUsd, liquidityUsd: opts.entryPriceUsd > 0 ? opts.entryPriceUsd * 1000 : undefined });
-    if (!s.allowed) {
-      return { success: false, simulated: false, outputTokens: 0, error: `fill-sim gate refused: ${s.reason} (impact ${s.impactPct.toFixed(1)}%)` };
-    }
+    if (!s.allowed) return reject('rejected', `fill-sim gate refused: ${s.reason} (impact ${s.impactPct.toFixed(1)}%)`);
   }
+  lifecycle('simulated');
 
   // ── Q13 cost gate (cumulative fill-cost budget) ─────────────────────────
   if (opts.costGate) {
     const c = opts.costGate.trySpend(desiredUsd);
-    if (!c.allowed) {
-      return { success: false, simulated: false, outputTokens: 0, error: `cost gate refused: ${c.reason}` };
-    }
+    if (!c.allowed) return reject('rejected', `cost gate refused: ${c.reason}`);
   }
 
   // ── Q11 execution governance (idempotent reservation + hash-locked receipt) ──
   if (opts.governance) {
     const payload = JSON.stringify({ chain, token: opts.contractAddress, amountUsd: desiredUsd });
     const reserved = opts.governance.reserve({ nonce, payload });
-    if (!reserved.reserved) {
-      return { success: false, simulated: false, outputTokens: 0, error: `governance reservation refused: ${reserved.reason}` };
-    }
+    if (!reserved.reserved) return reject('rejected', `governance reservation refused: ${reserved.reason}`);
     const receipt = opts.governance.issue({ nonce, payload });
-    if (!receipt.valid) {
-      return { success: false, simulated: false, outputTokens: 0, error: `governance receipt refused: ${receipt.reason}` };
-    }
+    if (!receipt.valid) return reject('rejected', `governance receipt refused: ${receipt.reason}`);
   }
 
   // ── Per-token tx serialization (TxLock) ─────────────────────────────────
   const release = opts.txLock ? await opts.txLock.acquire(opts.contractAddress) : null;
   try {
+    lifecycle('submitted');
     // Q09 executor-DI: when an executor is provided, route the fill through it
     // (serialized + veto-with-reason) instead of the raw EVM adapter.
     const execRes = opts.executor
@@ -165,6 +183,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
             success: r.outcome === 'confirmed' || r.outcome === 'simulated',
             simulated: r.outcome === 'simulated',
             outputTokens: 0,
+            txHash: r.txHash,
             error: r.outcome === 'confirmed' || r.outcome === 'simulated' ? undefined : (r.reason || r.outcome),
           };
         })()
@@ -178,7 +197,10 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
           opts.wallet
         );
 
-    opts.journal.recordTradeEntry({
+    const finalState: TradeLifecycleState = execRes.success ? 'confirmed' : (execRes.error?.includes('timed out') || execRes.error?.includes('timeout') ? 'timed_out' : 'failed');
+    lifecycle(finalState, { reason: execRes.error, txHash: (execRes as { txHash?: string }).txHash });
+
+    const journalEntry = opts.journal.recordTradeEntry({
       id: `TRADE_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       domain: 'MEME_ROBINHOOD',
       symbol: opts.symbol || 'TOKEN',
@@ -191,7 +213,14 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
       strategyUsed: opts.strategyUsed || 'approval-approved',
       aiThesisSummary: (opts.thesis || '').slice(0, 200),
       status: 'OPEN',
+      nonce,
+      lifecycle: finalState,
+      txHash: (execRes as { txHash?: string }).txHash,
+      quoteUsd: desiredUsd,
+      expectedOutTokens: undefined,
+      failureReason: execRes.error,
     });
+    void journalEntry;
 
     opts.onExecuted();
     opts.ledger?.recordSend(nonce, execRes.success ? 'confirmed' : 'failed');
