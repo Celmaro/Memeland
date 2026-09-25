@@ -162,10 +162,15 @@ export class SentimentVoter {
       }
 
       const finalScoreClamped = Math.max(0, Math.min(100, Math.round(finalScore)));
+      const noSignal = reasons.length === 0;
       out.set(key, {
         voter: 'sentiment',
         score: finalScoreClamped,
-        reasons: reasons.length > 0 ? reasons : ['no social signal — neutral'],
+        reasons: noSignal ? ['no social signal — abstain'] : reasons,
+        // #1 abstention: a token with NO social signal at all is a missing
+        // input, not a neutral read — sentiment (a veto/tiebreak by design)
+        // should neither help nor drag when there is nothing to read.
+        abstain: noSignal,
         contradiction,
         organicScore,
         paidScore,
@@ -177,6 +182,6 @@ export class SentimentVoter {
   /** Convenience: single-token evaluation (reuses the batch path). */
   public async evaluateOne(token: GMGNRawToken): Promise<SentimentResult> {
     const map = await this.evaluateBatch([token]);
-    return map.get(token.address.toLowerCase()) ?? { voter: 'sentiment', score: 50, reasons: ['neutral'], contradiction: false, organicScore: 50, paidScore: 0 };
+    return map.get(token.address.toLowerCase()) ?? { voter: 'sentiment', score: 50, reasons: ['no social signal — abstain'], abstain: true, contradiction: false, organicScore: 50, paidScore: 0 };
   }
 }

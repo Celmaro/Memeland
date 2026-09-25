@@ -94,6 +94,24 @@ export function antiFoolingRisk(token: GMGNRawToken, extras?: {
     }
   }
 
+  // 5. LAUNCH-TX HEURISTICS (I2-5 seed): serial-deployer + dev-hold + dev-closed.
+  // Heuristics, not verified chain facts — each must be reproducible from the
+  // token's own fields. They add to foolingRisk but only bundle forensics and
+  // the deny-list can set `fooled` (hard reject class).
+  const serialLauncher = typeof token.twitterCreateTokenCount === 'number' && token.twitterCreateTokenCount > 10;
+  if (serialLauncher) {
+    foolingRisk += 15;
+    reasons.push(`serial deployer: ${token.twitterCreateTokenCount} tokens created`);
+  }
+  if (typeof token.devTeamHoldRate === 'number' && token.devTeamHoldRate >= 0.1) {
+    foolingRisk += 15;
+    reasons.push(`dev-team holds ${(token.devTeamHoldRate * 100).toFixed(0)}%`);
+  }
+  if (token.creatorClose) {
+    foolingRisk += 10;
+    reasons.push('dev closed positions');
+  }
+
   return {
     foolingRisk: Math.max(0, Math.min(100, Math.round(foolingRisk))),
     fooled,

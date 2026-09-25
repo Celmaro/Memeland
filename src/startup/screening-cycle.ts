@@ -18,6 +18,11 @@ import { globalDecisionCache } from '../services/decision-cache.js';
 import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { sellabilityConfigured } from '../services/execution-gates.js';
 
+/** Cycle cadence (default 5 min) — used by the stale-gate hours calculation. */
+const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
+/** #6: consecutive afterGate=0 cycles — the automated "fired=0 ⇒ diagnostic" norm. */
+let staleGateCycles = 0;
+
 /**
  * Dependency surface of the screening cycle. Typed `any` deliberately: the
  * contract is "index.ts wires the live singletons", and the loop body was
@@ -176,6 +181,16 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     // if memeStats.prefiltered=0, every reader of the log can see "prefilter
     // is the upstream dead end" without running the 7-bucket checklist in their head.
     console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} meme.scan=${memeStats.scanned} meme.prefilter=${memeStats.prefiltered} meme.emit=${memeStats.emitted} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
+
+    // #6 stale-gate detector: sustained afterGate=0 is the "fired=0 across
+    // deploys ⇒ diagnostic report, not another patch" norm automated. Logs a
+    // distinct marker after the first N consecutive zero-gate cycles so the
+    // operator sees calibration drift instead of a silent non-firing bot.
+    staleGateCycles = postGateCount > 0 ? 0 : staleGateCycles + 1;
+    const STALE_GATE_AFTER = Number(process.env.STALE_GATE_ALERT_AFTER_CYCLES ?? 12); // ≈1h at 5-min cycles
+    if (postGateCount === 0 && staleGateCycles > 0 && staleGateCycles % STALE_GATE_AFTER === 0) {
+      console.warn(`[STALE GATE] afterGate=0 for ${staleGateCycles} consecutive cycles (${(staleGateCycles * CYCLE_INTERVAL_MS / 60000 / 60).toFixed(1)}h) — screening is not firing. Diagnose before adding features.`);
+    }
 
     // Register real heartbeats for every active agent that ran this pass
     for (const domain of hub.getActiveDomains()) {

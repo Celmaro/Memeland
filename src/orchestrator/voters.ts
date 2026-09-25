@@ -51,6 +51,15 @@ export interface VoterOpinion {
   /** Relative weight in the consensus average; falls back to DEFAULT_VOTER_WEIGHTS. */
   weight?: number;
   reasons: string[];
+  /**
+   * Abstention semantics (#1): true when the voter's INPUT WAS MISSING (klines
+   * absent, critic keyless/errored, no smart-money flow, no wallet metrics...).
+   * An abstaining voter does NOT render into the 5-slot map — the weighted
+   * average renormalizes over voters that actually produced evidence. A forced
+   * neutral-50 on missing data dragged every candidate toward the band floor;
+   * abstention makes the floor reachable without ever lowering it.
+   */
+  abstain?: boolean;
 }
 
 export interface VoterContext {
@@ -184,12 +193,12 @@ export function whaleVote(
   enrichment: WhaleEnrichment = {}
 ): VoterOpinion {
   if (!trades || trades.length === 0) {
-    const reasons = botRisk >= 60 ? [`bot risk ${Math.round(botRisk)} — flow not trusted`] : ['no smart-money flow data — neutral'];
-    return {
-      voter: 'whale',
-      score: botRisk >= 60 ? 40 : 50,
-      reasons,
-    };
+    // #1 abstention: no smart-money flow data is a MISSING input, not a neutral
+    // read. A high bot-risk DOES carry signal ("flow not trusted") and votes.
+    if (botRisk >= 60) {
+      return { voter: 'whale', score: 40, reasons: [`bot risk ${Math.round(botRisk)} — flow not trusted`] };
+    }
+    return { voter: 'whale', score: 50, reasons: ['no smart-money flow data — abstain'], abstain: true };
   }
   let buys = 0;
   let sells = 0;
@@ -239,7 +248,7 @@ export function whaleVote(
 /** Build a full VoterScores map from opinions that actually rendered (fine-grained keys). */
 export function scoresFromOpinions(opinions: VoterOpinion[]): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const o of opinions) out[o.voter] = o.score;
+  for (const o of opinions) if (!o.abstain) out[o.voter] = o.score;
   return out;
 }
 
@@ -249,6 +258,9 @@ export function scoresFromOpinions(opinions: VoterOpinion[]): Record<string, num
  * blended; security = security (also a hard pre-gate); sentiment = sentiment;
  * critic = critic + rubric blended. Only rendered slots appear — missing stays
  * missing (aggregate ignores absent voters, never treats them as 0).
+ * Abstention (#1): opinions flagged `abstain` (input missing) are skipped
+ * entirely, both here and in scoresFromOpinions — a missing voter renormalizes
+ * out of the average instead of dragging it toward 50.
  */
 export function consolidateOpinions(opinions: VoterOpinion[]): Partial<Record<VoterId, number>> {
   const raw = scoresFromOpinions(opinions);
@@ -277,7 +289,7 @@ export function consolidateOpinions(opinions: VoterOpinion[]): Partial<Record<Vo
  */
 export function walletVote(ctx: VoterContext): VoterOpinion {
   if (!ctx.walletMetrics) {
-    return { voter: 'wallet', score: 50, reasons: ['wallet metrics missing — neutral'] };
+    return { voter: 'wallet', score: 50, reasons: ['wallet metrics missing — abstain'], abstain: true };
   }
   const res = walletScore(ctx.walletMetrics);
   const finite = Number.isFinite(res.score);
@@ -377,7 +389,7 @@ export function reputationAwareSecurityVote(
 export function convergenceVote(ctx: VoterContext): VoterOpinion {
   const data = ctx.convergence;
   if (!data || !Array.isArray(data.buys) || data.buys.length === 0) {
-    return { voter: 'convergence', score: 50, reasons: ['no convergence flow data — neutral'] };
+    return { voter: 'convergence', score: 50, reasons: ['no convergence flow data — abstain'], abstain: true };
   }
   const res = flowConvergenceScore(data.buys, data.config, data.now);
   const finite = Number.isFinite(res.score);
@@ -399,7 +411,7 @@ export function convergenceVote(ctx: VoterContext): VoterOpinion {
  */
 export function rubricVote(ctx: VoterContext): VoterOpinion {
   if (!ctx.rubricMetrics) {
-    return { voter: 'rubric', score: 50, reasons: ['rubric metrics missing — neutral'] };
+    return { voter: 'rubric', score: 50, reasons: ['rubric metrics missing — abstain'], abstain: true };
   }
   const factors = securityMetricFactors(ctx.rubricMetrics);
   const rubric = computeRubric(factors);
@@ -408,7 +420,8 @@ export function rubricVote(ctx: VoterContext): VoterOpinion {
     return {
       voter: 'rubric',
       score: 50,
-      reasons: [`missing required factor(s): ${missing.join(', ')}`, 'rubric not clean — neutral (fail-closed)'],
+      reasons: [`missing required factor(s): ${missing.join(', ')} — abstain (incomplete data)`],
+      abstain: true,
     };
   }
   return {

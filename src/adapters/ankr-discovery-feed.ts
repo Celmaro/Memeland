@@ -28,6 +28,11 @@ export const FACTORY_ADDRESSES: Record<string, string> = {
   // robinhood deliberately ABSENT: 0x5C69bEe… is the Ethereum factory, NOT an
   // RH factory. An unverified guess returns empty forever, silently. Add the
   // RH factory address only once confirmed on-chain.
+  // VERIFIED 2026-09-25: eth_getCode on RH mainnet returns 0x for both
+  // Uniswap V2 (0x5C69bEe…) and PancakeSwap V2 (0xcA143Ce…) — neither is
+  // deployed on Robinhood Chain. Do NOT add either address; the V2-style
+  // PairCreated discovery feed does not cover RH until a real factory (and
+  // its Pons/Router topology) is confirmed on-chain.
 };
 
 const CHAIN_TO_POOL: Record<string, 'rh' | 'eth' | 'bsc' | 'base'> = {

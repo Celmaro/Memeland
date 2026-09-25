@@ -20,7 +20,7 @@ export interface CriticInput {
   reasons: string[];
 }
 
-const NEUTRAL: VoterOpinion = { voter: 'critic', score: 50, reasons: ['critic unavailable — neutral vote'] };
+const NEUTRAL: VoterOpinion = { voter: 'critic', score: 50, reasons: ['critic unavailable — abstain'], abstain: true };
 
 function parseScore(raw: string): number | null {
   const m = raw.match(/SCORE\s*[:=]?\s*(\d{1,3})/i);
