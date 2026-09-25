@@ -37,7 +37,7 @@ import { WalletTracker } from './services/wallet-tracker.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability } from './services/execution-gates.js';
 import { executableChainsFromEnv, normalizeExecutionChainKey } from './config/execution-registry.js';
-import { bootstrapStartupConfig, printStartupBanner } from './startup/bootstrap.js';
+import { bootstrapStartupConfig, printStartupBanner, validateRuntimeConfig } from './startup/bootstrap.js';
 import { registerGracefulShutdown } from './startup/shutdown.js';
 import { createMarketRiskMonitor, startRuntimeMonitoring } from './startup/risk.js';
 import { createScreeningCycle } from './startup/screening-cycle.js';
@@ -48,6 +48,7 @@ import { createOperationalFunnel, mergeOperationalFunnel, funnelCountersFromStat
 dotenv.config();
 
 bootstrapStartupConfig();
+validateRuntimeConfig();
 printStartupBanner();
 
 const telegramService = new TelegramService();

@@ -136,6 +136,26 @@ describe('decodePairCreated (B4 decode fixture)', () => {
 
 import { FreshPairWatchlist } from '../src/services/fresh-pair-watchlist.js';
 import { klinesFollowThroughLabeler } from '../src/orchestrator/calibration-harness.js';
+import { TradeJournalService } from '../src/services/trade-journal-service.js';
+
+describe('#1 trade-plan lifecycle + journal persistence', () => {
+  it('journal updateLifecycle persists nonce/hash/quote/slippage/reconcile fields', () => {
+    const journal = new TradeJournalService();
+    const entry = journal.recordTradeEntry({
+      id: 'TRADE_X', domain: 'MEME_ROBINHOOD', symbol: 'X', contractAddressOrId: '0xX', chain: 'bsc',
+      entryTimestamp: new Date().toISOString(), entryPriceUsdOrEth: 0.01, positionSizeUsd: 500,
+      swarmScore: 85, strategyUsed: 't', aiThesisSummary: '', status: 'OPEN',
+    });
+    const updated = journal.updateLifecycle('TRADE_X', {
+      lifecycle: 'confirmed', nonce: 'n1', txHash: '0xabc', quoteUsd: 500, actualOutTokens: 123,
+      gasUsed: 21000, slippagePct: 0.5, reconciled: true,
+    });
+    expect(updated!.txHash).toBe('0xabc');
+    expect(updated!.lifecycle).toBe('confirmed');
+    expect(updated!.reconciled).toBe(true);
+    expect(updated!.slippagePct).toBe(0.5);
+  });
+});
 
 describe('#3 fresh-pair promotion watchlist', () => {
   function mkFresh(overrides: Record<string, unknown>): any {

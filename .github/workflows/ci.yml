@@ -21,5 +21,11 @@ jobs:
         run: npm test
       - name: Coverage gate (decision-core)
         run: npx vitest run --coverage
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build
         run: npm run build

@@ -1,5 +1,7 @@
 import { assertStartupConfig } from '../config/startup-validation.js';
 import { getExecutionMode, isDryRun as isDryRunMode, isAutoExecute, isSignalOnly } from '../config/config.js';
+import { globalRPCFailoverManager } from '../services/rpc-failover.js';
+import { validateChainConfig, validateExecutionMode } from '../config/chain-config.js';
 
 /** Central startup guard: same env checks as before, packaged as a boot module. */
 export function bootstrapStartupConfig(): void {
@@ -9,6 +11,27 @@ export function bootstrapStartupConfig(): void {
     console.error(`[CONFIG] REFUSING TO START: ${err.message}`);
     process.exit(1);
   }
+}
+
+/**
+ * Item 3 — loud runtime config validation. AUTO_EXECUTE misconfig is a hard
+ * boot failure; in DRY_RUN/SIGNAL_ONLY the same issues are loud warnings (the
+ * bot can still screen, but the operator is told exactly what is wrong).
+ */
+export function validateRuntimeConfig(): void {
+  const chains = (process.env.MULTICHAIN_CHAINS || 'sol,bsc,base,eth,robinhood')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const chainRes = validateChainConfig(chains, (key) => {
+    const pool = globalRPCFailoverManager.getRpcUrls(key);
+    return pool && pool.length > 0 ? pool[0] : undefined;
+  });
+  const modeRes = validateExecutionMode();
+  const all = [...chainRes.issues, ...modeRes.issues];
+  if (all.length === 0) return;
+  const header = isAutoExecute() ? '[CONFIG] REFUSING TO START (AUTO_EXECUTE with invalid config)' : '[CONFIG] ⚠️ config issues';
+  console.warn(header);
+  for (const issue of all) console.warn(`  - ${issue.chain}: ${issue.message}`);
+  if (isAutoExecute()) process.exit(1);
 }
 
 export function printStartupBanner(): string {

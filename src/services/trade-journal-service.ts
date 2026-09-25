@@ -1,4 +1,5 @@
 import { StateStore } from './state-store.js';
+import type { TradeLifecycleState } from './decision-ledger.js';
 
 export interface TradeJournalEntry {
   id: string;
@@ -18,6 +19,17 @@ export interface TradeJournalEntry {
   aiThesisSummary: string;
   status: 'OPEN' | 'CLOSED_TP' | 'CLOSED_SL' | 'CLOSED_MANUAL' | 'OUT_OF_RANGE';
   exitReason?: string;
+  // ── Item 1/4: execution lifecycle + reconciliation persistence ──
+  nonce?: string;
+  lifecycle?: TradeLifecycleState;
+  txHash?: string;
+  quoteUsd?: number;
+  expectedOutTokens?: number;
+  actualOutTokens?: number;
+  gasUsed?: number;
+  slippagePct?: number;
+  failureReason?: string;
+  reconciled?: boolean;
 }
 
 export interface JournalSummaryStats {
@@ -61,6 +73,23 @@ export class TradeJournalService {
     this.stateStore?.setJournalEntry(entry);
     console.log(`[TRADE JOURNAL] Logged new trade entry: ${entry.symbol} (${entry.domain}) - Status: ${entry.status}`);
     return entry;
+  }
+
+  /**
+   * Item 1/4: persist an execution-lifecycle transition + settlement fields on
+   * an existing entry (nonce → lifecycle → txHash → quote → expected/actual →
+   * gas → slippage → failure reason → reconciled). Returns the updated entry.
+   */
+  public updateLifecycle(
+    id: string,
+    patch: Partial<Pick<TradeJournalEntry, 'lifecycle' | 'txHash' | 'quoteUsd' | 'expectedOutTokens' | 'actualOutTokens' | 'gasUsed' | 'slippagePct' | 'failureReason' | 'reconciled'> & { nonce?: string }>,
+  ): TradeJournalEntry | null {
+    const trade = this.entries.get(id);
+    if (!trade) return null;
+    Object.assign(trade, patch);
+    this.entries.set(id, trade);
+    this.stateStore?.setJournalEntry(trade);
+    return trade;
   }
 
   public closeTrade(

@@ -12,7 +12,7 @@ Autonomous Multi-Agent Crypto Intelligence & On-Chain Trading Engine
   </a>
 </p>
 
-# OpenCatz 🐾 — Robinhood Chain Autonomous Crypto Intelligence
+# OpenCatz 🐾 — Multi-Chain Autonomous Memecoin Screening & Intelligence (Memeland fork)
 
 <p align="center">
   <a href="https://opencatz.xyz/robinhood-chain"><img src="https://img.shields.io/badge/Portal-opencatz.xyz%2Frobinhood--chain-brightgreen.svg?style=flat-square" alt="Portal"></a>
@@ -190,7 +190,6 @@ opencatz deploy
 ---
 
 ## 🛡️ 9-Lives Automated Risk Guard
-
 Every trade candidate is governed by the automated **9-Lives Risk Engine**:
 
 - **Hard Stop-Loss (`-50%`)**: Automated capital protection cutoff to eliminate catastrophic drawdowns (matches position-manager `stopLossPct ?? 0.5`).
@@ -217,6 +216,27 @@ npm test
 ```
 
 ---
+
+## 📊 Maturity Matrix
+
+| Feature | Status | Notes |
+|---|---|---|
+| Multi-chain discovery (sol/bsc/base/eth/robinhood) | ✅ Implemented + tested | DEXPaprika/Gecko/DexScreener/Ankr-feed, keyless |
+| 5-slot swarm consensus (security gate + 80% floor) | ✅ Implemented + tested | Abstention semantics; floor never lowered |
+| Security hard-gate + deterministic anti-fooling | ✅ Implemented + tested | GoPlus, bundle forensics, sellability contradiction |
+| RPC failover pools + 429 circuit breaker | ✅ Implemented + tested | Chain-id verified probes, per-chain pools |
+| Fresh-pair lane (recency) | ✅ Implemented + tested | ankr PairCreated bypasses volume floor at birth |
+| Calibration harness (+CLI) | ✅ Implemented + tested | Replays ledger, earns the floor |
+| Trade-plan lifecycle + journal fields | ✅ Implemented + tested | planned→approved→simulated→submitted→confirmed |
+| Monitoring / execution gates chain | ✅ Implemented + tested | safety/sizer/fillSim/cost/governance/sellability |
+| **Live trade execution** | ⚠️ **DRY_RUN only / Simulation-only** | `AUTO_EXECUTE_ENABLED=false`, no live keys |
+| Smart-money/KOL track (GMGN) | ⚠️ Experimental | Enrichment only; subject to GMGN rate limits |
+| Solana execution | ⚠️ Requires credentials | SOLANA_PRIVATE_KEY absent; fails closed |
+| EVM execution (eth/bsc/base/rh) | ⚠️ Requires credentials | EVM_PRIVATE_KEY absent; fails closed |
+| Hyperliquid whale overlay | ❌ Removed | Stripped (no edge) |
+| Regime/macro voter | ❌ Removed | Stripped (no edge) |
+| Backtesting | 🚧 Not supported | Calibration replay only; no order-level backtest |
+| Paper trading | 🚧 Not supported | SIGNAL_ONLY journals predicted-vs-actual |
 
 ## 🤝 Contributing
 
