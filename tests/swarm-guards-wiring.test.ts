@@ -19,7 +19,7 @@ function candidate(overrides: Record<string, unknown> = {}) {
 describe('Kernel B guard wiring (swarm-guards -> swarm-consensus)', () => {
   afterEach(() => SwarmConsensusEngine.setStrategyProvider(null));
 
-  it('regime no longer raises the floor: 85% passes even in a bear; sub-80 fails as REGIME_REJECTED only in risk-off regimes', () => {
+  it('regime removed: the floor is a flat 80% — bear/risk-off no longer changes the refusal', () => {
     const normal = new SwarmConsensusEngine();
     expect(normal.evaluateSignal(candidate()).passed).toBe(true);
 
@@ -29,7 +29,8 @@ describe('Kernel B guard wiring (swarm-guards -> swarm-consensus)', () => {
     const lowBear = new SwarmConsensusEngine();
     const res = lowBear.evaluateSignal(candidate({ symbol: 'LOWB', regime: 'TRENDING_BEAR', confidence: 70 }));
     expect(res.passed).toBe(false);
-    expect(res.decision?.refusal).toBe(RefusalCode.REGIME_REJECTED);
+    // Regime voter is gone — a sub-80 reject is a plain CONSENSUS refusal, never REGIME_REJECTED.
+    expect(res.decision?.refusal).toBe(RefusalCode.CONSENSUS);
 
     const lowChop = new SwarmConsensusEngine();
     const chop = lowChop.evaluateSignal(candidate({ symbol: 'LOWC', regime: 'CHOP', confidence: 70 }));

@@ -100,12 +100,10 @@ describe('StrategyEngine', () => {
     expect(active?.id).toBe('meme-robinhood-default');
   });
 
-  it('per-domain activation: activating meme-robinhood does not deactivate whale-eth', () => {
+  it('per-domain activation: activating meme-robinhood strategy isolates it from other activations', () => {
     const engine = new StrategyEngine();
     engine.setActiveStrategy('meme-robinhood', 'meme-robinhood-default');
-    engine.setActiveStrategy('whale-eth', 'whale-eth-default');
     expect(engine.getActiveStrategy('meme-robinhood')?.id).toBe('meme-robinhood-default');
-    expect(engine.getActiveStrategy('whale-eth')?.id).toBe('whale-eth-default');
   });
 
   it('falls back to domain-default strategy without explicit activation', () => {
@@ -116,13 +114,6 @@ describe('StrategyEngine', () => {
     // Domain normalization: uppercase/underscore (swarm style) also resolves
     const swarmStyle = engine.getActiveStrategy('MEME_ROBINHOOD');
     expect(swarmStyle?.id).toBe('meme-robinhood-default');
-  });
-
-  it('falls back to whale-eth-default strategy without explicit activation', () => {
-    const engine = new StrategyEngine();
-    // No active map set — the shipped whale-eth-default must be active out-of-the-box
-    const active = engine.getActiveStrategy('whale-eth');
-    expect(active?.id).toBe('whale-eth-default');
   });
 
   it('returns null when no strategy exists for the domain', () => {
@@ -151,17 +142,14 @@ describe('StrategyEngine', () => {
 describe('customizable presets', () => {
   const engine = new StrategyEngine();
 
-  it('loads the loosened defaults for the meme and whale domains', () => {
+  it('loads the loosened defaults for the meme domain', () => {
     const meme = engine.getActiveStrategy('meme-robinhood');
-    const whale = engine.getActiveStrategy('whale-eth');
     expect(meme?.params.minVolume24hUsd).toBe(25000);
     expect(meme?.params.minLiquidityUsd).toBe(5000);
-    expect(whale?.params.minPerpsUsd).toBe(500000);
   });
 
   it('standard presets exist and keep the strict values', () => {
     const files = fs.readdirSync('strategies').filter((f) => f.endsWith('.mjs'));
     expect(files).toContain('meme-robinhood-standard.mjs');
-    expect(files).toContain('whale-eth-standard.mjs');
   });
 });

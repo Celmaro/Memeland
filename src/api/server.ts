@@ -1,7 +1,6 @@
 import http from 'node:http';
 import { OpenCatHub } from '../orchestrator/hub.js';
 import { globalHealthWatcher } from '../services/health-watcher.js';
-import { globalMarketRegimeFilter } from '../services/market-regime.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
 import { tradeJournalService } from '../discord/handlers/command-handlers.js';
 import { globalStateStore } from '../services/state-store.js';
@@ -107,7 +106,6 @@ export class OpenCatzRESTServer {
         // 1. GET /health or /api/status (Full system status & setup overview)
         if (req.method === 'GET' && (pathname === '/health' || pathname === '/api/status')) {
           const health = globalHealthWatcher.auditSystemHealth();
-          const regime = globalMarketRegimeFilter.getRegime();
           const isKillSwitch = globalRiskEngineV2.checkKillSwitchStatus();
           const ops = globalOperationalHealth.snapshot();
 
@@ -128,7 +126,6 @@ export class OpenCatzRESTServer {
               primaryVenue: 'Uniswap V3 • Robinhood Chain L2 (#4663)',
               activeDomains: hub.getActiveDomains(),
               subAgents,
-              marketRegime: regime,
               connectedApiKeys: {
                 xApiV2: Boolean(process.env.X_API_BEARER_TOKEN),
                 llm: Boolean(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY),

@@ -183,11 +183,6 @@ export class OpenCatzHub {
         const { AlphaRobinhoodScreeningAgent } = await import('../agents/alpha-robinhood/alpha-screening-agent.js');
         return new AlphaRobinhoodScreeningAgent();
       }
-      case 'whale-eth': {
-        const { WhaleScreeningAgent } = await import('../agents/whale-eth/whale-screening-agent.js');
-        const { HyperliquidAdapter } = await import('../adapters/hyperliquid-adapter.js');
-        return new WhaleScreeningAgent(new HyperliquidAdapter());
-      }
       default:
         throw new Error(`No agent factory registered for domain "${id}"`);
     }

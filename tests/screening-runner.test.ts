@@ -15,9 +15,9 @@ describe('KC6 / Kernel Q — withScreeningTimeout', () => {
   it('fail-closed: resolves [] when the pass exceeds the timeout', async () => {
     const log = vi.fn();
     const never = new Promise<never[]>(() => {});
-    const out = await withScreeningTimeout(never, 'whale-eth', 20, log);
+    const out = await withScreeningTimeout(never, 'meme-robinhood', 20, log);
     expect(out).toEqual([]);
-    expect(log).toHaveBeenCalledWith(expect.stringMatching(/SCREENING TIMEOUT.*WHALE-ETH/));
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/SCREENING TIMEOUT.*MEME-ROBINHOOD/));
   });
 
   it('rejects on pass error', async () => {

@@ -1,9 +1,9 @@
 /**
  * Kernel S — Screening cycle factory (extracted verbatim from index.ts).
  *
- * The live production loop: heartbeats → equity/drawdown → market regime →
- * dispatch → consensus gate → funnel → dedup → approval ladder → auto-exec →
- * Discord/Telegram dispatch → wallet tracking → scorecard mark-to-market.
+ * The live production loop: heartbeats → equity/drawdown → dispatch → consensus
+ * gate → funnel → dedup → approval ladder → auto-exec → Discord/Telegram dispatch
+ * → wallet tracking → scorecard mark-to-market.
  *
  * G7 discipline: this is a byte-for-byte move of the former inline closure
  * (index.ts:247-646). Deps are injected as a single object; mutable closure
@@ -29,10 +29,8 @@ export interface ScreeningCycleDeps {
   globalWalletBalanceReader: any;
   priceFeedService: any;
   stateStore: any;
-  globalMarketRegimeFilter: any;
   dispatchDomain: any;
   robinhoodScreeningAgent: any;
-  whaleScreeningAgent: any;
   apiKeyGuard: any;
   gateSignal: (payload: any) => boolean;
   createOperationalFunnel: any;
@@ -76,7 +74,7 @@ export interface ScreeningCycleDeps {
 export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<void> {
   const {
     hub, globalHealthWatcher, globalWalletBalanceReader, priceFeedService, stateStore,
-    globalMarketRegimeFilter, dispatchDomain, robinhoodScreeningAgent, whaleScreeningAgent,
+    dispatchDomain, robinhoodScreeningAgent,
     apiKeyGuard, gateSignal, createOperationalFunnel, mergeOperationalFunnel,
     globalOperationalHealth, DEDUP_WINDOW_MS, sightingFromCallCard,
     opportunityStrategist, opportunityLedger, approvalQueueService, executeMemeBuy,
@@ -149,18 +147,6 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       console.warn(`[RISK] Portfolio equity unavailable this pass: ${equityErr.message}`);
     }
 
-    // Real market regime from live BTC/ETH 24h changes (fail-soft when unavailable)
-    try {
-      const btcChange = await priceFeedService.get24hChange('BTC');
-      const ethChange = await priceFeedService.get24hChange('ETH');
-      if (btcChange !== null && ethChange !== null) {
-        const volIdx = Math.min(100, Math.round(Math.max(Math.abs(btcChange), Math.abs(ethChange)) * 15));
-        globalMarketRegimeFilter.updateMarketRegime(btcChange, ethChange, volIdx);
-      }
-    } catch (regimeErr: any) {
-      console.warn(`[MARKET REGIME] Update failed: ${regimeErr.message}`);
-    }
-
     let dispatchedPayloads: Array<{ payload: import('../agents/shared/agent-contract.js').CallCardPayload; channelName: string; rawReason: string }> = [];
 
             const robinhoodDispatched = await dispatchDomain({
@@ -172,21 +158,11 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             });
             dispatchedPayloads.push(...robinhoodDispatched);
 
-            const whaleDispatched = await dispatchDomain({
-              domain: 'whale-eth',
-              channelName: 'call-whale-eth',
-              isActive: () => hub.isAgentActive('whale-eth'),
-              runPass: () => withScreeningTimeout(whaleScreeningAgent.runScreeningPass(), 'whale-eth', SCREENING_TIMEOUT_MS),
-              keyReady: () => apiKeyGuard.checkDomainKeys('whale-eth'),
-            });
-            dispatchedPayloads.push(...whaleDispatched);
-
     // Real Swarm Consensus gate (>= 80%): every signal must pass with real data
     const preGateCount = dispatchedPayloads.length;
     dispatchedPayloads = dispatchedPayloads.filter((item) => gateSignal(item.payload));
     const postGateCount = dispatchedPayloads.length;
     const memeStats = robinhoodScreeningAgent.getLastFunnelStats();
-    const whaleStats = whaleScreeningAgent.getLastFunnelStats?.() ?? { scanned: 0, prefiltered: 0, emitted: 0 };
     stateStore.incrementFunnel('meme-robinhood', 'scanned', memeStats.scanned);
     stateStore.incrementFunnel('meme-robinhood', 'consensus', postGateCount);
     cycleOperationalFunnel.sourcesQueried += Math.max(1, hub.getActiveDomains().length);
@@ -199,7 +175,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     // in the same line so `beforeGate=0 afterGate=0` is no longer ambiguous —
     // if memeStats.prefiltered=0, every reader of the log can see "prefilter
     // is the upstream dead end" without running the 7-bucket checklist in their head.
-    console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} meme.scan=${memeStats.scanned} meme.prefilter=${memeStats.prefiltered} meme.emit=${memeStats.emitted} whale.scan=${whaleStats.scanned} whale.emit=${whaleStats.emitted} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
+    console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} meme.scan=${memeStats.scanned} meme.prefilter=${memeStats.prefiltered} meme.emit=${memeStats.emitted} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
 
     // Register real heartbeats for every active agent that ran this pass
     for (const domain of hub.getActiveDomains()) {

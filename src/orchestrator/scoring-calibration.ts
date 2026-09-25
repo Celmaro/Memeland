@@ -1,5 +1,5 @@
 /**
- * Q10 - Scoring calibration (IC-weight learning + Platt + regime abstain +
+ * Q10 - Scoring calibration (IC-weight learning + Platt + walk-forward split +
  * walk-forward validation), validated through the Q01 harness. Pure and
  * deterministic so it can be unit-tested and dry-run through the harness.
  */
@@ -95,16 +95,6 @@ export function plattCalibrate(score01: number, a: number, b: number): number {
   const z = a * clamped + b;
   const p = 1 / (1 + Math.exp(-z));
   return Math.max(0, Math.min(1, p));
-}
-
-export interface RegimeState {
-  abstain?: boolean;
-}
-
-/** When a regime is abstain-critical, return a neutral vote (never a win). */
-export function abstainNeutral(regime: RegimeState | null | undefined): { abstain: boolean; neutralScore: number } {
-  if (!regime?.abstain) return { abstain: false, neutralScore: 50 };
-  return { abstain: true, neutralScore: 50 };
 }
 
 export interface WalkForwardSplit {

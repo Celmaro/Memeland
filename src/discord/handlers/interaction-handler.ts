@@ -46,7 +46,6 @@ export function isOpenCatzChannel(interaction: Interaction): boolean {
     'audit-on-demand',
     'call-meme-robinhood',
     'call-alpha-robinhood',
-    'call-whale-eth',
     'opencatz-logs',
     'opencat-logs',
     'opencatz-journal',

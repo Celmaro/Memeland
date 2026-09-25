@@ -1,4 +1,4 @@
-export type CallDomain = 'MEME_ROBINHOOD' | 'ALPHA_ROBINHOOD' | 'WHALE_ETH';
+export type CallDomain = 'MEME_ROBINHOOD' | 'ALPHA_ROBINHOOD';
 
 /** Whale tracking: a single open position >= threshold belonging to one smart trader. */
 export interface WhaleTraderEntry {
@@ -74,7 +74,7 @@ export interface CallCardPayload {
   socialHypeScore: number;
   liquidityUsd: number;
   volume1hUsd: number;
-  /** Arch-3 7-voter swarm scores (quant/ml/security/sentiment/whale/regime/critic), when collected. */
+  /** Arch-3 voter swarm scores (quant/ml/security/sentiment/whale/critic), when collected. */
   voterScores?: Partial<Record<string, number>>;
   whaleReport?: WhaleReport;
   cexRadar?: any[];

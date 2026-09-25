@@ -4,13 +4,12 @@ import { RefusalCode } from '../decision/refusal-code.js';
 import { aggregateVoterScores } from './voters.js';
 import { globalSwarmLearning } from './swarm-learning.js';
 import {
-  regimeAwareFloor,
+  CONSENSUS_FLOOR,
   resolveConflict,
   calibratedConfidence,
   cohortVote,
   CircuitBreaker,
   StickyConviction,
-  type Regime,
   type DirectionVote,
 } from './swarm-guards.js';
 
@@ -23,10 +22,8 @@ export interface SignalCandidate {
   securityAuditPassed: boolean;
   socialHypeScore: number; // 0 - 100
   confidence?: number; // agent-computed confidence (0-100); when present, swarm acts as pure gate
-  /** Arch-3 10-voter swarm scores. When present, the weighted voter average becomes the confidence. */
+  /** Arch-3 voter swarm scores. When present, the weighted voter average becomes the confidence. */
   voterScores?: Partial<Record<string, number>>;
-  /** Kernel B — prism-insight regime (raises the consensus floor in a bear market). */
-  regime?: Regime;
   /** Kernel B — Decision Hub asymmetric conflict (1BUY + 2SELL = veto). */
   directionVotes?: DirectionVote[];
   /** Kernel B — zetryn downgrade-only calibration map (score -> calibrated). */
@@ -182,8 +179,8 @@ export class SwarmConsensusEngine {
         // emphasis feeds the voter aggregate (bounded ±30%, renormalized). Default
         // weights are used whenever learning has not diverged from baseline.
         const voterWeights = globalSwarmLearning.getVoterWeights();
-        // Arch-3 10-voter swarm path: weighted average across the voters that rendered
-        // a score (quant/ml/security/sentiment/whale/regime/critic/wallet/convergence/rubric).
+        // Arch-3 9-voter swarm path: weighted average across the voters that rendered
+        // a score (quant/ml/security/sentiment/whale/critic/wallet/convergence/rubric).
         // The meme agent's own confidence rides in as the 'quant' vote, so nothing is lost.
         if (candidate.voterScores && Object.keys(candidate.voterScores).length > 0) {
           const agg = aggregateVoterScores(candidate.voterScores, voterWeights);
@@ -277,21 +274,20 @@ export class SwarmConsensusEngine {
       }
     }
 
-    // Single 80% quorum floor in every regime (regimeAwareFloor). The regime
-    // votes through the regime voter, not a raised floor.
-    const floor = Math.round(regimeAwareFloor(candidate.regime ?? 'CHOP') * 100);
+    // Single flat 80% quorum floor (regime voter removed — no edge; the floor
+    // is a constant, never regime-aware).
+    const floor = Math.round(CONSENSUS_FLOOR * 100);
     const passed = confidenceScore >= floor && candidate.securityAuditPassed;
 
     const checks = [
       { id: 'confidence', passed: confidenceScore >= floor, reason: `${confidenceScore}% confidence (floor ${floor}%)` },
       { id: 'security', passed: candidate.securityAuditPassed, reason: candidate.securityAuditPassed ? 'audit passed' : 'audit failed' },
     ];
-    if (candidate.regime) checks.push({ id: 'regime', passed: true, reason: `regime ${candidate.regime} scored via regime voter` });
     const decision: DecisionResult<number> = passed
       ? allowDecision(confidenceScore, `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`, checks)
       : refuseDecision(
           `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          (candidate.regime === 'TRENDING_BEAR' || candidate.regime === 'EXTREME_VOLATILITY') && confidenceScore < floor ? RefusalCode.REGIME_REJECTED : RefusalCode.CONSENSUS,
+          RefusalCode.CONSENSUS,
           `Signal rejected (${confidenceScore}% confidence below ${floor}% threshold or security failed).`,
           checks,
         );
@@ -324,7 +320,7 @@ export class SwarmConsensusEngine {
           : isFastLane 
             ? `⚡ **FAST-LANE AGENT CONSENSUS PASSED** (${confidenceScore}% confidence, Sub-second High Conviction, Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
             : voterBreakdown
-              ? `Signal passed 10-voter Swarm Consensus (${confidenceScore}% confidence; voters: ${JSON.stringify(voterBreakdown)})${cohortReason}.`
+              ? `Signal passed 9-voter Swarm Consensus (${confidenceScore}% confidence; voters: ${JSON.stringify(voterBreakdown)})${cohortReason}.`
               : `Signal passed Multi-Agent Consensus with ${confidenceScore}% confidence (Reputation Wt: ${reputationMultiplier.toFixed(2)}x).`
         : `Signal rejected (${confidenceScore}% confidence below ${floor}% threshold or security failed).`,
     };

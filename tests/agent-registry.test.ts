@@ -3,16 +3,13 @@ import { getAgentDomain, normalizeDomainKey, AGENT_DOMAINS } from '../src/orches
 
 describe('agent registry', () => {
   it('contains all active agent domains with channels', () => {
-      expect(AGENT_DOMAINS.map((d) => d.id).sort()).toEqual(
-        ['meme-robinhood', 'whale-eth'].sort()
-      );
+      expect(AGENT_DOMAINS.map((d) => d.id)).toEqual(['meme-robinhood']);
     });
 
     it('getAgentDomain resolves canonical id, aliases, and channel names', () => {
       expect(getAgentDomain('meme-robinhood')?.channel).toBe('call-meme-robinhood');
       expect(getAgentDomain('evm-meme')?.id).toBe('meme-robinhood');
       expect(getAgentDomain('sol')?.id).toBe('meme-robinhood');
-      expect(getAgentDomain('call-whale-eth')?.id).toBe('whale-eth');
       expect(getAgentDomain('unknown-agent')).toBeUndefined();
     });
 

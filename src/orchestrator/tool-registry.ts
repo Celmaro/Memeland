@@ -254,11 +254,6 @@ export class ToolRegistry {
         parameters: { type: 'object', properties: {} },
       },
       {
-        name: 'get_market_regime',
-        description: 'Show the current market regime (TRENDING_BULL/BEAR, SIDEWAYS_CHOP, EXTREME_VOLATILITY) with BTC/ETH 24h change and volatility index.',
-        parameters: { type: 'object', properties: {} },
-      },
-      {
         name: 'get_portfolio',
         description: 'Show portfolio state: Robinhood (ETH) wallet balance, open position count, current drawdown.',
         parameters: { type: 'object', properties: {} },
@@ -586,11 +581,6 @@ export class ToolRegistry {
             message: health.allHealthy ? 'All agents HEALTHY.' : 'Some agents are not responding.',
             data: health.report,
           };
-        }
-
-        case 'get_market_regime': {
-          const { globalMarketRegimeFilter } = await import('../services/market-regime.js');
-          return { success: true, message: 'Market regime.', data: globalMarketRegimeFilter.getRegime() };
         }
 
         case 'get_portfolio': {

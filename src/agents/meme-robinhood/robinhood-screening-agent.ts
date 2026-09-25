@@ -2,7 +2,6 @@ import { GMGNAdapter, GMGNRawToken, type Chain, type KlineCandle } from '../../a
 import { RhFillTapeReader } from '../../adapters/rh-fill-tape.js';
 import { chainIdFor, type MarketDataProvider } from '../../adapters/market-data-provider.js';
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
-import { globalMarketRegimeFilter } from '../../services/market-regime.js';
 import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
 import { globalRugScoring } from '../../services/rug-scoring.js';
 import { BytecodeScanner } from '../../services/bytecode-scanner.js';
@@ -20,7 +19,7 @@ import { CriticVoter } from '../shared/critic-voter.js';
 import { predictUpMomentum, fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../shared/ml-predictor.js';
 import {
   type VoterOpinion, type VoterContext, scoresFromOpinions,
-  whaleVote, regimeVote, securityVote, walletVote, rubricVote,
+  whaleVote, securityVote, walletVote, rubricVote,
   reputationAwareSecurityVote, reputationAwareWalletVote, reputationContextFromToken,
   stickyQuantVote, ownerDedupedConvergenceVote,
 } from '../../orchestrator/voters.js';
@@ -720,11 +719,6 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               if (trk.fullCloseTotalUsd > 0) trackTrades.push({ side: 'sell', amountUsd: trk.fullCloseTotalUsd, isFullClose: true });
             }
             opinions.push(whaleVote(trackTrades, botReport.botRisk));
-            const regime = globalMarketRegimeFilter.getRegime();
-            opinions.push(regimeVote({
-              volatilityIndex: regime.volatilityIndex,
-              riskOff: regime.regime === 'TRENDING_BEAR' || regime.regime === 'EXTREME_VOLATILITY',
-            }));
             if (klines) {
               const pred = predictUpMomentum(klines);
               opinions.push({ voter: 'ml', score: pred.score, reasons: pred.reasons });

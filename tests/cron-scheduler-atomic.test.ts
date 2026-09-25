@@ -19,7 +19,7 @@ describe('CronScheduler atomic persistence', () => {
   it('persists schedules through the atomic JSON store and reloads them', () => {
     const dbPath = path.join(dir, 'schedules', 'schedules.json');
     const scheduler = new CronSchedulerService(dbPath);
-    const task = scheduler.addSchedule('every 4 hours', 'screening', 'whale-eth');
+    const task = scheduler.addSchedule('every 4 hours', 'screening', 'meme-robinhood');
 
     const disk = readJsonFileSafe<Array<{ id: string }>>(dbPath, []);
     expect(disk.some((entry) => entry.id === task.id)).toBe(true);

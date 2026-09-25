@@ -169,7 +169,6 @@ export async function handleChatInput(
     const channelDomainMap: Record<string, { agent: string; name: string }> = {
       'call-meme-robinhood': { agent: 'meme-robinhood', name: 'Robinhood Meme Agent' },
       'call-alpha-robinhood': { agent: 'alpha-robinhood', name: 'Alpha Scraper Agent' },
-      'call-whale-eth': { agent: 'whale-eth', name: 'ETH Whale Tracking Agent' },
     };
 
     let targetAgent = explicitAgent;
@@ -221,7 +220,6 @@ export async function handleChatInput(
       const ALL_AGENTS: Array<{ id: string; label: string; emoji: string }> = [
         { id: 'meme-robinhood',  label: 'Robinhood Meme Agent',               emoji: '🌸' },
         { id: 'alpha-robinhood', label: 'Alpha Scraper Agent (X API v2)',     emoji: '☀️' },
-        { id: 'whale-eth',       label: 'ETH Whale Tracker (Hyperliquid)',   emoji: '🐋' },
       ];
 
       const activeCount = ALL_AGENTS.filter(a => hub.isAgentActive(a.id)).length;

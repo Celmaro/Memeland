@@ -25,7 +25,7 @@ export function printStartupBanner(): string {
   // Memeland-fork kernel map. The 12-PR plan + KC1–KC9 consolidation + Kernels
   // S/T/U/V all landed here. See docs/KERNEL_CATALOG.md for the full surface.
   console.log('[KERNELS] A=reputation C=ledger D=sellability E=Result<T,E> F=decisionCache G=discovery | L=ttl-cache M=paced-http N=try-fetch-json O=staleness-clock P=chat-notifier Q=screening-runner R=wallet-balance');
-  console.log('[SWARM] voters=10 (quant/ml/security/sentiment/whale/regime/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED');
+  console.log('[SWARM] voters=9 (quant/ml/security/sentiment/whale/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED');
   console.log('[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork)');
   // Memeland fork multichain audit-key warning: every chain in MULTICHAIN_CHAINS that
   // doesn't have a GMGN_API_KEY_<CHAIN> (or a base GMGN_API_KEY) will cascade-fail

@@ -76,8 +76,7 @@ export const slashCommands = [
             .setRequired(false)
             .addChoices(
               { name: 'Robinhood Meme Agent', value: 'meme-robinhood' },
-              { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' },
-              { name: 'ETH Whale Tracker', value: 'whale-eth' }
+              { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' }
             )
         )
     )
@@ -90,8 +89,7 @@ export const slashCommands = [
             .setRequired(false)
             .addChoices(
               { name: 'Robinhood Meme Agent', value: 'meme-robinhood' },
-              { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' },
-              { name: 'ETH Whale Tracker', value: 'whale-eth' }
+              { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' }
             )
         )
     )
@@ -104,12 +102,11 @@ export const slashCommands = [
         .setDescription('Run an immediate on-demand screening pass for an agent')
         .addStringOption(opt =>
           opt.setName('agent')
-            .setDescription('Domain agent to trigger (e.g. meme-robinhood, alpha-robinhood, whale-eth)')
+            .setDescription('Domain agent to trigger (e.g. meme-robinhood, alpha-robinhood)')
             .setRequired(true)
             .addChoices(
               { name: 'Robinhood Meme Agent', value: 'meme-robinhood' },
-              { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' },
-              { name: 'ETH Whale Tracker', value: 'whale-eth' }
+              { name: 'Alpha Scraper Agent', value: 'alpha-robinhood' }
             )
         )
     ),
@@ -156,7 +153,7 @@ export const slashCommands = [
         .addStringOption(opt => opt.setName('strategy').setDescription('Strategy id').setRequired(true))
         .addStringOption(opt =>
           opt.setName('domain')
-            .setDescription('Screening domain (e.g. meme-robinhood, alpha-robinhood, whale-eth)')
+            .setDescription('Screening domain (e.g. meme-robinhood, alpha-robinhood)')
             .setRequired(true)
         )
     )
