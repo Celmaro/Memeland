@@ -485,7 +485,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
                   // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...gmgnDiscovery]) merged.set(t.address.toLowerCase(), t);
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...gmgnDiscovery]) {
+                    const key = t.address.toLowerCase();
+                    const prev = merged.get(key);
+                    // Fresh-pair lane survival: a later, richer source (e.g. GMGN
+                    // rank) may overwrite an ankr raw pair — preserve freshLane so
+                    // the low fresh floor still applies to a pair first seen on-chain.
+                    const fresh = (prev?.freshLane || t.freshLane) ? true : undefined;
+                    merged.set(key, fresh ? { ...t, freshLane: true } : t);
+                  }
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         if (signalBoostMap.size > 0) {
