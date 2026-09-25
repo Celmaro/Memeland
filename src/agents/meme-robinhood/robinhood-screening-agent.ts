@@ -547,6 +547,16 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           try {
             const batched = await this.batchFreshMarketData(freshZero.map((t) => t.address));
             for (const [addr, data] of batched) freshEnrichMap.set(addr, data);
+            // Batch-level observability (#2 audit): how many fresh pairs got ANY
+            // DexScreener data (vs zero suppliers)? <minFresh pairs are enriched
+            // but sub-1000-1h — no winner line fires, so this is the only proof
+            // the endpoint works from this network.
+            const withData = freshEnrichMap.size;
+            if (withData > 0) {
+              console.log(`[FRESH LANE] enrichment: ${withData}/${freshZero.length} fresh pairs resolved real market data (${freshZero.length} attempted).`);
+            } else {
+              console.warn(`[FRESH LANE] enrichment: 0/${freshZero.length} fresh pairs resolved — DexScreener unreachable or pairs not yet indexed (fresh pairs take minutes to appear).`);
+            }
           } catch (enrichErr: any) {
             console.warn(`[FRESH LANE] batch enrichment failed (fresh pairs stay zero-data): ${enrichErr.message}`);
           }
