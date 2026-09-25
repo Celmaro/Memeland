@@ -5,6 +5,7 @@ import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { globalBotDetection, recordBotRiskSample } from '../../services/bot-detection.js';
 import { globalRugScoring } from '../../services/rug-scoring.js';
 import { antiFoolingRisk, antiFoolingPenalties } from '../../services/anti-fooling.js';
+import { globalFreshPairWatchlist } from '../../services/fresh-pair-watchlist.js';
 import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
@@ -496,6 +497,22 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   }
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
+        // #3 fresh-pair promotion: track freshLane candidates across cycles and
+        // log the ones that matured (volume/liquidity accumulated) — fresh
+        // discoveries become visible instead of sitting in the lane silently.
+        try {
+          const { matured, active } = globalFreshPairWatchlist.track(allCandidates);
+          if (matured.length > 0) {
+            for (const m of matured) {
+              console.log(`[FRESH LANE] ${m.symbol} (${m.chain}) matured: vol1h $${((m.volume1hUsd ?? 0) / 1000).toFixed(1)}k liq $${((m.liquidityUsd ?? 0) / 1000).toFixed(1)}k — now eligible at the mature floor.`);
+            }
+          }
+          if (active > 0 && matured.length === 0) {
+            console.log(`[FRESH LANE] ${chain}: ${active} fresh pair(s) tracked, ${matured.length} matured this cycle.`);
+          }
+        } catch (watchErr: any) {
+          console.warn(`[FRESH LANE] watchlist failed (non-fatal): ${watchErr.message}`);
+        }
         if (signalBoostMap.size > 0) {
           console.log(`[MEME AGENT] ${chain}: signal overlay ${signalBoostMap.size} tokens with smart-money/KOL/CTO events.`);
         }
@@ -743,14 +760,16 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               const pred = predictUpMomentum(klines);
               opinions.push({ voter: 'ml', score: pred.score, reasons: pred.reasons });
             } else {
-              opinions.push({ voter: 'ml', score: 50, reasons: ['no klines — neutral vote'] });
+              // #1 abstention: no klines is a MISSING input, not a neutral read.
+              // Drop the forced 50 — the average renormalizes without momentum.
+              opinions.push({ voter: 'ml', score: 50, reasons: ['no klines — abstain'], abstain: true });
             }
             if (this.criticVoter) {
               try {
                 opinions.push(await this.criticVoter.evaluate({ token: t, chain, thesis, reasons: det.reasons }));
               } catch (err: any) {
-                console.warn(`[MEME AGENT] Critic failed (neutral): ${err.message}`);
-                opinions.push({ voter: 'critic', score: 50, reasons: ['critic error — neutral'] });
+                console.warn(`[MEME AGENT] Critic failed (abstain): ${err.message}`);
+                opinions.push({ voter: 'critic', score: 50, reasons: ['critic error — abstain'], abstain: true });
               }
             }
             payload.voterScores = consolidateOpinions(opinions);

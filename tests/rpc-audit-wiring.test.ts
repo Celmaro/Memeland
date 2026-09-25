@@ -6,6 +6,15 @@ import { AnkrDiscoveryFeed, PAIR_CREATED_TOPIC0, decodePairCreated, FACTORY_ADDR
 import { RPCFailoverManager } from '../src/services/rpc-failover.js';
 import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { MarketDataProvider, MarketToken } from '../src/adapters/market-data-provider.js';
+import {
+  consolidateOpinions,
+  scoresFromOpinions,
+  whaleVote,
+  walletVote,
+  convergenceVote,
+  rubricVote,
+  type VoterContext,
+} from '../src/orchestrator/voters.js';
 
 // Hermetic: every test in this file must run WITHOUT real network. The RPC
 // probe tests and fail-soft paths hit fetch(); stub it globally to reject fast
@@ -125,6 +134,57 @@ describe('decodePairCreated (B4 decode fixture)', () => {
   });
 });
 
+import { FreshPairWatchlist } from '../src/services/fresh-pair-watchlist.js';
+import { klinesFollowThroughLabeler } from '../src/orchestrator/calibration-harness.js';
+
+describe('#3 fresh-pair promotion watchlist', () => {
+  function mkFresh(overrides: Record<string, unknown>): any {
+    return { chain: 'bsc', address: '0xF', symbol: 'F', freshLane: true, volume1hUsd: 0, liquidityUsd: 0, ...overrides };
+  }
+
+  it('tracks fresh pairs and reports the ones that matured', () => {
+    const wl = new FreshPairWatchlist();
+    const r1 = wl.track([mkFresh({ volume1hUsd: 0, liquidityUsd: 0 })]);
+    expect(r1.matured.length).toBe(0);
+    // Next cycle the pair accumulated volume → matured.
+    const r2 = wl.track([mkFresh({ volume1hUsd: 30000, liquidityUsd: 5000 })]);
+    expect(r2.matured.length).toBe(1);
+    expect(r2.matured[0]!.address).toBe('0xF');
+    expect(r2.matured[0]!.matured).toBe(true);
+  });
+
+  it('ignores non-freshLane candidates', () => {
+    const wl = new FreshPairWatchlist();
+    const r = wl.track([mkFresh({ freshLane: false, volume1hUsd: 999999 })]);
+    expect(r.matured.length).toBe(0);
+    expect(r.active).toBe(0);
+  });
+});
+
+describe('#2 klines follow-through labeler', () => {
+  const entry = {
+    symbol: 'TEST', domain: 'MEME_ROBINHOOD', contractAddress: '0xCA',
+    totalConfidence: 85, passed: true, timestamp: '2026-09-25T00:00:00Z', rawPayloadJson: '{}',
+  };
+
+  it('labels up when price rose in the window', async () => {
+    const labeler = klinesFollowThroughLabeler({
+      fetchKlines: async () => [
+        { timestamp: Date.parse('2026-09-24T23:50:00Z'), close: 100 },
+        { timestamp: Date.parse('2026-09-25T00:30:00Z'), close: 110 },
+        { timestamp: Date.parse('2026-09-25T01:00:00Z'), close: 120 },
+      ],
+      now: Date.parse('2026-09-25T01:30:00Z'),
+    });
+    expect(await labeler(entry as any)).toBe('up');
+  });
+
+  it('labels null when klines are unavailable (never a false fire)', async () => {
+    const labeler = klinesFollowThroughLabeler({ fetchKlines: async () => null });
+    expect(await labeler(entry as any)).toBeNull();
+  });
+});
+
 describe('Fresh-pair lane (recency fix)', () => {
   const matureCfg = {
     minVolume1hUsd: 50000,
@@ -177,6 +237,42 @@ describe('Fresh-pair lane (recency fix)', () => {
     const r = preFilterToken(mkT({ freshLane: undefined, volume1hUsd: 8000, liquidityUsd: 12000, marketCapUsd: 200000 }), matureCfg as any);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('volume 1h $8.0k < $50k');
+  });
+});
+
+describe('#1 abstention semantics', () => {
+  it('abstained opinions drop out of consolidateOpinions (renormalized, not 50-dragged)', () => {
+    const out = consolidateOpinions([
+      { voter: 'quant', score: 95, reasons: [] },
+      { voter: 'ml', score: 50, reasons: ['no klines — abstain'], abstain: true },
+      { voter: 'security', score: 100, reasons: [] },
+    ]);
+    // ml abstained → momentum = quant alone (95), not (95+50)/2.
+    expect(out.momentum).toBe(95);
+    expect(out.flow).toBeUndefined();
+  });
+
+  it('scoresFromOpinions skips abstained opinions', () => {
+    const map = scoresFromOpinions([
+      { voter: 'critic', score: 50, reasons: ['critic unavailable — abstain'], abstain: true },
+      { voter: 'quant', score: 80, reasons: [] },
+    ]);
+    expect(map['critic']).toBeUndefined();
+    expect(map['quant']).toBe(80);
+  });
+
+  it('whaleVote abstains on missing flow but votes (40) when bot-risk distrusts flow', () => {
+    const missing = whaleVote([], 0);
+    expect(missing.abstain).toBe(true);
+    const distrust = whaleVote([], 70);
+    expect(distrust.abstain).toBeFalsy();
+    expect(distrust.score).toBe(40);
+  });
+
+  it('wallet/convergence/rubric abstain when their inputs are missing', () => {
+    expect(walletVote({} as VoterContext).abstain).toBe(true);
+    expect(convergenceVote({} as VoterContext).abstain).toBe(true);
+    expect(rubricVote({} as VoterContext).abstain).toBe(true);
   });
 });
 

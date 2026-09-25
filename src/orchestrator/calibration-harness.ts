@@ -132,7 +132,51 @@ export function sweepThresholds(rows: CalibrationRow[], opts: CalibrationHarness
 }
 
 /**
- * Replay a candidate through the CURRENT swarm and return its confidence —
+ * Backfill labeler (#2): fetch post-signal klines (GeckoTerminal, keyless) and
+ * label follow-through — the signal timestamp + 1h window decides up/down/flat.
+ * Caller supplies a kline fetcher so tests stay hermetic; the live wiring in
+ * index.ts/CLI passes fetchKlinesWithGeckoFallback.
+ */
+export interface KlineFollowThroughDeps {
+  fetchKlines: (chain: string, address: string, hours: number) => Promise<Array<{ timestamp: number; close: number }> | null>;
+  /** Signal age in ms; defaults to now. */
+  now?: number;
+  /** Window (ms) after the signal to measure follow-through (default 1h). */
+  windowMs?: number;
+  /** Relative move (%) required to call it 'up'/'down' (default 3). */
+  movePct?: number;
+}
+
+export function klinesFollowThroughLabeler(deps: KlineFollowThroughDeps) {
+  return async (input: CalibrationLabelerInput): Promise<FollowThroughLabel> => {
+    try {
+      const now = deps.now ?? Date.now();
+      const windowMs = deps.windowMs ?? 60 * 60 * 1000;
+      const movePct = deps.movePct ?? 3;
+      const klines = await deps.fetchKlines(input.domain === 'MEME_ROBINHOOD' ? 'bsc' : input.domain, input.contractAddress, 48);
+      if (!klines || klines.length < 2) return null;
+      const signalAt = Date.parse(input.timestamp);
+      if (!Number.isFinite(signalAt)) return null;
+      // The signal timestamp may be in the future relative to local now (log
+      // clock skew) — clamp so we measure from the signal point, not the wall.
+      const target = Math.min(signalAt + windowMs, now);
+      const before = klines.filter((k) => k.timestamp <= signalAt);
+      const after = klines.filter((k) => k.timestamp <= target && k.timestamp > signalAt);
+      if (before.length === 0 || after.length === 0) return null;
+      const entry = before[before.length - 1]!.close;
+      const exit = after[after.length - 1]!.close;
+      if (!Number.isFinite(entry) || !Number.isFinite(exit) || entry <= 0) return null;
+      const change = ((exit - entry) / entry) * 100;
+      if (change > movePct) return 'up';
+      if (change < -movePct) return 'down';
+      return 'flat';
+    } catch {
+      return null; // klines unavailable → unlabelled (never a false fire)
+    }
+  };
+}
+
+/** Replay a candidate through the CURRENT swarm and return its confidence —
  * used to re-score historical raw payloads with today's voter weights/gates.
  */
 export function replayThroughSwarm(candidate: SignalCandidate, engine: SwarmConsensusEngine): { confidenceScore: number; passed: boolean; refusal?: string } {
