@@ -85,7 +85,6 @@ export class TelegramService {
       'audit-on-demand',
       'call-meme-robinhood',
       'call-alpha-robinhood',
-      'call-whale-eth',
     ];
 
     const results: Record<string, number | null> = {};

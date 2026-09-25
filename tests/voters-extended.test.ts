@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   whaleVote,
   securityVote,
-  regimeVote,
   aggregateVoterScores,
   scoresFromOpinions,
   VOTER_IDS,
@@ -123,7 +122,6 @@ describe('existing voters exports remain intact and new ids are weighted', () =>
   it('keeps all original voter exports', () => {
     expect(typeof whaleVote).toBe('function');
     expect(typeof securityVote).toBe('function');
-    expect(typeof regimeVote).toBe('function');
     expect(typeof aggregateVoterScores).toBe('function');
     expect(typeof scoresFromOpinions).toBe('function');
     expect(typeof walletVote).toBe('function');

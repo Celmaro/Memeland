@@ -2,12 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   aggregateVoterScores,
   DEFAULT_VOTER_WEIGHTS,
+  VOTER_IDS,
   immutableSecurityVote,
   ownerDedupedConvergenceVote,
   securityVote,
   stickyQuantVote,
   whaleVote,
-  regimeVote,
   scoresFromOpinions,
 } from '../src/orchestrator/voters.js';
 import { predictUpMomentum, rsi, fetchKlinesWithGeckoFallback, geckoNetworkIdFor, type KlineLike } from '../src/agents/shared/ml-predictor.js';
@@ -20,8 +20,8 @@ import { DecisionCache } from '../src/services/decision-cache.js';
 describe('7-voter swarm aggregation', () => {
   it('weights average only the voters that rendered a score (missing voters ignored, never 0)', () => {
     const { score, breakdown } = aggregateVoterScores({ quant: 100, security: 100, ml: 50 });
-    // weights: quant .1626 + security .2033 + ml .1220 = .4879 → (16.26 + 20.33 + 6.10)/.4879 = 87.49 → 87
-    expect(score).toBe(87);
+    // weights: quant .1695 + security .2119 + ml .1271 = .5085 → (16.95 + 21.19 + 6.36)/.5085 = 87.50 → 88
+    expect(score).toBe(88);
     expect(breakdown['sentiment']).toBeUndefined();
   });
 
@@ -81,12 +81,10 @@ describe('7-voter swarm aggregation', () => {
     expect(whaleVote([], 70).score).toBe(40);
   });
 
-  it('regime vote: risk-off caps at 45', () => {
-    const riskOff = regimeVote({ volatilityIndex: 40, riskOff: true });
-    expect(riskOff.score).toBeLessThanOrEqual(45);
-    const calm = regimeVote({ volatilityIndex: 10, riskOff: false });
-    expect(calm.score).toBe(60);
-    expect(regimeVote(null).score).toBe(50);
+  it('regime vote: removed — a 4% macro vote had no edge and dragged the average', () => {
+    // The regime voter was stripped (inert 4% weight could never stop a fire).
+    // VOTER_IDS no longer contains regime; aggregate ignores it entirely.
+    expect(VOTER_IDS).not.toContain('regime');
   });
 
   it('scoresFromOpinions maps rendered opinions to VoterScores', () => {

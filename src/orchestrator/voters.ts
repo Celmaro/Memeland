@@ -10,8 +10,7 @@
  *   3 security  — GoPlus + GMGN audit + holder concentration (fail-closed 0 on audit fail)
  *   4 sentiment — sentiment-voter.ts: X / on-chain social fields (X optional)
  *   5 whale     — GMGN smart-money/KOL trade flow (accumulation vs exit)
- *   6 regime    — market-regime + DeFiLlama chain TVL/DEX-volume context
- *   7 critic    — critic-voter.ts: LLM adversarial pass, neutral (50) when unavailable
+ *   6 critic    — critic-voter.ts: LLM adversarial pass, neutral (50) when unavailable
  */
 
 import type { GMGNRawToken } from '../adapters/gmgn-adapter.js';
@@ -21,26 +20,24 @@ import { flowConvergenceScore, type BuyEvent, type FlowConvergenceConfig } from 
 import { securityMetricFactors, computeRubric } from '../services/risk-rubric.js';
 import type { DecisionCache } from '../services/decision-cache.js';
 
-export type VoterId = 'quant' | 'ml' | 'security' | 'sentiment' | 'whale' | 'regime' | 'critic' | 'wallet' | 'convergence' | 'rubric';
+export type VoterId = 'quant' | 'ml' | 'security' | 'sentiment' | 'whale' | 'critic' | 'wallet' | 'convergence' | 'rubric';
 
-export const VOTER_IDS: VoterId[] = ['quant', 'ml', 'security', 'sentiment', 'whale', 'regime', 'critic', 'wallet', 'convergence', 'rubric'];
+export const VOTER_IDS: VoterId[] = ['quant', 'ml', 'security', 'sentiment', 'whale', 'critic', 'wallet', 'convergence', 'rubric'];
 
 /**
  * Default relative weights (sum ≈ 1.0). Security carries the most weight —
- * consistent with the fail-closed ethos. Regime is deliberately small:
- * chain-wide context must never override a strong token-level signal.
+ * consistent with the fail-closed ethos.
  */
 export const DEFAULT_VOTER_WEIGHTS: Record<VoterId, number> = {
-  quant: 0.1626,
-  ml: 0.1220,
-  security: 0.2033,
-  sentiment: 0.1220,
-  whale: 0.0813,
-  regime: 0.0407,
-  critic: 0.0813,
-  wallet: 0.0650,
-  convergence: 0.0488,
-  rubric: 0.0732,
+  quant: 0.1695,
+  ml: 0.1271,
+  security: 0.2119,
+  sentiment: 0.1271,
+  whale: 0.0847,
+  critic: 0.0847,
+  wallet: 0.0677,
+  convergence: 0.0509,
+  rubric: 0.0763,
 };
 
 export interface VoterOpinion {
@@ -61,8 +58,6 @@ export interface VoterContext {
   signalConfidence: number;
   /** GMGN smart-money/KOL trade feed rows for this token, if fetched. */
   trackTrades?: Array<{ side: 'buy' | 'sell'; amountUsd: number; isFullClose: boolean }>;
-  /** Market-regime snapshot, if available. */
-  regime?: { volatilityIndex: number; riskOff: boolean } | null;
   /** 15m klines for the ML predictor, if fetched. */
   klines?: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> | null;
   /** Wallet-scoring metrics (Q03). Missing => neutral, never a false win. */
@@ -235,25 +230,6 @@ export function whaleVote(
     reasons.push(`bot risk ${Math.round(botRisk)} limits accumulation read`);
   }
   return { voter: 'whale', score: capped, reasons };
-}
-
-/** Helper: regime vote — risk-off caps the score at 45, high volatility adds small caution. */
-export function regimeVote(regime: VoterContext['regime']): VoterOpinion {
-  if (!regime) return { voter: 'regime', score: 50, reasons: ['regime unknown — neutral'] };
-  let score = 50;
-  const reasons: string[] = [];
-  if (regime.riskOff) {
-    score = Math.min(score, 45);
-    reasons.push('macro risk-off (BTC/ETH bear/extreme regime)');
-  }
-  if (regime.volatilityIndex > 70) {
-    score -= 10;
-    reasons.push(`extreme volatility index ${regime.volatilityIndex}`);
-  } else if (regime.volatilityIndex < 25) {
-    score += 10;
-    reasons.push(`calm regime (vol index ${regime.volatilityIndex})`);
-  }
-  return { voter: 'regime', score: Math.max(0, Math.min(100, score)), reasons: reasons.length > 0 ? reasons : ['regime neutral'] };
 }
 
 /** Build a full VoterScores map from opinions that actually rendered. */

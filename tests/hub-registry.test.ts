@@ -114,8 +114,8 @@ describe('OpenCatzHub registry-driven triggerAgentPass', () => {
     expect(stub.runScreeningPass).toHaveBeenCalledTimes(1);
   });
 
-  it('all active registered domains are triggerable via factories (meme-robinhood + whale-eth)', async () => {
-    const ids = ['meme-robinhood', 'whale-eth'] as const;
+  it('all active registered domains are triggerable via factories (meme-robinhood)', async () => {
+    const ids = ['meme-robinhood'] as const;
     for (const id of ids) {
       const stub = mkStubAgent(id, [mkReport(id.toUpperCase())]);
       const hub = new OpenCatzHub({ agentFactories: { [id]: () => stub } });
@@ -127,11 +127,11 @@ describe('OpenCatzHub registry-driven triggerAgentPass', () => {
   it('factory exception is caught and returns [] (fail-closed)', async () => {
     const hub = new OpenCatzHub({
       agentFactories: {
-        'whale-eth': () => {
+        'meme-robinhood': () => {
           throw new Error('boom');
         },
       },
     });
-    expect(await hub.triggerAgentPass('whale-eth')).toEqual([]);
+    expect(await hub.triggerAgentPass('meme-robinhood')).toEqual([]);
   });
 });

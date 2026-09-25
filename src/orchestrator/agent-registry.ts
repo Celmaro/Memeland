@@ -1,9 +1,8 @@
 export type AgentDomainId =
   | 'meme-robinhood'
-  | 'alpha-robinhood'
-  | 'whale-eth';
+  | 'alpha-robinhood';
 
-export type AgentCategory = 'MEME' | 'ALPHA' | 'WHALE';
+export type AgentCategory = 'MEME' | 'ALPHA';
 
 export interface AgentDomainInfo {
   id: AgentDomainId;
@@ -27,15 +26,6 @@ export const AGENT_DOMAINS: AgentDomainInfo[] = [
     // neutral vote — a missing key must never halt the screening pass.
     requiredKeys: [],
     category: 'MEME',
-  },
-  {
-    id: 'whale-eth',
-    displayName: 'WHALE-ETH',
-    name: 'Hyperliquid ETH Whale & Smart-Money Positioning',
-    channel: 'call-whale-eth',
-    aliases: ['whale', 'eth-whale', 'hyperliquid', 'whale-tracking', 'whale-eth'],
-    requiredKeys: [],
-    category: 'WHALE',
   },
 ];
 

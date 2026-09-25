@@ -4,7 +4,6 @@ import {
   icWeightDeltas,
   applyDeltas,
   plattCalibrate,
-  abstainNeutral,
   walkForwardSplit,
   type CalibrationRow,
 } from '../src/orchestrator/scoring-calibration.js';
@@ -56,16 +55,6 @@ describe('Platt calibration (Q10)', () => {
     const nan = plattCalibrate(NaN, 2, -1);
     expect(nan).toBeGreaterThanOrEqual(0);
     expect(nan).toBeLessThanOrEqual(1);
-  });
-});
-
-describe('regime abstain (Q10)', () => {
-  it('an abstain regime returns a neutral vote (never raises consensus)', () => {
-    const r = abstainNeutral({ abstain: true });
-    expect(r.abstain).toBe(true);
-    expect(r.neutralScore).toBe(50);
-    expect(abstainNeutral({ abstain: false }).abstain).toBe(false);
-    expect(abstainNeutral(null).abstain).toBe(false);
   });
 });
 

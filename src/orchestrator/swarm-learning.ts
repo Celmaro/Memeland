@@ -25,14 +25,13 @@ export interface SwarmWeights {
   twitterWeight: number;    // default 0.20
 }
 
-/** Baseline 7-voter weights — mirror of DEFAULT_VOTER_WEIGHTS in voters.ts. */
+/** Baseline voter weights — mirror of DEFAULT_VOTER_WEIGHTS in voters.ts. */
 const BASE_VOTER_WEIGHTS: Record<VoterId, number> = {
   quant: 0.2,
   ml: 0.15,
   security: 0.25,
   sentiment: 0.15,
   whale: 0.1,
-  regime: 0.05,
   critic: 0.1,
   wallet: 0.08,
   convergence: 0.06,
@@ -234,7 +233,6 @@ export class SwarmLearningEngine {
       security: BASE_VOTER_WEIGHTS.security * swing(w.devHoldingWeight, LEARNING_DEFAULTS.devHolding),
       sentiment: BASE_VOTER_WEIGHTS.sentiment * swing(w.twitterWeight, LEARNING_DEFAULTS.twitter),
       whale: BASE_VOTER_WEIGHTS.whale * swing(w.smartMoneyWeight, LEARNING_DEFAULTS.smartMoney),
-      regime: BASE_VOTER_WEIGHTS.regime,
       critic: BASE_VOTER_WEIGHTS.critic,
     };
     const out = {} as Record<VoterId, number>;

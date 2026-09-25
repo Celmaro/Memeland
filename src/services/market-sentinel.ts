@@ -12,15 +12,12 @@
 
 import type { BotRiskWindow } from './bot-detection.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
-import { type MarketRegimeFilter } from './market-regime.js';
 
 export interface MarketSentinelSample {
   /** Market-wide average bot risk 0-100 (e.g. globalBotRiskWindow avg). */
   botRisk: number;
   /** 0-1 — fraction of window samples flagged high (>= kill-switch threshold). */
   highRiskFraction: number;
-  /** Macro / whale risk-off from the regime filter. */
-  regimeRiskOff: boolean;
 }
 
 export interface MarketSentinelConfig {
@@ -28,8 +25,6 @@ export interface MarketSentinelConfig {
   tripBotRisk: number;
   /** Combined high-risk fraction required alongside `tripBotRisk`. */
   highRiskFractionThreshold: number;
-  /** Macro risk-off alone can count toward a trip when true. */
-  regimeRiskOffTrips: boolean;
   /** Consecutive qualifying passes required before the kill-switch trips. */
   requireConsecutive: number;
   /** Minimum interval between kill-switch trips (prevents re-trip churn). */
@@ -46,7 +41,6 @@ export interface MarketSentinelStatus {
 const DEFAULT_CONFIG: MarketSentinelConfig = {
   tripBotRisk: 80,
   highRiskFractionThreshold: 0.2,
-  regimeRiskOffTrips: true,
   requireConsecutive: 3,
   cooldownMs: 15 * 60 * 1000,
 };
@@ -94,8 +88,7 @@ export class MarketSentinel {
 
     this.status.lastSample = sample;
     const qualifies =
-      (sample.botRisk >= this.config.tripBotRisk && sample.highRiskFraction >= this.config.highRiskFractionThreshold) ||
-      (this.config.regimeRiskOffTrips && sample.regimeRiskOff === true);
+      sample.botRisk >= this.config.tripBotRisk && sample.highRiskFraction >= this.config.highRiskFractionThreshold;
 
     this.status.consecutiveRiskPasses = qualifies ? this.status.consecutiveRiskPasses + 1 : 0;
 
@@ -129,28 +122,23 @@ export class MarketSentinel {
     if (sample.botRisk >= this.config.tripBotRisk) {
       parts.push(`market bot-risk ${sample.botRisk} with ${(sample.highRiskFraction * 100).toFixed(0)}% high-risk tokens`);
     }
-    if (sample.regimeRiskOff) parts.push('macro risk-off');
     const forN = this.status.consecutiveRiskPasses;
     return `MarketSentinel killed trading after ${forN} persistent ${parts.join(' + ') || 'risk'} passes.`;
   }
 }
 
 /**
- * Process-wide singleton wired to the shared bot-risk window + market regime.
- * Dropped into index.ts on its own setInterval — decoupled from the screening
- * loop.
+ * Process-wide singleton wired to the shared bot-risk window. Dropped into
+ * index.ts on its own setInterval — decoupled from the screening loop.
  */
 export function marketSentinelProbe(
-  window: BotRiskWindow,
-  regime: MarketRegimeFilter
+  window: BotRiskWindow
 ): () => MarketSentinelSample {
   return () => {
     const snap = window.snapshot();
-    const r = regime.getRegime();
     return {
       botRisk: snap.avg,
       highRiskFraction: snap.highFraction,
-      regimeRiskOff: r.regime === 'TRENDING_BEAR' || r.regime === 'EXTREME_VOLATILITY',
     };
   };
 }

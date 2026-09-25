@@ -4,25 +4,21 @@ import { buildCallEmbed } from './discord/embeds/call-embed.js';
 import { OpenCatzHub } from './orchestrator/hub.js';
 import { dispatchDomain } from './orchestrator/dispatch.js';
 import { SwarmConsensusEngine } from './orchestrator/swarm-consensus.js';
-import type { Regime } from './orchestrator/swarm-guards.js';
 import { StrategyEngine } from './orchestrator/strategy-engine.js';
 import { PositionManager } from './position/position-manager.js';
 import { AIService } from './services/ai-service.js';
 import { handleInteraction } from './discord/handlers/interaction-handler.js';
 import { handleControlRoomMessage } from './discord/handlers/message-handler.js';
 import { globalHealthWatcher } from './services/health-watcher.js';
-import { globalMarketRegimeFilter } from './services/market-regime.js';
 import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
 import { globalLifiExecutor } from './adapters/lifi-executor.js';
 import { GMGNAdapter } from './adapters/gmgn-adapter.js';
-import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
 import { DexScreenerFeed } from './adapters/dexscreener-feed.js';
 import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
 import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
 import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
-import { WhaleScreeningAgent } from './agents/whale-eth/whale-screening-agent.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
@@ -88,10 +84,8 @@ const strategyEngine = new StrategyEngine();
 SwarmConsensusEngine.setStrategyProvider((domain: string) => strategyEngine.getActiveStrategy(domain));
 
 function gateSignal(payload: any): boolean {
-  // Kernel B — feed the prism-insight regime and azimuth sticky-conviction keys
-  // into the consensus guard so the regime floor and conviction hold live.
-  const regimeRaw = globalMarketRegimeFilter.getRegime().regime;
-  const regime: Regime = regimeRaw === 'SIDEWAYS_CHOP' ? 'CHOP' : (regimeRaw as Regime);
+  // Kernel B — feed the azimuth sticky-conviction keys into the consensus
+  // guard so the sticky-conviction and circuit-breaker checks hold live.
   const res = swarmEngine.evaluateSignal({
     symbol: payload.symbol || 'CUSTOM',
     domain: payload.domain || 'MEME_ROBINHOOD',
@@ -101,10 +95,9 @@ function gateSignal(payload: any): boolean {
     securityAuditPassed: Boolean(payload.securityAuditPassed),
     socialHypeScore: Number(payload.socialHypeScore) || 0,
     confidence: Number(payload.confidenceScore) || undefined,
-    // Arch-3 7-voter swarm: when the agent attached per-voter scores, the gate
+    // Arch-3 voter swarm: when the agent attached per-voter scores, the gate
     // re-derives confidence from the weighted average (voters.ts).
     voterScores: payload.voterScores || undefined,
-    regime,
     stickyKey: `${payload.domain || 'MEME_ROBINHOOD'}:${payload.network || 'chain'}:${payload.symbol || 'CUSTOM'}`.toUpperCase(),
   });
   if (!res.passed) {
@@ -195,13 +188,9 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     ankr: process.env.ANKR_FEED_ENABLED === 'true' ? new AnkrDiscoveryFeed() : null,
   },
 );
-const hyperliquidAdapter = new HyperliquidAdapter();
-const whaleScreeningAgent = new WhaleScreeningAgent(hyperliquidAdapter);
-
 // Wire shared adapters + singleton agent instances into the Hub
 hub.attachAgentFactories({
   'meme-robinhood': () => robinhoodScreeningAgent,
-  'whale-eth': () => whaleScreeningAgent,
 });
 
 // Attach StateStore to all persistent services
@@ -213,12 +202,12 @@ approvalQueueService.attachStateStore(stateStore);
 
 const loadedSkills = skillLoader.loadAllSkills();
 
-// Memeland fork boot summary. Names the live 10-voter swarm, the only execution
+// Memeland fork boot summary. Names the live 9-voter swarm, the only execution
 // layer (LI.FI/Jumper), and the skills the runtime actually loaded. The
 // kernel map (A–G + L–R) is printed earlier by printStartupBanner() in
 // startup/bootstrap.ts — see docs/KERNEL_CATALOG.md for the full surface.
-console.log(`[SWARM] voters=10 (quant/ml/security/sentiment/whale/regime/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED`);
-console.log(`[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork) | adapters=evm-robinhood,gmgn-rest-client,hyperliquid | cycles=${loadedSkills.length} skills loaded (${loadedSkills.map(s => s.name).join(', ')})`);
+console.log(`[SWARM] voters=9 (quant/ml/security/sentiment/whale/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED`);
+console.log(`[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork) | adapters=evm-robinhood,gmgn-rest-client | cycles=${loadedSkills.length} skills loaded (${loadedSkills.map(s => s.name).join(', ')})`);
 console.log(`[AI] provider=${aiService.getConfig().provider} model=${aiService.getConfig().modelName}`);
 
 const discordToken = process.env.DISCORD_BOT_TOKEN;
@@ -241,7 +230,7 @@ for (const [k, v] of Object.entries(stateStore.getAllDedupEntries())) {
 // Kernel S — cycle body moved to src/startup/screening-cycle.ts (createScreeningCycle).
 const runScreeningCycle = createScreeningCycle({
   hub, globalHealthWatcher, globalWalletBalanceReader, priceFeedService, stateStore,
-  globalMarketRegimeFilter, dispatchDomain, robinhoodScreeningAgent, whaleScreeningAgent,
+  dispatchDomain, robinhoodScreeningAgent,
   apiKeyGuard, gateSignal, createOperationalFunnel, mergeOperationalFunnel,
   globalOperationalHealth, DEDUP_WINDOW_MS, sightingFromCallCard,
   opportunityStrategist, opportunityLedger, approvalQueueService, executeMemeBuy,

@@ -3,7 +3,6 @@
  * `aggregateVoterScores` untouched so the 570-test floor cannot regress; G3).
  *
  * Adds, without replacing the existing weighted average:
- *   - regime-aware floor      (SRC-082 prism-insight Adapt)
  *   - asymmetric conflict     (SRC-097 Decision Hub A5: 1BUY+2SELL = veto)
  *   - downgrade-only confidence (SRC-233 zetryn A27 CalibrationMap)
  *   - cohort Jaccard voter    (SRC-194 FlySwarm A21)
@@ -12,26 +11,19 @@
  *   - RefusalCode vocabulary  (SRC-197 loxley A14 + Decision Hub A5)
  */
 
-export type Regime = 'TRENDING_BEAR' | 'TRENDING_BULL' | 'CHOP' | 'EXTREME_VOLATILITY';
-
-/** Named refusals (loxley + Decision Hub) — read by the reputation memory (Kernel A). */
 export type RefusalCode =
   | 'LOW_CONFIDENCE'
   | 'ASYMMETRIC_CONFLICT'
-  | 'REGIME_REJECTED'
   | 'CIRCUIT_OPEN'
   | 'PARSER_UNTRUSTWORTHY'
   | 'SELL_NOT_OPENABLE';
 
 /**
- * Single consensus floor (80%). The regime is ALREADY an input through the
- * regime voter (risk-off caps its vote at 45); raising the floor on top of
- * that double-counted the same signal and made the 80% quorum unreachable in
- * any risk-off regime.
+ * Single consensus floor (80%). The regime voter was removed (no edge — a 4%
+ * vote could never stop a fire and dragged the average toward neutral); the
+ * floor is a flat constant, not regime-aware.
  */
-export function regimeAwareFloor(_regime: Regime): number {
-  return 0.8;
-}
+export const CONSENSUS_FLOOR = 0.8;
 
 export interface DirectionVote {
   side: 'BUY' | 'SELL';

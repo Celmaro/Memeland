@@ -116,7 +116,7 @@ describe('Memeland fork boot banner (logs reflect THIS fork, not the upstream Op
     expect(joined).toContain('L=ttl-cache');
     expect(joined).toContain('R=wallet-balance');
     expect(joined).toContain('SWARM');
-    expect(joined).toContain('voters=10');
+    expect(joined).toContain('voters=9');
   });
 
   it('autonomy_ladder reflects env: defaults to Phase 2 APPROVAL when neither AUTO nor SIGNAL_ONLY set', () => {

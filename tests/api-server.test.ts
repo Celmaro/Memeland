@@ -33,8 +33,8 @@ describe('OpenCatzRESTServer Test Suite', () => {
       expect(data.executionMode).toBeDefined();
       expect(data.primaryVenue).toContain('Robinhood Chain L2');
       expect(Array.isArray(data.subAgents)).toBe(true);
-      // Arch-3 strip: lp-robinhood + nft + alpha removed; meme (multi-chain) + whale remain.
-      expect(data.subAgents.length).toBe(2);
+      // Arch-3 strip: lp-robinhood + nft + alpha + whale-eth removed; meme (multi-chain) remains.
+      expect(data.subAgents.length).toBe(1);
       expect(data.connectedApiKeys).toBeDefined();
     });
 
