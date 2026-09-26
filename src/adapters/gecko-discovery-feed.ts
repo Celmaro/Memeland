@@ -45,6 +45,8 @@ interface GeckoPoolRow {
   };
   relationships?: {
     base_token?: { data?: { id?: string } };
+    /** All-networks responses carry the chain here (base_token ids are raw). */
+    network?: { data?: { id?: string } };
   };
 }
 
@@ -179,17 +181,30 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
     const attrs = row?.attributes;
     if (!attrs?.address) return undefined;
     const baseTokenId = row?.relationships?.base_token?.data?.id;
-    // id looks like "base:0xADDR" (EVM) or "solana:ADDR" (non-EVM). The FIRST
-    // segment is the Gecko network name → our chainId (item 3: all-networks
-    // rows carry their own network, no per-chain fetch needed).
+    // id looks like "base:0xADDR" (EVM) or "solana:ADDR" (non-EVM) in
+    // network-scoped responses; in ALL-networks responses the base-token id is
+    // a RAW address and the chain is in relationships.network.data.id. Try the
+    // explicit network relationship first, then the id prefix (item 3).
     let address = attrs.address;
     let chainId: number | undefined;
+    let network = row?.relationships?.network?.data?.id;
+    if (network) {
+      network = network.toLowerCase();
+      chainId = chainIdFor(network === 'ethereum' ? 'eth' : network);
+    }
+    // The bot tracks TOKENS: the base-token id is the contract address (either
+    // "network:0xADDR" in network-scoped responses or a raw "0xADDR" in
+    // all-networks responses). Prefer it over the pair address.
     if (baseTokenId) {
       const parts = String(baseTokenId).split(':');
       if (parts.length >= 2) {
         address = parts.slice(1).join(':');
-        const network = parts[0]!.toLowerCase();
-        chainId = chainIdFor(network === 'ethereum' ? 'eth' : network);
+        if (chainId === undefined) {
+          network = parts[0]?.toLowerCase() ?? network;
+          chainId = chainIdFor(network === 'ethereum' ? 'eth' : network);
+        }
+      } else {
+        address = baseTokenId; // raw contract address
       }
     }
     if (!address || chainId === undefined) return undefined;
@@ -208,7 +223,7 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
       liquidityUsd: num(attrs.reserve_in_usd),
       volume24hUsd: num(attrs.volume_usd),
       fdvUsd: num(attrs.fdv_usd) || undefined,
-      dex: baseTokenId?.split(':')[0]?.toLowerCase(), // network prefix (chain filter)
+      dex: network, // Gecko network name (chain filter for all-networks fetch)
       ...(attrs.price_change_percentage_h24 ? { change24hPct: num(attrs.price_change_percentage_h24) } : {}),
     };
   }

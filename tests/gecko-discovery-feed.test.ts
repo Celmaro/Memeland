@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { GeckoDiscoveryFeed } from '../src/adapters/gecko-discovery-feed.js';
 
-/** Minimal GeckoTerminal v2 pool-row fixture (matching the real API shape). */
+/** Minimal GeckoTerminal v2 pool-row fixture — ALL-NETWORKS response shape:
+ *  base_token id is a RAW address; the chain lives in
+ *  relationships.network.data.id (the shape /networks/{kind} returns). */
 function poolRow(overrides: { address: string; name: string; network: string; priceUsd?: string; reserveUsd?: string; volumeUsd?: string; fdvUsd?: string }) {
   return {
-    id: `${overrides.network}:${overrides.address}`,
+    id: `0xPool_${overrides.address}`,
     type: 'pool',
     attributes: {
       address: `0xPair_${overrides.address}`,
@@ -17,7 +19,8 @@ function poolRow(overrides: { address: string; name: string; network: string; pr
       price_change_percentage_h24: '5.5',
     },
     relationships: {
-      base_token: { data: { id: `${overrides.network}:${overrides.address}` } },
+      base_token: { data: { id: `${overrides.address}` } },
+      network: { data: { id: `${overrides.network}` } },
     },
   };
 }
