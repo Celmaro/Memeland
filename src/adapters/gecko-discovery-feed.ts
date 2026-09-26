@@ -89,7 +89,13 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
     // GeckoDiscovery merges the two discovery surfaces the operator asked for:
     // fresh pools (new_pools) + rising pools (trending_pools). Dedupe by address,
     // then apply the standard options (chain filter, min liquidity, sort, limit).
-    const [fresh, trending] = await Promise.all([this.freshPools(), this.trendingPools()]);
+    // NOTE: freshPools/trendingPools run SEQUENTIALLY (not Promise.all) — they
+    // share one pacing guard, and concurrent loops both read lastRequestAt at
+    // the same instant, compute the same wait, and fire together — collapsing
+    // the 2s pacing and tripping Gecko's 30/min budget (observed live: HTTP 429
+    // on trending_pools). Serializing restores the real 2s-apart cadence.
+    const fresh = await this.freshPools();
+    const trending = await this.trendingPools();
     const byAddress = new Map<string, MarketToken>();
     for (const t of [...fresh, ...trending]) byAddress.set(`${t.chainId}:${t.address.toLowerCase()}`, t);
     let out = [...byAddress.values()];
