@@ -39,7 +39,23 @@ interface RawPoolRow {
   liquidity_usd?: number | string;
   price_usd?: number | string;
   transactions_24h?: number;
+  price_change_percentage_1h?: number | string;
+  price_change_percentage_5m?: number | string;
+  price_change_percentage_6h?: number | string;
+  price_change_percentage_24h?: number | string;
   tokens?: Array<{ id?: string; chain?: string; symbol?: string; name?: string }>;
+}
+
+/** Per-token detail row (item 4): carries granular 1h/15m/5m volume. */
+interface RawTokenDetail {
+  summary?: {
+    price_usd?: number | string;
+    liquidity_usd?: number | string;
+    '1h'?: { volume_usd?: number | string };
+    '15m'?: { volume_usd?: number | string };
+    '5m'?: { volume_usd?: number | string };
+    '24h'?: { volume_usd?: number | string };
+  };
 }
 
 export interface DexpaprikaFeedOptions {
@@ -158,13 +174,57 @@ export class DexpaprikaFeed implements MarketDataProvider {
       priceUsd: this.num(row.price_usd),
       liquidityUsd: this.num(row.liquidity_usd),
       volume24hUsd: this.num(row.volume_usd_24h),
+      // Item 4: DEXPaprika search rows carry real 1h/5m/6h/24h price change for
+      // free — wire them so the momentum/technical path isn't GMGN-only.
+      change1hPct: this.optNum(row.price_change_percentage_1h),
+      change5mPct: this.optNum(row.price_change_percentage_5m),
+      change24hPct: this.optNum(row.price_change_percentage_24h),
       ...(row.id ? { pairAddress: row.id } : {}),
     };
+  }
+
+  /**
+   * Item 4: fetch a token's granular volume detail (1h/15m/5m) — the search
+   * rows only carry 24h volume, so prefilter survivors on dexpaprika can get
+   * precise short-window volume via /networks/{network}/tokens/{address}.
+   * Fail-soft: null on transport/parse error (caller falls back to 24h/24).
+   */
+  public async tokenDetail(
+    chain: string,
+    address: string,
+  ): Promise<{ volume1hUsd?: number; volume15mUsd?: number; volume5mUsd?: number } | null> {
+    try {
+      const normalized = chain.toLowerCase();
+      const url = `${this.baseUrl}/networks/${encodeURIComponent(normalized)}/tokens/${encodeURIComponent(address)}`;
+      const res = await this.fetch(url);
+      if (!res.ok) return null;
+      const body = (await res.json()) as RawTokenDetail;
+      const s = body?.summary;
+      if (!s) return null;
+      const vol = (v: unknown): number | undefined => {
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+      };
+      return {
+        volume1hUsd: vol(s['1h']?.volume_usd),
+        volume15mUsd: vol(s['15m']?.volume_usd),
+        volume5mUsd: vol(s['5m']?.volume_usd),
+      };
+    } catch {
+      return null;
+    }
   }
 
   private num(raw: string | number | undefined): number {
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  /** Optional number — undefined for missing/non-numeric, so callers can tell
+   *  "not reported" from a genuine 0. */
+  private optNum(raw: string | number | undefined): number | undefined {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
   }
 
   private applyOptions(base: MarketToken[], options: MarketDiscoveryOptions): MarketToken[] {
