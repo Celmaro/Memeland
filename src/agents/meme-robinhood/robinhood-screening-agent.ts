@@ -481,6 +481,9 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       // Per-chain scan distribution — makes "only robinhood?" verifiable from
       // the funnel line instead of guessing from which chain is logged last.
       const scannedByChain: Record<string, number> = {};
+      // Per-source ingestion — "who provides the most (fresh) pairs" answerable
+      // from one line: count candidates by their discovery source.
+      const scannedBySource: Record<string, number> = {};
 
       // Chains from env (MULTICHAIN_CHAINS), default = the fork's full 5-chain scope.
       // Operators narrow with `MULTICHAIN_CHAINS=sol,bsc,robinhood` etc.; an empty
@@ -538,6 +541,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         scannedByChain[chain] = (scannedByChain[chain] ?? 0) + allCandidates.length;
+        for (const t of allCandidates) {
+          const src = t.source ?? 'unknown';
+          scannedBySource[src] = (scannedBySource[src] ?? 0) + 1;
+        }
         // Fresh-pair enrichment (batched, gap fix): collect every freshLane
         // candidate that carries zero market data, batch-fetch real
         // price/liquidity/volume from DexScreener /latest/dex/tokens (30 per
@@ -873,7 +880,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
       console.log(`[MEME AGENT] Pass complete. ${reports.length} signals passed.`);
       this.lastFunnel = { scanned, prefiltered, emitted: reports.length };
-      console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length} byChain=${Object.entries(scannedByChain).map(([c, n]) => `${c}:${n}`).join(',')}`);
+      console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length} byChain=${Object.entries(scannedByChain).map(([c, n]) => `${c}:${n}`).join(',')} bySource=${Object.entries(scannedBySource).map(([c, n]) => `${c}:${n}`).join(',')}`);
       return reports;
       }
 
