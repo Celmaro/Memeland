@@ -478,6 +478,9 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       const reports: AgentReport<RobinhoodSignal>[] = [];
       let scanned = 0;
       let prefiltered = 0;
+      // Per-chain scan distribution — makes "only robinhood?" verifiable from
+      // the funnel line instead of guessing from which chain is logged last.
+      const scannedByChain: Record<string, number> = {};
 
       // Chains from env (MULTICHAIN_CHAINS), default = the fork's full 5-chain scope.
       // Operators narrow with `MULTICHAIN_CHAINS=sol,bsc,robinhood` etc.; an empty
@@ -534,6 +537,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   }
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
+        scannedByChain[chain] = (scannedByChain[chain] ?? 0) + allCandidates.length;
         // Fresh-pair enrichment (batched, gap fix): collect every freshLane
         // candidate that carries zero market data, batch-fetch real
         // price/liquidity/volume from DexScreener /latest/dex/tokens (30 per
@@ -869,7 +873,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
       console.log(`[MEME AGENT] Pass complete. ${reports.length} signals passed.`);
       this.lastFunnel = { scanned, prefiltered, emitted: reports.length };
-      console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length}`);
+      console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length} byChain=${Object.entries(scannedByChain).map(([c, n]) => `${c}:${n}`).join(',')}`);
       return reports;
       }
 
