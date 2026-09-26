@@ -113,51 +113,41 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
     return out;
   }
 
-  /** Fresh (new) pools across all supported networks. Cache per chain set. */
+  /** Fresh (new) pools — ALL networks in ONE call (item 3: 5 calls → 1). */
   private async freshPools(): Promise<MarketToken[]> {
-    const out: MarketToken[] = [];
-    for (const chain of ['sol', 'bsc', 'base', 'eth', 'robinhood']) {
-      const key = `new:${chain}`;
-      const cached = this.newPoolsCache.get(key);
-      if (cached) {
-        out.push(...cached);
-        continue;
-      }
-      const tokens = await this.fetchNetworkPools(chain, 'new_pools');
-      this.newPoolsCache.set(key, tokens);
-      out.push(...tokens);
-    }
-    return out;
-  }
-
-  /** Trending pools across all supported networks. Cache per chain set. */
-  private async trendingPools(): Promise<MarketToken[]> {
-    const out: MarketToken[] = [];
-    for (const chain of ['sol', 'bsc', 'base', 'eth', 'robinhood']) {
-      const key = `trending:${chain}`;
-      const cached = this.trendingCache.get(key);
-      if (cached) {
-        out.push(...cached);
-        continue;
-      }
-      const tokens = await this.fetchNetworkPools(chain, 'trending_pools');
-      this.trendingCache.set(key, tokens);
-      out.push(...tokens);
-    }
-    return out;
-  }
-
-  private async fetchNetworkPools(chain: string, kind: 'new_pools' | 'trending_pools'): Promise<MarketToken[]> {
-    const network = geckoNetworkIdFor(chain);
-    if (!network) return [];
-    const chainId = chainIdFor(chain);
-    if (chainId === undefined) return [];
-    const url = `${this.baseUrl}/networks/${encodeURIComponent(network)}/${kind}?limit=${this.limit}`;
-    const tokens = await this.pacedGetPoolRows(url, chainId);
+    const key = 'new:all';
+    const cached = this.newPoolsCache.get(key);
+    if (cached) return cached;
+    const tokens = await this.fetchNetworkPools('new_pools');
+    this.newPoolsCache.set(key, tokens);
     return tokens;
   }
 
-  private async pacedGetPoolRows(url: string, chainId: number): Promise<MarketToken[]> {
+  /** Trending pools — ALL networks in ONE call (item 3: 5 calls → 1). */
+  private async trendingPools(): Promise<MarketToken[]> {
+    const key = 'trending:all';
+    const cached = this.trendingCache.get(key);
+    if (cached) return cached;
+    const tokens = await this.fetchNetworkPools('trending_pools');
+    this.trendingCache.set(key, tokens);
+    return tokens;
+  }
+
+  // Item 3: fetch ALL supported networks in a single call. Gecko row ids are
+  // "network:0xADDR" — the network prefix maps back to our chain, so one
+  // request per kind yields every chain's pools. This cuts the 5-chain×2-kind
+  // fan-out (10 calls) to 2 calls, keeping well under the 30/min budget and
+  // removing the burst that 429'd trending_pools.
+  private async fetchNetworkPools(kind: 'new_pools' | 'trending_pools'): Promise<MarketToken[]> {
+    const url = `${this.baseUrl}/networks/${kind}?limit=${this.limit}`;
+    const tokens = await this.pacedGetPoolRows(url);
+    // Filter to our supported chains only (the all-networks endpoint includes
+    // chains we don't trade — 30% of rows are noise otherwise).
+    const supported = new Set(['solana', 'bsc', 'base', 'eth', 'robinhood']);
+    return tokens.filter((t) => supported.has(t.dex ?? ''));
+  }
+
+  private async pacedGetPoolRows(url: string): Promise<MarketToken[]> {
     // Pace to the shared 30/min budget: sleep until minIntervalMs has elapsed
     // since the last request, then fetch. Fail-open (empty) on any error.
     const wait = Math.max(0, this.lastRequestAt + this.minIntervalMs - this.now());
@@ -175,7 +165,7 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
       const rows = Array.isArray(body?.data) ? body.data : [];
       const tokens: MarketToken[] = [];
       for (const row of rows) {
-        const t = this.normalizePool(row, chainId);
+        const t = this.normalizePool(row);
         if (t) tokens.push(t);
       }
       return tokens;
@@ -185,18 +175,24 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
     }
   }
 
-  private normalizePool(row: GeckoPoolRow, chainId: number): MarketToken | undefined {
+  private normalizePool(row: GeckoPoolRow): MarketToken | undefined {
     const attrs = row?.attributes;
     if (!attrs?.address) return undefined;
     const baseTokenId = row?.relationships?.base_token?.data?.id;
-    // id looks like "base:0xADDR" (EVM) or "solana:ADDR" (non-EVM). The pool
-    // address is the DEX pair; the base token address is the contract we track.
+    // id looks like "base:0xADDR" (EVM) or "solana:ADDR" (non-EVM). The FIRST
+    // segment is the Gecko network name → our chainId (item 3: all-networks
+    // rows carry their own network, no per-chain fetch needed).
     let address = attrs.address;
+    let chainId: number | undefined;
     if (baseTokenId) {
       const parts = String(baseTokenId).split(':');
-      if (parts.length >= 2) address = parts.slice(1).join(':');
+      if (parts.length >= 2) {
+        address = parts.slice(1).join(':');
+        const network = parts[0]!.toLowerCase();
+        chainId = chainIdFor(network === 'ethereum' ? 'eth' : network);
+      }
     }
-    if (!address) return undefined;
+    if (!address || chainId === undefined) return undefined;
     const name = attrs.name || '';
     const symbol = name.split('/')[0]?.trim() || '???';
     const num = (v: string | undefined): number => {
@@ -212,6 +208,7 @@ export class GeckoDiscoveryFeed implements MarketDataProvider {
       liquidityUsd: num(attrs.reserve_in_usd),
       volume24hUsd: num(attrs.volume_usd),
       fdvUsd: num(attrs.fdv_usd) || undefined,
+      dex: baseTokenId?.split(':')[0]?.toLowerCase(), // network prefix (chain filter)
       ...(attrs.price_change_percentage_h24 ? { change24hPct: num(attrs.price_change_percentage_h24) } : {}),
     };
   }

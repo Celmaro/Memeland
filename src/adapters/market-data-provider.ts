@@ -16,6 +16,9 @@ export interface MarketToken {
   fdvUsd?: number;
   mcapUsd?: number;
   change24hPct?: number;
+  /** Short-window price change (DEXPaprika search rows provide 1h/5m free). */
+  change1hPct?: number;
+  change5mPct?: number;
   pairAddress?: string;
   dex?: string;
   /**

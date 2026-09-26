@@ -120,7 +120,9 @@ describe('GeckoDiscoveryFeed (SRC-153 keyless discovery tier)', () => {
     const second = await feed.discover();
     expect(first.length).toBeGreaterThan(0);
     expect(second).toEqual(first);
-    // fresh run: 10 calls (5 chains x 2 endpoints). second run: 0 (all cached).
-    expect(count()).toBe(10);
+    // Item 3: all-network endpoints collapse the fan-out — 2 calls (new_pools
+    // + trending_pools for ALL chains), not 10 (5 chains x 2 endpoints). The
+    // TTL cache then absorbs repeat discovers entirely.
+    expect(count()).toBe(2);
   });
 });
