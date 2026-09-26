@@ -50,6 +50,16 @@ export interface MarketDataProvider {
   readonly id: string;
   /** Discover and normalize tokens across the supported chains. */
   discover(options?: MarketDiscoveryOptions): Promise<MarketToken[]>;
+  /**
+   * PR7 — optional granular short-window volume lookup (DEXPaprika token
+   * detail provides REAL 1h/15m/5m volume that search rows lack). Optional so
+   * feeds that only have discover() are untouched; when present, enrichment
+   * paths can replace the 24h/24 estimate with observed data.
+   */
+  tokenDetail?(
+    chain: string,
+    address: string,
+  ): Promise<{ volume1hUsd?: number; volume15mUsd?: number; volume5mUsd?: number } | null>;
 }
 
 /** Canonical chain-name → chain-id map used by normalized providers. */
