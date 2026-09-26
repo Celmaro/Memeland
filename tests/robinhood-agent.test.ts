@@ -41,6 +41,7 @@ describe('RobinhoodScreeningAgent', () => {
   };
 
   async function runVoterSwarmSecurityPass(agent: RobinhoodScreeningAgent, token: GMGNRawToken) {
+    process.env.GMGN_API_KEY = 'test-key';
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
       if (url.includes('api.coingecko.com')) {
         return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ethereum: { usd: ETH_PRICE, usd_24h_change: 1.5 } }) };
@@ -50,12 +51,22 @@ describe('RobinhoodScreeningAgent', () => {
       }
       throw new Error(`unexpected fetch: ${url}`);
     }));
+    // Feed contract (2026-09-26): keyless discovery introduces candidates;
+    // GMGN overlays enrichment onto addresses a keyless feed already found.
+    // A GMGN-only token (rank-only, no keyless feed row) is no longer a
+    // candidate — so the fixture supplies the token via the dexpaprika
+    // (keyless) collector, and GMGN enriches it as the overlay pass.
     vi.spyOn(agent, 'collectCandidates').mockResolvedValue([token]);
     vi.spyOn(agent, 'collectSignalBoostMap').mockResolvedValue(new Map());
     vi.spyOn(agent, 'collectTrackAccumulation').mockResolvedValue(new Map());
     vi.spyOn(agent, 'collectTrackCandidates').mockResolvedValue([]);
     vi.spyOn(agent, 'collectTapeCandidates').mockResolvedValue([]);
     vi.spyOn(agent, 'collectDexscreenerCandidates').mockResolvedValue([]);
+    // Keyless entry: mirror the token through the dexpaprika collector so it
+    // survives the overlay gate (address present in the keyless pool).
+    vi.spyOn(agent, 'collectDexpaprikaCandidates').mockResolvedValue([
+      { ...token, source: 'dexpaprika' as const, freshLane: undefined },
+    ]);
     return agent.runScreeningPass();
   }
 
@@ -224,6 +235,12 @@ describe('RobinhoodScreeningAgent', () => {
 
     const agent = new RobinhoodScreeningAgent();
     expect(agent.preFilter(healthy, ETH_PRICE).ok).toBe(true); // sanity: GMGN audit gates pass
+    // Feed contract (2026-09-26): keyless discovery introduces candidates;
+    // GMGN overlays onto addresses keyless feeds found. Mirror the healthy
+    // token through the dexpaprika collector so it survives the overlay gate.
+    vi.spyOn(agent, 'collectDexpaprikaCandidates').mockResolvedValue([
+      { ...healthy, source: 'dexpaprika' as const, freshLane: undefined },
+    ]);
     const reports = await agent.runScreeningPass();
     expect(reports.length).toBe(1);
     expect(reports[0].payload?.domain).toBe('MEME_ROBINHOOD');

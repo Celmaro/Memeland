@@ -385,10 +385,46 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    * leaves that slice unenriched (null) so fresh pairs keep their zeros and
    * the volume-ranked feeds re-surface them later. Keyless.
    */
+  /**
+   * Real observed volume for fresh pairs. DexScreener gives 24h only; DEXPaprika's
+   * per-token detail gives REAL 1h/15m/5m USD volume. PR7 wiring: when the
+   * dexpaprika feed is injected, use its tokenDetail() to override the 24h/24
+   * estimate on fresh-loop hot addresses (budget-capped at 8/call — keyless
+   * DEXPaprika is 15 req/min).
+   */
+  private async overlayDexpaprikaVolume(
+    out: Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>,
+    chain: string,
+    addresses: string[],
+  ): Promise<void> {
+    if (!this.dexpaprika?.tokenDetail) return;
+    let used = 0;
+    const MAX_DETAIL_CALLS = 8;
+    for (const addr of addresses) {
+      if (used >= MAX_DETAIL_CALLS) break;
+      try {
+        const detail = await this.dexpaprika.tokenDetail(chain, addr);
+        used += 1;
+        if (!detail) continue;
+        const key = addr.toLowerCase();
+        const prev = out.get(key) ?? {};
+        out.set(key, {
+          ...prev,
+          // REAL observed 1h volume — replaces the volume24h/24 estimate the
+          // prefilter would otherwise see (the I1-4 feed-vs-zero fix).
+          ...(detail.volume1hUsd !== undefined ? { volume1hUsd: detail.volume1hUsd } : {}),
+        });
+      } catch {
+        // fail-soft: keep the estimate; never block the fresh lane
+      }
+    }
+  }
+
   private async batchFreshMarketData(
     addresses: string[],
-  ): Promise<Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string }>> {
-    const out = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string }>();
+    chain: string,
+  ): Promise<Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>> {
+    const out = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>();
     const uniq = [...new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean))];
     const BATCH = 30;
     for (let s = 0; s < uniq.length; s += BATCH) {
@@ -410,6 +446,15 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         }
       } catch {
         // fail-soft: this slice stays unenriched; re-surfaced later
+      }
+    }
+    // PR7: DEXPaprika real 1h/15m/5m volume overlay on the batch that actually
+    // has zeros (fresh pairs) — the estimate loses when observed data exists.
+    if (this.dexpaprika?.tokenDetail) {
+      try {
+        await this.overlayDexpaprikaVolume(out, chain, uniq.filter((a) => !out.has(a)));
+      } catch {
+        // fail-soft — estimate path stays
       }
     }
     return out;
@@ -529,7 +574,16 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
                   // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...gmgnDiscovery]) {
+                  // Final (2026-09-26, feed-matrix decision): keyless discovery
+                  // feeds INTRODUCE candidates — dexpaprika/gecko/dexscreener/
+                  // tape/track/ankr all cover the 5 chains. GMGN rank/trenches/
+                  // hot no longer introduces new addresses (its 748/cycle was
+                  // 429-prone and, per the verified feed research, not a
+                  // freshness source): GMGN rows now OVERLAY enrichment onto
+                  // addresses a keyless feed already found (smartDegen/CTO/KOL
+                  // fields that detectMemeSignal needs), and GMGN-only
+                  // addresses are dropped.
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN
@@ -537,6 +591,17 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                     // the low fresh floor still applies to a pair first seen on-chain.
                     const fresh = (prev?.freshLane || t.freshLane) ? true : undefined;
                     merged.set(key, fresh ? { ...t, freshLane: true } : t);
+                  }
+                  // GMGN overlay pass: upgrade EXISTING addresses only. A GMGN
+                  // row for an address the keyless feeds never surfaced is
+                  // skipped (GMGN no longer a discovery source). freshLane
+                  // survives the overlay.
+                  for (const g of gmgnDiscovery) {
+                    const key = g.address.toLowerCase();
+                    const existing = merged.get(key);
+                    if (!existing) continue;
+                    const fresh = existing.freshLane || g.freshLane ? true : undefined;
+                    merged.set(key, fresh ? { ...g, freshLane: true } : g);
                   }
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
@@ -552,11 +617,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         // score momentum in the same cycle instead of dying data-less. The
         // prefilter bypass still sees zeros (fresh-at-birth semantics); once
         // enriched, the candidate competes on real numbers.
-        const freshEnrichMap = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; symbol?: string }>();
+        const freshEnrichMap = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>();
         const freshZero = allCandidates.filter((t) => t.freshLane === true && t.volume1hUsd === 0 && t.liquidityUsd === 0 && t.marketCapUsd === 0);
         if (freshZero.length > 0) {
           try {
-            const batched = await this.batchFreshMarketData(freshZero.map((t) => t.address));
+            const batched = await this.batchFreshMarketData(freshZero.map((t) => t.address), chain);
             for (const [addr, data] of batched) freshEnrichMap.set(addr, data);
             // Batch-level observability (#2 audit): how many fresh pairs got ANY
             // DexScreener data (vs zero suppliers)? <minFresh pairs are enriched
@@ -628,10 +693,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               t.liquidityUsd = fresh.liquidityUsd ?? t.liquidityUsd;
               const vol24 = fresh.volume24hUsd ?? 0;
               t.volume24hUsd = vol24;
-              t.volume1hUsd = vol24 > 0 ? vol24 / 24 : t.volume1hUsd;
+              // PR7: prefer REAL observed 1h volume (DEXPaprika token detail)
+              // over the 24h/24 estimate — the prefilter/maturity floor then
+              // sees actual short-window flow, not a divisor.
+              t.volume1hUsd = fresh.volume1hUsd ?? (vol24 > 0 ? vol24 / 24 : t.volume1hUsd);
               if (fresh.symbol) t.symbol = fresh.symbol;
               if (t.volume1hUsd >= this.config.minFreshVolume1hUsd) {
-                console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k`);
+                console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k${fresh.volume1hUsd !== undefined ? ' (real 1h)' : ''}`);
               }
             }
           }

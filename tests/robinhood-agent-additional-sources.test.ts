@@ -78,8 +78,10 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
     });
     const reports = await agent.runScreeningPass();
     expect(reports.length).toBe(0);
-    // Only the single rank candidate is scanned — tape/dexscreener ignored while flags are off.
-    expect(agent.getLastFunnelStats().scanned).toBe(1);
+    // Feed contract (2026-09-26): keyless discovery introduces candidates;
+    // GMGN only overlays enrichment onto addresses keyless feeds found. With
+    // every keyless flag off, the rank candidate (GMGN-only) is not scanned.
+    expect(agent.getLastFunnelStats().scanned).toBe(0);
   });
 
   it('(b) flags on → tape + dexscreener appended and address-deduped against rank candidates', async () => {
@@ -111,8 +113,9 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
     });
     const reports = await agent.runScreeningPass(); // must NOT throw
     expect(Array.isArray(reports)).toBe(true);
-    // Both sources failed open → only the single rank candidate scanned.
-    expect(agent.getLastFunnelStats().scanned).toBe(1);
+    // Both sources failed open → keyless pool empty → GMGN-only rank candidate
+    // is dropped (GMGN no longer introduces), so nothing scans.
+    expect(agent.getLastFunnelStats().scanned).toBe(0);
   });
 
   it('(d) real DexScreenerFeed injected into the agent yields normalized candidates (composition-root wire)', async () => {

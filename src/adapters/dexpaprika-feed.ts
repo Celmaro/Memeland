@@ -194,8 +194,12 @@ export class DexpaprikaFeed implements MarketDataProvider {
     address: string,
   ): Promise<{ volume1hUsd?: number; volume15mUsd?: number; volume5mUsd?: number } | null> {
     try {
-      const normalized = chain.toLowerCase();
-      const url = `${this.baseUrl}/networks/${encodeURIComponent(normalized)}/tokens/${encodeURIComponent(address)}`;
+      // Chain-name aliasing: the agent passes chain keys ('sol','eth') but
+      // DEXPaprika networks are named ('solana','ethereum'). Resolve to the
+      // canonical network id the provider uses internally.
+      const network = this.chainToNetwork(chain);
+      if (!network) return null;
+      const url = `${this.baseUrl}/networks/${encodeURIComponent(network)}/tokens/${encodeURIComponent(address)}`;
       const res = await this.fetch(url);
       if (!res.ok) return null;
       const body = (await res.json()) as RawTokenDetail;
@@ -213,6 +217,17 @@ export class DexpaprikaFeed implements MarketDataProvider {
     } catch {
       return null;
     }
+  }
+
+  /** Map bot chain keys / canonical names onto DEXPaprika network ids. */
+  private chainToNetwork(chain: string): string | null {
+    const c = chain.toLowerCase();
+    if (c === 'sol' || c === 'solana') return 'solana';
+    if (c === 'eth' || c === 'ethereum') return 'ethereum';
+    if (c === 'bsc' || c === 'binance') return 'bsc';
+    if (c === 'base') return 'base';
+    if (c === 'robinhood' || c === 'rh') return 'robinhood';
+    return null;
   }
 
   private num(raw: string | number | undefined): number {
