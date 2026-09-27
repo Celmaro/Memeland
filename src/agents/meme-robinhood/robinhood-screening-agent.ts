@@ -112,6 +112,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private gecko: MarketDataProvider | null;
   /** B4 keyless on-chain PairCreated discovery feed (Ankr-style, pool-backed). Empty until injected. */
   private ankr: MarketDataProvider | null;
+  /** Routescan keyless multi-chain explorer feed (new-token discovery + holders). Empty until injected. */
+  private routescan: MarketDataProvider | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -136,6 +138,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       dexpaprika?: MarketDataProvider;
       gecko?: MarketDataProvider;
       ankr?: MarketDataProvider | null;
+      routescan?: MarketDataProvider | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
@@ -157,6 +160,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.dexpaprika = opts.dexpaprika ?? null;
     this.gecko = opts.gecko ?? null;
     this.ankr = opts.ankr ?? null;
+    this.routescan = opts.routescan ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
@@ -265,6 +269,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.ankr, 'ankr', 'ANKR_FEED_ENABLED', chain);
   }
 
+  /** Routescan multi-chain new-token discovery. Guarded by ROUTESCAN_FEED_ENABLED=true. */
+  public async collectRoutescanCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.routescan, 'routescan', 'ROUTESCAN_FEED_ENABLED', chain);
+  }
+
   /**
    * Shared keyless-feed collector. Fails open (empty) unless the env gate is on
    * and a provider is injected. Normalizes discovered MarketTokens (filtered to
@@ -272,7 +281,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
@@ -578,6 +587,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const dexpaprikaCandidates = await this.collectDexpaprikaCandidates(chain);
                   const geckoCandidates = await this.collectGeckoCandidates(chain);
                   const ankrCandidates = await this.collectAnkrCandidates(chain);
+                  const routescanCandidates = await this.collectRoutescanCandidates(chain);
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
                   // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
@@ -590,7 +600,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // addresses a keyless feed already found (smartDegen/CTO/KOL
                   // fields that detectMemeSignal needs), and GMGN-only
                   // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates]) {
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN

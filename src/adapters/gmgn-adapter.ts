@@ -76,7 +76,7 @@ export interface GMGNRawToken {
   launchpadStatus: string | null;
   /** Bonding curve progress 0-1 (trenches/signal snapshot). */
   progress: number | null;
-  source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr';
+  source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan';
   /** I1-4: true when the source feed failed to supply market data. */
   sourceUnavailable?: boolean;
   /**
