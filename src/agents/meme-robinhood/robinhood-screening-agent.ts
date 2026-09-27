@@ -724,6 +724,20 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               }
             }
           }
+          // Fresh-pair REVALIDATE (strategy-audit #3): the fresh bypass let this
+          // token through with zero market data; once enrichment hydrated real
+          // numbers, re-run the MATURE floor so a $0-mcap token can't reach the
+          // strategy. Fail-closed on what matters, recency on what's fresh.
+          if (t.freshLane === true && (t.priceUsd > 0 || t.liquidityUsd > 0 || t.volume24hUsd > 0)) {
+            const matureCheck = preFilterToken(t, this.config, nativePriceUsd);
+            if (!matureCheck.ok) {
+              console.log(`[REVALIDATE] ⛔ ${t.symbol}: fresh→mature re-check failed — ${matureCheck.reason}`);
+              continue;
+            }
+            if (t.volume1hUsd > 0 || t.liquidityUsd > 0) {
+              console.log(`[REVALIDATE] ✓ ${t.symbol}: fresh pair now passes mature gates (vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k)`);
+            }
+          }
           // Security audit — GoPlus FIRST on EVM chains (keyless, no 429 wall):
           // honeypot/blacklist/tax from the on-chain service. GMGN is the fallback
           // when GoPlus has no data for the chain or the token. Solana stays GMGN

@@ -407,9 +407,19 @@ export function detectMemeSignal(t: GMGNRawToken): MemeSignalResult {
   // Quality gate: at least 1 of 3 signals {smart wallet, CTO, KOL} is required.
   // "Empty" tokens (only volume/pump with no smart money/CTO/KOL at all)
   // = noise, not alpha — straight to NONE, never becomes a call.
+  // FRESH-PAIR PATH (2026-09-28, live audit Q2): freshLane tokens arrive with
+  // smartDegen=0/renowned=0/ctoFlag=false because the keyless discovery feeds
+  // (routescan/ankr/gecko new_pools) don't have GMGN's social fields yet. The
+  // old gate sent every fresh pair to NONE — "fresh discovery works, fresh
+  // promotion doesn't". Bypass the social gate ONLY for fresh pairs that have
+  // real observed flow (post-REVALIDATE hydration) — security gates still run.
   const signalStrength = (smartDegen >= 1 ? 1 : 0) + (t.ctoFlag ? 1 : 0) + (renowned >= 1 ? 1 : 0);
-  if (signalStrength < 1) {
+  const freshWithFlow = t.freshLane === true && (t.volume1hUsd > 0 || t.volume24hUsd > 0 || t.liquidityUsd > 0);
+  if (signalStrength < 1 && !freshWithFlow) {
     return { type: 'NONE', confidence: 0, reasons: ['⚠️ Empty: no smart wallet, CTO, or KOL — skip.'] };
+  }
+  if (signalStrength < 1 && freshWithFlow) {
+    reasons.push('🌱 Fresh pair w/ observed flow (no smart-money labels yet)');
   }
 
   // CTO (GMGN source only)

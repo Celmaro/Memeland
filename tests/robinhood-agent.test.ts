@@ -175,6 +175,32 @@ describe('RobinhoodScreeningAgent', () => {
     expect(two.type).toBe('MOMENTUM');
   });
 
+  it('detectSignal fresh-pair path: freshLane + observed flow passes WITHOUT smart-money labels', () => {
+    // Q2 live-audit fix: fresh pairs arrive with smartDegen=0/renowned=0/cto=false
+    // because keyless discovery feeds don't carry GMGN social fields yet. The old
+    // gate sent every fresh pair to NONE. With observed flow (post-REVALIDATE),
+    // the social gate is bypassed — security gates still run downstream.
+    const agent = new RobinhoodScreeningAgent();
+    const fresh = agent.detectSignal(mkToken({
+      smartDegenCount: 0, renownedCount: 0, ctoFlag: false,
+      priceChange1h: 40, priceChange5m: 3, volume24hUsd: 300000,
+      freshLane: true,
+    }));
+    expect(fresh.type).toBe('MOMENTUM');
+    expect(fresh.reasons.some((r) => r.includes('Fresh pair'))).toBe(true);
+  });
+
+  it('detectSignal fresh-pair path: freshLane WITHOUT flow still NONE (fail-closed)', () => {
+    // Fresh but no observed volume/liquidity — cannot score momentum honestly.
+    const agent = new RobinhoodScreeningAgent();
+    const dead = agent.detectSignal(mkToken({
+      smartDegenCount: 0, renownedCount: 0, ctoFlag: false,
+      priceChange1h: 40, priceChange5m: 3, volume24hUsd: 0, volume1hUsd: 0, liquidityUsd: 0,
+      freshLane: true,
+    }));
+    expect(dead.type).toBe('NONE');
+  });
+
   it('runScreeningPass returns [] without network', async () => {
     process.env.GMGN_API_KEY = 'test-key';
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no network')));
