@@ -15,6 +15,7 @@ import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry } from '../../discovery/discovery-registry.js';
 import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
+import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
@@ -129,6 +130,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private sellability: SellabilitySimulator;
   /** P4.2 CoinStats token-risks (finalist security second-read, EVM only). */
   private coinstatsRisk: CoinStatsRiskService | null;
+  /** P5.2 Jev shadow-mode router (never gates; swarm fallback). */
+  private jevRouter: JevRouter | null;
   /** Keyless EVM token-security audit (GoPlus) — primary before GMGN. */
   private goplusService: GoPlusSecurityService;
   /** I0-1 Blockscout BuyEvent producer for the convergence voter (env-gated). */
@@ -180,7 +183,31 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
     this.coinstatsRisk = process.env.COINSTATS_API_KEY ? new CoinStatsRiskService() : null;
+    this.jevRouter = this.buildJevRouter();
     this.blockscout = opts.blockscout ?? null;
+  }
+
+  /**
+   * P5.2: build the Jev router. Client only when JEV_API_BASE is set; the
+   * router itself is inert unless JEV_ENABLED=true (shadow mode).
+   */
+  private buildJevRouter(): JevRouter | null {
+    const apiBase = process.env.JEV_API_BASE;
+    const apiKey = process.env.JEV_API_KEY;
+    const client: JevClient | undefined = apiBase
+      ? {
+          call: async (state: unknown) => {
+            const res = await fetch(`${apiBase.replace(/\/$/, '')}/decide`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+              body: JSON.stringify({ state }),
+            });
+            if (!res.ok) throw new Error(`jev HTTP ${res.status}`);
+            return (await res.json()) as import('../../ai/jev-schema.js').JevOutput;
+          },
+        }
+      : undefined;
+    return new JevRouter({ swarmConfidence: this.config.passThreshold ?? 80, client });
   }
 
   /**
@@ -1122,6 +1149,24 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             model: 'arch3-5slot',
           });
           (payload as unknown as Record<string, unknown>).calibratedDecision = cal;
+
+          // P5.2: Jev shadow-mode decision (never gates). Routes enrichment +
+          // regime classification; swarm fallback on any failure.
+          if (this.jevRouter && this.jevRouter.enabled()) {
+            try {
+              const jd = await this.jevRouter.decide({
+                rawScore: confidence,
+                regime: det.type,
+                flow: { buyUsd1h: t.buyUsd1h, sellUsd1h: t.sellUsd1h },
+                liquidity: t.liquidityUsd,
+                smartMoney: t.smartDegenCount,
+              });
+              (payload as unknown as Record<string, unknown>).jevDecision = jd;
+              console.log(`[JEV] ${t.symbol} source=${jd.source} regime=${jd.regime ?? '-'} next=${jd.nextAction ?? '-'} conf=${jd.confidence}`);
+            } catch (jevErr: any) {
+              console.warn(`[JEV] decide failed (swarm continues): ${jevErr.message}`);
+            }
+          }
           console.log(
             `[CALIBRATED] ${t.symbol} raw=${cal.rawScore} prob=${cal.calibratedProbability !== null ? cal.calibratedProbability.toFixed(2) : 'null (no model yet)'} horizon=${cal.horizon}`,
           );
