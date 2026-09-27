@@ -304,6 +304,37 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         expect(evm.executeBuyToken).not.toHaveBeenCalled();
       });
 
+      it('Q08 fill-sim FAILS CLOSED when real liquidity is unknown (no entryPriceUsd*1000)', async () => {
+        // Audit fix: the old code synthesized liquidity as entryPriceUsd*1000.
+        // Now the gate refuses when real pool depth is absent — never fabricates.
+        const { journal, evm, wallet } = makeDeps();
+        const check = vi.fn(() => ({ allowed: true, impactPct: 1, reason: 'ok' }));
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          fillSim: { check },
+          // NOTE: no liquidityUsd provided
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/unknown pool liquidity/);
+        expect(check).not.toHaveBeenCalled(); // never fabricate depth
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q08 fill-sim uses REAL liquidity when provided', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const check = vi.fn(() => ({ allowed: true, impactPct: 1, reason: 'ok' }));
+        await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          fillSim: { check },
+          liquidityUsd: 25000, // real pool depth from the candidate
+        });
+        expect(check).toHaveBeenCalledWith(
+          expect.objectContaining({ liquidityUsd: 25000 })
+        );
+      });
+
       it('Q13 cost gate refused → fill blocked after budget exhausted', async () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({

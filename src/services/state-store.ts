@@ -55,6 +55,9 @@ export interface ApprovalOrder {
   contractAddress: string;
   chain: string;
   entryPriceUsd: number;
+  /** Real pooled liquidity at enqueue time — used by the fill-sim gate on the
+   *  manual-approve execution path (audit fix: replaces synthetic liquidity). */
+  liquidityUsd?: number;
   suggestedSizeUsd: number;
   confidence: number;
   thesis: string;

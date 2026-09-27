@@ -9,6 +9,7 @@ export interface ApprovalOrderInput {
   contractAddress: string;
   chain: string;
   entryPriceUsd: number;
+  liquidityUsd?: number;
   suggestedSizeUsd: number;
   confidence: number;
   thesis: string;
@@ -64,6 +65,7 @@ export class ApprovalQueueService {
       contractAddress: input.contractAddress,
       chain: input.chain,
       entryPriceUsd: input.entryPriceUsd,
+      liquidityUsd: input.liquidityUsd,
       suggestedSizeUsd: input.suggestedSizeUsd,
       confidence: input.confidence,
       thesis: input.thesis,

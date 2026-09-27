@@ -22,6 +22,11 @@ export interface ExecuteMemeBuyOptions {
   symbol: string;
   contractAddress: string;
   entryPriceUsd: number;
+  /** Real pooled liquidity of the target token (from the candidate). The
+   *  fill-sim gate uses this for impact, NOT entryPriceUsd*1000 (audit finding:
+   *  the synthetic liquidity over/under-stated real pool depth and made the
+   *  impact proof meaningless). When absent, the fill-sim fails closed. */
+  liquidityUsd?: number;
   amountEth: number;
   confidence: number;
   thesis: string;
@@ -144,7 +149,13 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   // ── Q08 fill simulation (impact / liquidity proof, fail-closed) ─────────
   lifecycle('approved'); // non-sim approval gates passed (safety/sellability/sizer)
   if (opts.fillSim) {
-    const s = opts.fillSim.check({ amountUsd: desiredUsd, midPriceUsd: opts.entryPriceUsd, liquidityUsd: opts.entryPriceUsd > 0 ? opts.entryPriceUsd * 1000 : undefined });
+    // Audit fix: use REAL pool liquidity, not entryPriceUsd*1000 (which was
+    // price-proportional fiction). Fail closed when the real depth is unknown —
+    // a fill whose impact can't be proven against actual liquidity is refused.
+    if (opts.liquidityUsd === undefined || opts.liquidityUsd <= 0) {
+      return reject('rejected', `fill-sim gate refused: unknown pool liquidity (fail-closed).`);
+    }
+    const s = opts.fillSim.check({ amountUsd: desiredUsd, midPriceUsd: opts.entryPriceUsd, liquidityUsd: opts.liquidityUsd });
     if (!s.allowed) return reject('rejected', `fill-sim gate refused: ${s.reason} (impact ${s.impactPct.toFixed(1)}%)`);
   }
   lifecycle('simulated');
