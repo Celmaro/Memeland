@@ -124,8 +124,23 @@ export default {
       let score = 0;
       if (change5m !== null && change5m > 0) { score += 15; reasons.push(`⚡ 5m +${change5m.toFixed(1)}% (+15)`); }
       if (change1h !== null && change1h > 30) { score += 25; reasons.push(`🚀 1h +${change1h.toFixed(0)}% (+25)`); }
+      const buyUsd = Number(g.buy_usd_1h ?? 0);
+      const sellUsd = Number(g.sell_usd_1h ?? 0);
+      const hasUsdFlow = buyUsd > 0 && sellUsd > 0;
       const totalTrades = buys + sells;
-      if (totalTrades > 0 && buys / totalTrades > 0.6) { score += 20; reasons.push(`⚖️ Buy ${((buys / totalTrades) * 100).toFixed(0)}% / Sell ${((sells / totalTrades) * 100).toFixed(0)}% (+20)`); }
+      if (hasUsdFlow) {
+        const netUsd = buyUsd - sellUsd;
+        const usdBuyRatio = buyUsd / (buyUsd + sellUsd);
+        if (usdBuyRatio > 0.6 && netUsd > 0) {
+          score += 20;
+          reasons.push(`💵 Buy $${(buyUsd / 1000).toFixed(0)}k / Sell $${(sellUsd / 1000).toFixed(0)}k (${(usdBuyRatio * 100).toFixed(0)}% USD, net +$${(netUsd / 1000).toFixed(0)}k) (+20)`);
+        } else if (netUsd < 0) {
+          reasons.push(`⚠️ Net ${(usdBuyRatio * 100).toFixed(0)}% buy by USD but net flow -$${(-netUsd / 1000).toFixed(0)}k — not counted as buy strength`);
+        }
+      } else if (totalTrades > 0 && buys / totalTrades > 0.6) {
+        score += 20;
+        reasons.push(`⚖️ Buy ${((buys / totalTrades) * 100).toFixed(0)}% / Sell ${((sells / totalTrades) * 100).toFixed(0)}% (count fallback, +20)`);
+      }
       if (volume24h >= 100000) { score += 15; reasons.push(`🔥 Volume $${(volume24h / 1000).toFixed(0)}k (+15)`); }
       if (smartDegen >= 1) { score += 15; reasons.push(`🧠 Smart money ${smartDegen} (+15)`); }
       if (ageHours !== null && ageHours < 2 && smartDegen >= 1) { score += 10; reasons.push(`🆕 Launch ${ageHours.toFixed(1)}h + smart money entering alongside (+10)`); }

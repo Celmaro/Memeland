@@ -393,7 +393,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    * DEXPaprika is 15 req/min).
    */
   private async overlayDexpaprikaVolume(
-    out: Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>,
+    out: Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string; buyUsd1h?: number; sellUsd1h?: number }>,
     chain: string,
     addresses: string[],
   ): Promise<void> {
@@ -413,6 +413,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // REAL observed 1h volume — replaces the volume24h/24 estimate the
           // prefilter would otherwise see (the I1-4 feed-vs-zero fix).
           ...(detail.volume1hUsd !== undefined ? { volume1hUsd: detail.volume1hUsd } : {}),
+          // Real 1h buy/sell USD — lets the strategy use USD flow, not count
+          // ratio (audit finding: counts lie on size-differential flows).
+          ...(detail.buyUsd1h !== undefined ? { buyUsd1h: detail.buyUsd1h } : {}),
+          ...(detail.sellUsd1h !== undefined ? { sellUsd1h: detail.sellUsd1h } : {}),
         });
       } catch {
         // fail-soft: keep the estimate; never block the fresh lane
@@ -423,8 +427,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private async batchFreshMarketData(
     addresses: string[],
     chain: string,
-  ): Promise<Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>> {
-    const out = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>();
+  ): Promise<Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string; buyUsd1h?: number; sellUsd1h?: number }>> {
+    const out = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string; buyUsd1h?: number; sellUsd1h?: number }>();
     const uniq = [...new Set(addresses.map((a) => a.toLowerCase()).filter(Boolean))];
     const BATCH = 30;
     for (let s = 0; s < uniq.length; s += BATCH) {
@@ -617,7 +621,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         // score momentum in the same cycle instead of dying data-less. The
         // prefilter bypass still sees zeros (fresh-at-birth semantics); once
         // enriched, the candidate competes on real numbers.
-        const freshEnrichMap = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string }>();
+        const freshEnrichMap = new Map<string, { priceUsd?: number; liquidityUsd?: number; volume24hUsd?: number; volume1hUsd?: number; symbol?: string; buyUsd1h?: number; sellUsd1h?: number }>();
         const freshZero = allCandidates.filter((t) => t.freshLane === true && t.volume1hUsd === 0 && t.liquidityUsd === 0 && t.marketCapUsd === 0);
         if (freshZero.length > 0) {
           try {
@@ -697,6 +701,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               // over the 24h/24 estimate — the prefilter/maturity floor then
               // sees actual short-window flow, not a divisor.
               t.volume1hUsd = fresh.volume1hUsd ?? (vol24 > 0 ? vol24 / 24 : t.volume1hUsd);
+              // Real 1h buy/sell USD flow onto the token — the strategy uses
+              // this instead of count ratio when present (audit finding).
+              if (fresh.buyUsd1h !== undefined) t.buyUsd1h = fresh.buyUsd1h;
+              if (fresh.sellUsd1h !== undefined) t.sellUsd1h = fresh.sellUsd1h;
               if (fresh.symbol) t.symbol = fresh.symbol;
               if (t.volume1hUsd >= this.config.minFreshVolume1hUsd) {
                 console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k${fresh.volume1hUsd !== undefined ? ' (real 1h)' : ''}`);

@@ -31,6 +31,12 @@ export interface GMGNRawToken {
   buys: number;
   sells: number;
   swaps: number;
+  /** Real 1h buy/sell USD flow (DEXPaprika detail buy_usd/sell_usd). Optional:
+   *  when present, the strategy uses USD flow instead of count ratio for the
+   *  buy/sell signal (audit finding — counts lie: 800×$20 buys vs 200×$500
+   *  sells = 80% 'BUY' by count but net SELLER by USD). */
+  buyUsd1h?: number;
+  sellUsd1h?: number;
   holderCount: number;
   top10HolderRate: number | null;
   devTeamHoldRate: number | null;
