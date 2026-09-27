@@ -163,4 +163,19 @@ describe('StateStore trackedTokens persistence', () => {
     expect(flipped.find((e) => e.id === 'SC_1')?.status).toBe('TP');
     expect(flipped.find((e) => e.id === 'SC_2')?.status).toBe('SL');
   });
+
+  it('#3 lineage: scorecard entry carries opportunityId and survives reload', () => {
+    const store = newStore();
+    store.appendScorecardEntry({
+      id: 'SC_L1', symbol: 'X', chain: 'robinhood', contractAddress: '0xlin',
+      confidence: 90, entryPriceUsd: 1, currentPriceUsd: 1,
+      entryTimestampIso: '2026-09-19T00:00:00.000Z', updatedAtIso: '2026-09-19T00:00:00.000Z',
+      status: 'OPEN', opportunityId: 'OPP_abc123',
+    });
+    store.flushToDisk();
+    const reloaded = new StateStore(dbPaths[dbPaths.length - 1]);
+    stores.push(reloaded);
+    const entry = reloaded.getScorecard().find((e) => e.id === 'SC_L1');
+    expect(entry?.opportunityId).toBe('OPP_abc123'); // decision↔scorecard↔outcome trace survives reload
+  });
 });

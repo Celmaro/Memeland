@@ -41,6 +41,11 @@ export interface ScorecardEntry {
   entryTimestampIso: string;
   updatedAtIso: string;
   status: 'OPEN' | 'TP' | 'SL' | 'CLOSED';
+  /** #3 lineage: opportunityId↔scorecard↔position↔outcome. Links the
+   *  opportunity-ledger identity to the scorecard entry so a decision can be
+   *  traced from first-seen through fill to terminal outcome. */
+  opportunityId?: string;
+  positionId?: string;
 }
 
 /**

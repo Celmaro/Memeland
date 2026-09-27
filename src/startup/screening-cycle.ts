@@ -228,13 +228,19 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
 
       // Opportunity ledger: ingest every fired signal so the Strategist can
       // re-score/re-admit it over time. Never gates anything (fail-soft).
+      // #3 lineage: capture the opportunityId and thread it into the scorecard
+      // so decision↔scorecard↔position↔outcome trace as one chain.
+      let opportunityId: string | undefined;
       try {
         const sighting = sightingFromCallCard(item);
         if (sighting) {
-          firedOpportunities.push({
-            id: opportunityStrategist.ingest(sighting).opportunityId,
-            confidence: Number(item.payload.confidenceScore) || 0,
-          });
+          opportunityId = opportunityStrategist.ingest(sighting).opportunityId;
+          if (opportunityId) {
+            firedOpportunities.push({
+              id: opportunityId,
+              confidence: Number(item.payload.confidenceScore) || 0,
+            });
+          }
         }
       } catch (ledgerErr: any) {
         console.warn(`[OPPORTUNITY LEDGER] ingest failed (${item.payload.symbol}): ${ledgerErr.message}`);
@@ -258,7 +264,9 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             entryTimestampIso: new Date().toISOString(),
             updatedAtIso: new Date().toISOString(),
             status: 'OPEN',
+            opportunityId,
           });
+          console.log(`[LINEAGE] ${item.payload.symbol}: opportunity=${opportunityId ?? 'n/a'} scorecard=${scorecardId} → decision chain linked`);
         }
       }
 
