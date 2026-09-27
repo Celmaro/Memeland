@@ -10,6 +10,7 @@ import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
+import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
@@ -834,6 +835,38 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
           const thesis = buildMemeThesis(t, det.type, confidence, det.reasons, strategyReason);
           const payload = this.buildPayload(t, confidence, thesis, trackLabel, chain);
+
+          // #1 Point-in-time FeatureSnapshot: immutable, provenance-tagged capture
+          // of the decision-time data. Wired so any later observer (Jev/ML/audit)
+          // can reconstruct EXACTLY what the bot knew when it called this a signal —
+          // no future information can be back-read into it.
+          try {
+            const snap = buildFeatureSnapshot({
+              candidateId: `${chain.toLowerCase()}:${t.address.toLowerCase()}`,
+              timestamp: Date.now(),
+              strategyVersion: this.strategyEngine.getActiveStrategy('meme-robinhood')?.id,
+              modelVersion: 'arch-3-5slot',
+              source: { name: t.source ?? 'unknown', fetchedAt: Date.now() },
+              market: {
+                priceUsd: t.priceUsd,
+                liquidityUsd: t.liquidityUsd,
+                volume24hUsd: volume24hOf(t),
+              },
+              flow: {
+                buyUsd1h: t.buyUsd1h ?? t.volume1hUsd / 2,
+                sellUsd1h: t.sellUsd1h ?? t.volume1hUsd / 2,
+              },
+              security: { sellable: true }, // sellability proven later in the security block; snapshot defaults conservative
+              momentum: { change1hPct: t.priceChange1h ?? 0, mlProb: klines ? predictUpMomentum(klines).score : undefined },
+              smartMoney: { smartDegenCount: t.smartDegenCount, kolCount: t.renownedCount },
+            });
+            (payload as unknown as Record<string, unknown>).featureSnapshot = snap;
+            console.log(
+              `[SNAPSHOT] ${t.symbol} dq=${snap.dataQuality} groups=${snap.evidenceLineage.length} lineage=[${snap.evidenceLineage.map((e) => `${e.group}.${e.field}`).join(',')}]`,
+            );
+          } catch (snapErr: any) {
+            console.warn(`[SNAPSHOT] build failed (signal still fires): ${snapErr.message}`);
+          }
 
           // Arch-3 voter swarm: assemble opinions for this FINALIST and attach them to the
           // payload — the consensus gate in index.ts re-derives confidence from the weighted
