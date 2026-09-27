@@ -62,6 +62,49 @@ describe('PositionManager.updateMemePosition — stop-loss enforcement', () => {
     expect(res.reason).toContain('-20%');
   });
 
+  it('P1.4: FAST_MOMENTUM regime fires TP at +50% (not the generic +100%)', () => {
+    const pm = new PositionManager();
+    pm.addPosition({ ...mkPosition(), regime: 'FAST_MOMENTUM' });
+
+    // +40% — below the FAST_MOMENTUM 1.5x (+50%) TP → no milestone yet.
+    expect(pm.updateMemePosition('POS_1', 1.4).triggerAlert).toBe(false);
+    // +50% hits the regime TP → MILESTONE.
+    const res = pm.updateMemePosition('POS_1', 1.5);
+    expect(res.triggerAlert).toBe(true);
+    expect(res.type).toBe('MILESTONE');
+    expect(res.reason).toContain('FAST_MOMENTUM');
+    expect(res.reason).toContain('1.5');
+  });
+
+  it('P1.4: FAST_MOMENTUM regime stop is -15%, not the generic -50%', () => {
+    const pm = new PositionManager();
+    pm.addPosition({ ...mkPosition(), regime: 'FAST_MOMENTUM' });
+
+    // -40% is above FAST_MOMENTUM's -15% stop → CRITICAL fires early.
+    const res = pm.updateMemePosition('POS_1', 0.6);
+    expect(res.triggerAlert).toBe(true);
+    expect(res.type).toBe('CRITICAL');
+    expect(res.reason).toContain('-15%');
+  });
+
+  it('P1.4: generic position (no regime) keeps the default ladder + -50% stop', () => {
+    const pm = new PositionManager();
+    pm.addPosition(mkPosition());
+
+    // +90% → not yet +100% generic TP1.
+    expect(pm.updateMemePosition('POS_1', 1.9).triggerAlert).toBe(false);
+    // +100% → generic TP1.
+    const tp = pm.updateMemePosition('POS_1', 2.0);
+    expect(tp.triggerAlert).toBe(true);
+    expect(tp.type).toBe('MILESTONE');
+    expect(tp.reason).toContain('+100%');
+    // -40% → above generic -50% stop.
+    const pm2 = new PositionManager();
+    pm2.addPosition(mkPosition());
+    expect(pm2.updateMemePosition('POS_1', 0.6).triggerAlert).toBe(false);
+    expect(pm2.updateMemePosition('POS_1', 0.5).type).toBe('CRITICAL');
+  });
+
   it('tightenStopLoss only narrows the SL — never widens it back', () => {
     const pm = new PositionManager();
     pm.addPosition(mkPosition());

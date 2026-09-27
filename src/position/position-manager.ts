@@ -15,6 +15,44 @@ export interface OpenPosition {
   tp200Triggered?: boolean;
   /** Current stop-loss magnitude (0.5 = -50%). Tightened on smart-money exit. */
   stopLossPct?: number;
+  /** Entry-regime (P1.4): drives the TP/SL profile when present; falls back to
+   *  the generic ladder otherwise. FAST_MOMENTUM/REVIVAL/CTO/SMART_MONEY. */
+  regime?: PositionRegime;
+}
+
+/**
+ * P1.4 — regime-aware position profiles (strategy-audit #6: entry and exit
+ * must be one strategy, not a generic 2x/3x/-50% ladder on every signal).
+ * Each regime carries its own take-profit targets, stop distance, and trailing
+ * behaviour, so a short-horizon momentum entry is not managed like a CTO event.
+ */
+export type PositionRegime = 'FAST_MOMENTUM' | 'REVIVAL' | 'CTO' | 'SMART_MONEY';
+
+export interface RegimeProfile {
+  /** TP milestones as price multipliers above entry (ascending). */
+  tpMultipliers: number[];
+  /** Stop distance below entry as a fraction (0.15 = -15%). */
+  stopLossPct: number;
+  /** Trailing hard-stop distance below the high-water mark (fraction). */
+  trailPct: number;
+  /** Scale-out fraction at each TP milestone (same length as tpMultipliers). */
+  scaleOutFractions: number[];
+}
+
+export const REGIME_PROFILES: Record<PositionRegime, RegimeProfile> = {
+  // Short horizon, tight invalidation, fast trailing, smaller ladder.
+  FAST_MOMENTUM: { tpMultipliers: [1.5, 2.5], stopLossPct: 0.15, trailPct: 0.25, scaleOutFractions: [0.6, 0.4] },
+  // Medium horizon, confirmation-based exit, volatility-aware trailing.
+  REVIVAL: { tpMultipliers: [2, 3], stopLossPct: 0.25, trailPct: 0.35, scaleOutFractions: [0.5, 0.5] },
+  // Event-driven horizon — give the catalyst room, protect on reversal.
+  CTO: { tpMultipliers: [2, 3, 4], stopLossPct: 0.3, trailPct: 0.4, scaleOutFractions: [0.4, 0.3, 0.3] },
+  // Wallet-flow driven, cohort-exit monitoring, thesis invalidation on flow reversal.
+  SMART_MONEY: { tpMultipliers: [2, 4], stopLossPct: 0.2, trailPct: 0.3, scaleOutFractions: [0.5, 0.5] },
+};
+
+/** Resolve the active profile for a position (generic ladder fallback). */
+export function profileForPosition(pos: Pick<OpenPosition, 'regime'>): RegimeProfile | null {
+  return pos.regime ? (REGIME_PROFILES[pos.regime] ?? null) : null;
 }
 
 /**
@@ -366,8 +404,28 @@ export class PositionManager {
 
     const priceChangePercent = ((currentPriceUsd - pos.entryPriceUsd) / pos.entryPriceUsd) * 100;
 
-    // 1. Take Profit Milestones (+100% and +200%)
-    if (priceChangePercent >= 200 && !pos.tp200Triggered) {
+    // 1. Take Profit Milestones — generic (+100%/+200%) OR regime profile when
+    //    the position carries one (P1.4): FAST_MOMENTUM triggers at +50%/+150%.
+    const profile = profileForPosition(pos);
+    if (profile) {
+      // multiplier above entry: +50% change = 1.5x total (regime TPs are
+      // expressed as total multipliers — FAST_MOMENTUM [1.5, 2.5]).
+      const pct = 1 + priceChangePercent / 100;
+      const milestones = [...profile.tpMultipliers].sort((a, b) => b - a);
+      for (const mult of milestones) {
+        const key = `tp_${String(mult).replace('.', '_')}` as 'tp100Triggered';
+        const already = (pos as unknown as Record<string, boolean | undefined>)[key];
+        if (pct >= mult && !already) {
+          (pos as unknown as Record<string, boolean | undefined>)[key] = true;
+          this.stateStore?.setPosition(pos);
+          return {
+            triggerAlert: true,
+            type: 'MILESTONE',
+            reason: `🎯 **TP ${mult}× (${pos.regime}) Reached:** $${pos.symbol} is ${Math.round(pct * 100)}% above entry. Scale out per regime ladder!`,
+          };
+        }
+      }
+    } else if (priceChangePercent >= 200 && !pos.tp200Triggered) {
       pos.tp200Triggered = true;
       this.stateStore?.setPosition(pos);
       return {
@@ -375,9 +433,7 @@ export class PositionManager {
         type: 'MILESTONE',
         reason: `🟢 **TP2 Milestone Reached:** $${pos.symbol} has surged **+200% (3x)** from entry! Current Price: $${currentPriceUsd.toFixed(6)}. High-profit taking recommended!`,
       };
-    }
-
-    if (priceChangePercent >= 100 && !pos.tp100Triggered) {
+    } else if (priceChangePercent >= 100 && !pos.tp100Triggered) {
       pos.tp100Triggered = true;
       this.stateStore?.setPosition(pos);
       return {
@@ -387,8 +443,9 @@ export class PositionManager {
       };
     }
 
-    // 2. Critical Drop (default -50%; tightened by a smart-money exit, e.g. -20%)
-    const stopLossPct = pos.stopLossPct ?? 0.5;
+    // 2. Critical Drop — default -50% (generic), regime stop when present
+    //    (FAST_MOMENTUM -15%), tightened by a smart-money exit.
+    const stopLossPct = pos.stopLossPct ?? profile?.stopLossPct ?? 0.5;
     if (priceChangePercent <= -stopLossPct * 100) {
       this.stateStore?.setPosition(pos);
       return {
