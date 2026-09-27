@@ -144,16 +144,19 @@ export class DexpaprikaFeed implements MarketDataProvider {
   }
 
   /**
-   * Fetch the top pools across every supported chain via the unified
-   * `/pools/search` endpoint (global form), sorted by 24h volume. This keeps
-   * one call per provider pass — no per-chain fan-out, so DEXPaprika's
-   * keyless tier is never stressed (no documented rate limits).
+   * Fetch the NEWEST pools across every supported chain via the unified
+   * `/pools/search` endpoint, sorted by CREATION TIME (P3.2, live audit Q3).
+   * The old volume_usd_24h sort returned the mature top-100 blue-chips —
+   * "discovery" found almost nothing fresh. order_by=created_at surfaces
+   * pools minutes old (verified: a pump.fun pool ~2 min before probe) — the
+   * fresh-pair lane input. Rows are freshLane by construction (zero market
+   * data at birth → the fresh floor applies, REVALIDATE promotes later).
    */
   private async fetchSearchAll(): Promise<MarketToken[]> {
     const chains = [...this.supportedChains].join(',');
     const url =
       `${this.baseUrl}/pools/search` +
-      `?order_by=volume_usd_24h&sort=desc&limit=100` +
+      `?order_by=created_at&sort=desc&limit=100` +
       (chains ? `&networks=${encodeURIComponent(chains)}` : '');
     const res = await this.fetch(url);
     if (!res.ok) throw new Error(`dexpaprika search failed (HTTP ${res.status})`);
@@ -185,6 +188,9 @@ export class DexpaprikaFeed implements MarketDataProvider {
       priceUsd: this.num(row.price_usd),
       liquidityUsd: this.num(row.liquidity_usd),
       volume24hUsd: this.num(row.volume_usd_24h),
+      // P3.2: created_at-ordered rows are by construction fresh pairs — mark
+      // freshLane so the fresh floor + REVALIDATE promotion applies.
+      freshLane: true,
       // Item 4: DEXPaprika search rows carry real 1h/5m/6h/24h price change for
       // free — wire them so the momentum/technical path isn't GMGN-only.
       change1hPct: this.optNum(row.price_change_percentage_1h),

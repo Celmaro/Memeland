@@ -59,13 +59,13 @@ describe('DexpaprikaFeed (PR 7 — keyless multi-chain discovery, 2026-06-30 sea
     expect(eth.chainId).toBe(1); // eth/ethereum mapping added in the chain fix
   });
 
-  it('hits the new /pools/search endpoint (not the dead /pairs)', async () => {
+  it('hits the new /pools/search endpoint sorted by CREATION TIME (P3.2 fresh lane)', async () => {
     const f = mockFetch();
     const feed = new DexpaprikaFeed({ fetch: f });
     await feed.discover();
     const called = f.mock.calls[0][0] as string;
     expect(called).toContain('/pools/search');
-    expect(called).toContain('order_by=volume_usd_24h');
+    expect(called).toContain('order_by=created_at'); // fresh discovery, not volume top-100
     expect(called).not.toContain('/pairs');
   });
 
