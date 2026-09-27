@@ -14,6 +14,7 @@ import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry } from '../../discovery/discovery-registry.js';
+import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
@@ -850,6 +851,19 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // Smart-money cluster (>= 3 wallets buying the same token, fresh) = boost +20
           const trackEntry = trackAcc.get(t.address.toLowerCase());
           const trackLabel = trackEntry ? trackAccumulationLabel(trackEntry) : undefined;
+          // P5.1: record persistent-cohort buys + detect convergence. The
+          // convergence event is logged but never gates — it's the "3+ smart
+          // wallets, same token, <5min" wallet-grounded signal (d1326a).
+          if (trackEntry && trackEntry.buyWalletCount >= 1) {
+            for (const w of trackEntry.buyWallets) globalPersistenceCohort.recordBuy(w, t.address, Date.now());
+            const convergence = globalPersistenceCohort.checkConvergence(
+              t.address,
+              [...trackEntry.buyWallets].map((h) => ({ handle: h, at: Date.now() })),
+            );
+            if (convergence && convergence.wallets.length >= 3) {
+              console.log(`[COHORT CONVERGENCE] ${t.symbol}: ${convergence.wallets.length} persistent wallets on same token <5min`);
+            }
+          }
           if (trackEntry && trackEntry.buyWalletCount >= 3 && det.type !== 'NONE') {
             det = {
               ...det,
