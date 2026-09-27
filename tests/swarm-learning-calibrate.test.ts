@@ -79,6 +79,33 @@ describe('SwarmLearningEngine calibrate (anti-overfit + scoring calibration)', (
     expect(after.smartMoneyWeight).toBeGreaterThan(before.smartMoneyWeight);
   });
 
+  it('(b2) updateSignalPrice resolves by CONTRACT ADDRESS (wallet-tracker path)', () => {
+    // wallet-tracker.ts:205 calls updateSignalPrice(holding.address, price) —
+    // the contract address, NOT the CALL_* id recordSignalCall returns. The
+    // audit's learning-linkage bug: outcome.id is 'CALL_<ts>_<rand>' and never
+    // equals an address, so `find(o => o.id === id)` was silently dropping every
+    // live position update (learning never ran on real trades). Regression test.
+    const addr = '0xDeAdBeEf00000000000000000000000000000000';
+    engine.recordSignalCall('quant', 'TEST', addr, 100, 80);
+    const before = engine.getWeights();
+    engine.updateSignalPrice(addr, 250); // 2.5x — address, not id
+    const after = engine.getWeights();
+    expect(after.smartMoneyWeight).toBeGreaterThan(before.smartMoneyWeight);
+    // And a follow-up high price must NOT recur — terminal state guard.
+    const beforeTerminal = engine.getWeights();
+    engine.updateSignalPrice(addr, 300);
+    expect(engine.getWeights()).toEqual(beforeTerminal);
+  });
+
+  it('(b3) updateSignalPrice recalibrates ONCE on TP (no repeat on same 2x+)', () => {
+    const { id } = engine.recordSignalCall('quant', 'TEST', '0xaddr', 100, 80);
+    engine.updateSignalPrice(id, 250); // → TAKE_PROFIT_2X, one recalibrate
+    const afterFirst = engine.getWeights();
+    engine.updateSignalPrice(id, 270); // still >= 2x — must NOT recalibrate again
+    engine.updateSignalPrice(id, 300);
+    expect(engine.getWeights()).toEqual(afterFirst);
+  });
+
   it('(c) getLastCalibrationReason returns a reason after calibrate', () => {
     expect(engine.getLastCalibrationReason()).toBeNull();
     engine.calibrate([outcome('x1', 'TAKE_PROFIT_2X', 90)]);
