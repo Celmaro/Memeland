@@ -233,7 +233,12 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     });
     void journalEntry;
 
-    opts.onExecuted();
+    // Audit fix (#10): onExecuted fires ONLY on a confirmed fill, never on
+    // failure — a failed/timed-out fill must not bump the `executed` counter
+    // nor (via recordExecuted) mark the approval order CONFIRMED_FILL.
+    if (execRes.success) {
+      opts.onExecuted();
+    }
     opts.ledger?.recordSend(nonce, execRes.success ? 'confirmed' : 'failed');
     return {
       success: execRes.success,

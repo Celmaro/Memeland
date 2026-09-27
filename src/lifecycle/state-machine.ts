@@ -28,12 +28,13 @@ export class StateMachine<S extends string> {
   }
 }
 
-export const APPROVAL_ORDER_STATES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export const APPROVAL_ORDER_STATES = ['PENDING', 'APPROVED', 'CONFIRMED_FILL', 'REJECTED'] as const;
 export type ApprovalOrderState = (typeof APPROVAL_ORDER_STATES)[number];
 
 export const approvalOrderTransitions: StateTransitions<ApprovalOrderState> = {
   PENDING: ['APPROVED', 'REJECTED'],
-  APPROVED: [],
+  APPROVED: ['CONFIRMED_FILL'], // only reached when the fill actually executes
+  CONFIRMED_FILL: [],
   REJECTED: [],
 };
 

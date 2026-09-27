@@ -133,13 +133,30 @@ describe('ApprovalQueueService', () => {
     expect(svc.getById(b.id)?.status).toBe('APPROVED');
   });
 
-  it('getApprovedFills counts only APPROVED orders and feeds the AUTO unlock', () => {
+  it('getApprovedFills counts only CONFIRMED_FILL orders (audit fix: APPROVED alone does NOT unlock AUTO)', () => {
     const { svc } = newService();
     const a = svc.enqueue(input);
     const b = svc.enqueue(input);
+    // APPROVED alone must NOT count toward the AUTO floor.
     svc.approve(a.id);
+    expect(svc.getApprovedFills()).toBe(0);
+    // Once the fill actually executes, it confirms and counts.
+    svc.recordExecuted(a.id);
     expect(svc.getApprovedFills()).toBe(1);
+    expect(svc.getById(a.id)?.status).toBe('CONFIRMED_FILL');
     expect(svc.getById(b.id)?.status).toBe('PENDING');
+  });
+
+  it('recordExecuted confirms an APPROVED order only, leaving PENDING/REJECTED alone', () => {
+    const { svc } = newService();
+    const approved = svc.enqueue(input);
+    svc.approve(approved.id);
+    svc.recordExecuted(approved.id);
+    expect(svc.getById(approved.id)?.status).toBe('CONFIRMED_FILL');
+    // A PENDING order that somehow gets recordExecuted stays PENDING (not confirmed).
+    const pending = svc.enqueue(input);
+    svc.recordExecuted(pending.id);
+    expect(svc.getById(pending.id)?.status).toBe('PENDING');
   });
 
   it('recordExecuted bumps the executed funnel stage for a known order', () => {
@@ -157,6 +174,7 @@ describe('ApprovalQueueService', () => {
     svc.attachStateStore(store);
     const order = svc.enqueue(input);
     svc.approve(order.id, 'op');
+    svc.recordExecuted(order.id); // confirm the fill so it persists as CONFIRMED_FILL
     store.flushToDisk();
 
     const reloaded = new StateStore(dbPaths[dbPaths.length - 1]);
@@ -164,14 +182,17 @@ describe('ApprovalQueueService', () => {
     const svc2 = new ApprovalQueueService();
     svc2.attachStateStore(reloaded);
     expect(svc2.getApprovedFills()).toBe(1);
-    expect(reloaded.getApprovalOrder(order.id)?.status).toBe('APPROVED');
+    expect(reloaded.getApprovalOrder(order.id)?.status).toBe('CONFIRMED_FILL');
   });
 
   describe('canAutoExecute (Phase-3 AUTO gate)', () => {
+    // Audit fix: the AUTO floor counts CONFIRMED_FILL only. The helper must
+    // approve AND confirm (run the fill) to seed the AUTO-unlock numerator.
     function seedApproved(svc: ApprovalQueueService, n: number): void {
       for (let i = 0; i < n; i++) {
         const o = svc.enqueue(input);
         svc.approve(o.id, 'op');
+        svc.recordExecuted(o.id);
       }
     }
 

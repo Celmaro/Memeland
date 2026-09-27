@@ -94,7 +94,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     expect(ledger.audit.some((e) => e.kind === 'send' && e.outcome === 'confirmed')).toBe(true);
   });
 
-  it('still journals and bumps the funnel even when the EVM fill reports failure (audit trail)', async () => {
+  it('journals a failed fill for audit trail but does NOT fire onExecuted (audit fix)', async () => {
     const { journal, evm, wallet } = makeDeps();
     (evm.executeBuyToken as ReturnType<typeof vi.fn>).mockResolvedValue({
       success: false,
@@ -120,7 +120,10 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     });
     expect(res.success).toBe(false);
     expect(res.error).toBe('quote failed');
-    expect(onExecuted).toHaveBeenCalledTimes(1);
+    // Audit fix (#10): onExecuted fires ONLY on confirmed fills — a failed fill
+    // must NOT bump the executed counter nor confirm the approval order. But the
+    // failed fill is still journaled for the audit trail.
+    expect(onExecuted).toHaveBeenCalledTimes(0);
     expect(journal.listTrades()).toHaveLength(1);
   });
 
