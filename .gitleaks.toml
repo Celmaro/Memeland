@@ -9,8 +9,11 @@
 # directory so legitimate audit notes don't trip the scanner, while all actual
 # code, config, and shipped docs remain fully scanned.
 
+title = "gitleaks config"
+
 [extend]
 useDefault = true
 
-[[allowlist]]
+[allowlist]
+description = "Research notes quoting external repos' leaked secrets (audit documentation, not Memeland credentials)"
 paths = ['''docs/research/''']
