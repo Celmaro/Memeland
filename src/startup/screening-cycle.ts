@@ -15,6 +15,7 @@
 import { isAutoExecute, isSignalOnly } from '../config/config.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
 import { globalDecisionCache } from '../services/decision-cache.js';
+import { globalWalletGraph } from '../graph/wallet-graph.js';
 import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { sellabilityConfigured } from '../services/execution-gates.js';
 
@@ -493,11 +494,20 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       const wins = closed.filter((e: any) => e.status === 'TP').length;
       const winRate = closed.length > 0 ? Math.round((wins / closed.length) * 100) : 0;
       // Kernel A: write terminal follow-up labels from the live scorecard.
+      // #4 wallet-graph: also feed deployer outcomes (TP=success, SL=rug) so
+      // the bot accumulates deployer reputation / rug-rate over time.
       try {
         for (const entry of closed) {
           if (!entry.contractAddress) continue;
           const followUp = entry.status === 'TP' ? 'live' : entry.status === 'SL' ? 'rugged' : 'abandoned';
           globalReputationMemory.labelAfterFollowup(entry.contractAddress, followUp);
+          if (entry.status === 'TP') {
+            globalWalletGraph.recordDeployerOutcome(entry.contractAddress, 'success');
+            console.log(`[WALLET GRAPH] ${entry.symbol} deployer ${entry.contractAddress.slice(0, 6)}… → success call`);
+          } else if (entry.status === 'SL') {
+            globalWalletGraph.recordDeployerOutcome(entry.contractAddress, 'rug');
+            console.log(`[WALLET GRAPH] ${entry.symbol} deployer ${entry.contractAddress.slice(0, 6)}… → rug outcome`);
+          }
         }
         globalReputationMemory.flush();
       } catch (repErr: any) {
