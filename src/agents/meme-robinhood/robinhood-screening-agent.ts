@@ -11,6 +11,7 @@ import { SellabilitySimulator } from '../../services/sellability/sellability-sim
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
+import { globalCandidateRegistry } from '../../discovery/discovery-registry.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
@@ -612,20 +613,36 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // GMGN overlay pass: upgrade EXISTING addresses only. A GMGN
                   // row for an address the keyless feeds never surfaced is
                   // skipped (GMGN no longer a discovery source). freshLane
-                  // survives the overlay.
+                  // survives the overlay. The DISCOVERY source is preserved —
+                  // the overlay no longer relabels the row as 'gmgn' (Q1: the
+                  // funnel bySource mislabeled every overlay-upgraded token).
                   for (const g of gmgnDiscovery) {
                     const key = g.address.toLowerCase();
                     const existing = merged.get(key);
                     if (!existing) continue;
                     const fresh = existing.freshLane || g.freshLane ? true : undefined;
-                    merged.set(key, fresh ? { ...g, freshLane: true } : g);
+                    const discoveredBy = existing.source; // keep who FOUND it
+                    merged.set(key, { ...g, freshLane: fresh ? true : undefined, discoveredBy });
                   }
         const allCandidates = [...merged.values()];
         scanned += allCandidates.length;
         scannedByChain[chain] = (scannedByChain[chain] ?? 0) + allCandidates.length;
         for (const t of allCandidates) {
-          const src = t.source ?? 'unknown';
+          const src = t.discoveredBy ?? t.source;
           scannedBySource[src] = (scannedBySource[src] ?? 0) + 1;
+          // P3.1 Candidate Registry: record per-source firstSeen + latency.
+          globalCandidateRegistry.observe({
+            chain,
+            tokenAddress: t.address,
+            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr',
+            at: Date.now(),
+          });
+        }
+        // P3.1 empirical primary discovery source — the "measure, don't guess"
+        // decision input (after weeks of data, this selects the discovery lead).
+        const primary = globalCandidateRegistry.primaryDiscoverySource();
+        if (primary.primary && primary.bySource[primary.primary]! % 25 === 0) {
+          console.log(`[DISCOVERY STATS] primary=${primary.primary} bySource=${JSON.stringify(primary.bySource)} candidates=${globalCandidateRegistry.size()}`);
         }
         // Fresh-pair enrichment (batched, gap fix): collect every freshLane
         // candidate that carries zero market data, batch-fetch real

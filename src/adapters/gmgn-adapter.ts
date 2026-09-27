@@ -77,6 +77,10 @@ export interface GMGNRawToken {
   /** Bonding curve progress 0-1 (trenches/signal snapshot). */
   progress: number | null;
   source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan';
+  /** P3.1: the discovery source that FIRST found this address — preserved
+   *  through the GMGN overlay so the funnel bySource never mislabels an
+   *  overlay-upgraded token as gmgn-discovered (Q1 live fix). */
+  discoveredBy?: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan';
   /** I1-4: true when the source feed failed to supply market data. */
   sourceUnavailable?: boolean;
   /**
