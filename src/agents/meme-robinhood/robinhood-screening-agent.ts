@@ -10,6 +10,8 @@ import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
+import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js';
+import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry } from '../../discovery/discovery-registry.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
@@ -115,6 +117,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private ankr: MarketDataProvider | null;
   /** Routescan keyless multi-chain explorer feed (new-token discovery + holders). Empty until injected. */
   private routescan: MarketDataProvider | null;
+  /** P3.6 injectable Solana signature loader (getSignaturesForAddress walk). */
+  private solTimeOnCurveLoader: TimeOnCurveAssessOptions['loader'] | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -140,6 +144,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       gecko?: MarketDataProvider;
       ankr?: MarketDataProvider | null;
       routescan?: MarketDataProvider | null;
+      solTimeOnCurveLoader?: TimeOnCurveAssessOptions['loader'] | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
@@ -162,6 +167,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.gecko = opts.gecko ?? null;
     this.ankr = opts.ankr ?? null;
     this.routescan = opts.routescan ?? null;
+    this.solTimeOnCurveLoader = opts.solTimeOnCurveLoader ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
@@ -707,6 +713,24 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
         // 2. Pre-filter (cheap, termasuk audit GMGN) then detect
         for (const t of allCandidates) {
+          // P3.6 QLO organic-lift (time-on-curve): for fresh SOL candidates,
+          // measure how long the bonding curve took to fill — slow fills are
+          // 1.5x/2.4x more likely to 2x/5x post-graduation (qlo, n=97,146).
+          // Fail-soft: never blocks the funnel.
+          let organicLiftReason: string | undefined;
+          if (chain === 'sol' && t.freshLane === true && t.openTimestamp) {
+            try {
+              const res = await assessSolanaTimeOnCurve(t.address, t.openTimestamp * 1000, this.solTimeOnCurveLoader ?? (async () => ({ signatures: [], nextCursor: null, truncated: false })), {
+                chains: ['sol'],
+              });
+              if (res.organic && res.timeOnCurveMs !== null && res.timeOnCurveMs > 0) {
+                const hours = res.timeOnCurveMs / 3600000;
+                organicLiftReason = `🌱 Slow-fill ${hours.toFixed(1)}h on curve → ${res.doubleRateLift.toFixed(1)}x/${res.fiveXRateLift.toFixed(1)}x post-grad lift (qlo)`;
+              }
+            } catch {
+              // fail-soft: organic lift unavailable, screening proceeds
+            }
+          }
           // Graduated-only: reject tokens still on the bonding curve (exchange='pump')
           if (!isGraduatedToken(t)) {
             console.log(`[MEME AGENT] ⛔ ${t.symbol}: not yet graduated (bonding curve).`);
@@ -803,6 +827,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           prefiltered += 1;
 
           let det = applySignalBoost(this.detectSignal(t), signalBoostMap, t.address);
+          // P3.6: fold the QLO organic-lift (slow-fill time-on-curve) into the
+          // signal reasons when present — the 1.5x/2.4x post-graduation edge.
+          if (organicLiftReason && det.type !== 'NONE') {
+            det = { ...det, reasons: [...det.reasons, organicLiftReason] };
+            console.log(`[QLO LIFT] ${t.symbol}: ${organicLiftReason}`);
+          }
           // Smart-money cluster (>= 3 wallets buying the same token, fresh) = boost +20
           const trackEntry = trackAcc.get(t.address.toLowerCase());
           const trackLabel = trackEntry ? trackAccumulationLabel(trackEntry) : undefined;
