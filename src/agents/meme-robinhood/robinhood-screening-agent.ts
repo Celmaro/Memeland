@@ -17,6 +17,7 @@ import { globalCandidateRegistry } from '../../discovery/discovery-registry.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
+import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
@@ -125,6 +126,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
   private sellability: SellabilitySimulator;
+  /** P4.2 CoinStats token-risks (finalist security second-read, EVM only). */
+  private coinstatsRisk: CoinStatsRiskService | null;
   /** Keyless EVM token-security audit (GoPlus) — primary before GMGN. */
   private goplusService: GoPlusSecurityService;
   /** I0-1 Blockscout BuyEvent producer for the convergence voter (env-gated). */
@@ -175,6 +178,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
+    this.coinstatsRisk = process.env.COINSTATS_API_KEY ? new CoinStatsRiskService() : null;
     this.blockscout = opts.blockscout ?? null;
   }
 
@@ -975,6 +979,19 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             }
             const rugFeature = globalRugScoring.assess(t);
             securityPenalties.push(...rugFeature.penalties);
+            // P4.2: CoinStats token-risks second read (EVM finalists only,
+            // fail-open — GoPlus + RPC remain primary).
+            if (this.coinstatsRisk && EVM_AUDIT_CHAINS[chain]) {
+              try {
+                const cs = await this.coinstatsRisk.screen(EVM_AUDIT_CHAINS[chain], t.address);
+                if (cs && cs.penalties.length > 0) {
+                  securityPenalties.push(...cs.penalties);
+                  console.log(`[COINSTATS RISK] ${t.symbol}: ${cs.penalties.join(', ')}`);
+                }
+              } catch {
+                // fail-open — never blocks the funnel
+              }
+            }
             if (typeof t.bytecode === 'string') {
               const scan = this.bytecodeScanner.scan(t.bytecode);
               securityPenalties.push(...scan.findings);
