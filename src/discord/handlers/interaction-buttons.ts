@@ -12,7 +12,8 @@ import { globalRiskEngineV2 } from '../../orchestrator/risk-engine-v2.js';
 import { EVMTradeAdapter } from '../../adapters/evm-adapter.js';
 import { globalLifiExecutor } from '../../adapters/lifi-executor.js';
 import { executeMemeBuy } from '../../services/approval-execution.js';
-import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance } from '../../services/execution-gates.js';
+import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability, sellabilityConfigured } from '../../services/execution-gates.js';
+import { requireOperator } from '../require-operator.js';
 import { priceAlertService, walletService, walletBalanceReader, tradeJournalService, approvalQueueService, buildDashboardOptions } from './command-handlers.js';
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
@@ -55,6 +56,23 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction,
 
 export async function handleButtonPress(interaction: ButtonInteraction, hub: OpenCatzHub): Promise<void> {
   const customId = interaction.customId;
+
+  // P2.1 RBAC: sensitive actions require an operator (role/user allowlist,
+  // else owner/admin). Fail-closed — being in the control-room channel is not
+  // authorization.
+  const OPERATOR_ONLY = ['btn_start_all_agents', 'btn_pause_all_agents', 'btn_emergency_stop'];
+  const OPERATOR_PREFIX = ['start_channel_', 'pause_channel_', 'trigger_pass_', 'APPROVE_', 'CANCEL_'];
+  const sensitive = OPERATOR_ONLY.includes(customId) || OPERATOR_PREFIX.some((p) => customId.startsWith(p));
+  if (sensitive) {
+    const op = requireOperator(interaction);
+    if (!op.allowed) {
+      await interaction.reply({
+        content: `⛔ **Operator required** — this action is restricted. ${op.reason ?? ''}`,
+        ephemeral: true,
+      });
+      return;
+    }
+  }
 
   if (customId === 'btn_start_all_agents') {
     hub.setAllAgentsActive(true);
@@ -139,6 +157,9 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         fillSim: gateFillSim(),
         costGate: gateCostGate(),
         governance: gateGovernance(),
+        // P2.2 gate parity: manual approve now runs the SAME sellability gate
+        // as the AUTO path — an operator cannot bypass honeypot/sell proof.
+        sellability: sellabilityConfigured() ? gateSellability() : undefined,
       });
       await interaction.editReply(
         `✅ **APPROVED & EXECUTED** \`${approved.symbol}\` (\`${orderId}\`)\n` +

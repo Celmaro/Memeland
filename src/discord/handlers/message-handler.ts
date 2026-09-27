@@ -2,6 +2,7 @@ import { Message, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.j
 import { OpenCatHub } from '../../orchestrator/hub.js';
 import { AIService } from '../../services/ai-service.js';
 import { priceAlertService, walletService } from './interaction-handler.js';
+import { requireOperator, baseUrlAllowed } from '../require-operator.js';
 
 /**
  * Split a large text response into chunks safe for a single Discord message (<= 1950 chars).
@@ -92,6 +93,12 @@ export async function handleControlRoomMessage(
 
   // 0c. Trigger ON-DEMAND Screening Pass intent
   if (lowerQuery.includes('run screening') || lowerQuery.includes('trigger screening') || lowerQuery.includes('start screening')) {
+  // P2.1 RBAC: on-demand screening passes are operator-class actions.
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — on-demand screening is restricted. ${op.reason ?? ''}`);
+    return;
+  }
   const agentDomains = ['meme-robinhood'];
     const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'meme-robinhood';
     await safeReply(message, `⚡ **OPENCATZ ON-DEMAND SCREENING TRIGGERED** for \`${foundDomain.toUpperCase()}\`...\nScreening pass in progress.`);
@@ -159,12 +166,24 @@ export async function handleControlRoomMessage(
 
   // 0h. Natural Language API Key Setup intent
   if (lowerQuery.includes('set_api_key') || lowerQuery.includes('set key') || lowerQuery.includes('setup api key') || lowerQuery.includes('set api key') || lowerQuery.includes('_api_key=') || lowerQuery.includes('_provider=') || lowerQuery.includes('_model_name=') || lowerQuery.includes('_base_url=')) {
+    // P2.1 RBAC: API-key and AI-provider changes are operator-only.
+    const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+    if (!op.allowed) {
+      await safeReply(message, `⛔ **Operator required** — API key / AI config changes are restricted. ${op.reason ?? ''}`);
+      return;
+    }
     const match = userQuery.match(/([A-Z][A-Z0-9_]{2,})\s*[:=]\s*([^\s]+)/i);
     if (match) {
       const keyName = match[1].toUpperCase();
       const keyValue = match[2].replace(/[`"'.,;]+$/, '');
       // AI provider/model/base-url changes go through switch_ai_model (runtime + .env), others via set_api_key
       if (keyName === 'AI_PROVIDER' || keyName === 'AI_MODEL_NAME' || keyName === 'AI_BASE_URL') {
+        // P2.1 / security-audit #6: AI_BASE_URL must pass the host allowlist —
+        // switch_ai_model previously could redirect the LLM to any endpoint.
+        if (keyName === 'AI_BASE_URL' && !baseUrlAllowed(keyValue)) {
+          await safeReply(message, `⛔ **AI_BASE_URL rejected** — host not in allowlist (AI_BASE_URL_ALLOWLIST).`);
+          return;
+        }
         const provider = keyName === 'AI_PROVIDER' ? keyValue : undefined;
         const modelName = keyName === 'AI_MODEL_NAME' ? keyValue : undefined;
         const baseUrl = keyName === 'AI_BASE_URL' ? keyValue : undefined;
