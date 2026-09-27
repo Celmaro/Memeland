@@ -20,6 +20,7 @@ import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
 import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
 import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
 import { RoutescanFeed } from './adapters/routescan-feed.js';
+import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
@@ -191,6 +192,9 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     // Routescan: free keyless multi-chain explorer new-token discovery + holders
     // (30+ EVM chains incl. robinhood). Inert unless ROUTESCAN_FEED_ENABLED=true.
     routescan: process.env.ROUTESCAN_FEED_ENABLED === 'true' ? new RoutescanFeed() : null,
+    // CMC keyless DEX stack: new-pair walking + holders + security detail.
+    // Inert unless CMC_DEX_FEED_ENABLED=true.
+    ...(process.env.CMC_DEX_FEED_ENABLED === 'true' ? { cmcDex: new CmcDexFeed() } : {}),
   },
 );
 // Wire shared adapters + singleton agent instances into the Hub
