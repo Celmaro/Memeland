@@ -46,6 +46,16 @@ export interface ScorecardEntry {
    *  traced from first-seen through fill to terminal outcome. */
   opportunityId?: string;
   positionId?: string;
+  /** P4.4 multi-horizon outcomes (ae395c §22): the learning dataset. */
+  return1m?: number;
+  return5m?: number;
+  return15m?: number;
+  return30m?: number;
+  return1h?: number;
+  mfePct?: number;   // max favorable excursion vs entry, %
+  maePct?: number;   // max adverse excursion vs entry, %
+  timeToTpMs?: number;
+  timeToSlMs?: number;
 }
 
 /**
@@ -476,8 +486,25 @@ export class StateStore {
     entry.currentPriceUsd = priceUsd;
     entry.updatedAtIso = nowIso;
     const change = entry.entryPriceUsd > 0 ? priceUsd / entry.entryPriceUsd - 1 : 0;
-    if (change >= 1.0) entry.status = 'TP';
-    else if (change <= -0.5) entry.status = 'SL';
+    // P4.4 multi-horizon + MFE/MAE (ae395c §22): the learning dataset.
+    const ageMs = Date.parse(nowIso) - Date.parse(entry.entryTimestampIso);
+    if (ageMs >= 60_000 && entry.return1m === undefined) entry.return1m = change;
+    if (ageMs >= 300_000 && entry.return5m === undefined) entry.return5m = change;
+    if (ageMs >= 900_000 && entry.return15m === undefined) entry.return15m = change;
+    if (ageMs >= 1_800_000 && entry.return30m === undefined) entry.return30m = change;
+    if (ageMs >= 3_600_000 && entry.return1h === undefined) entry.return1h = change;
+    // MFE/MAE track extremes vs entry (%. The open-position tracker calls this
+    // each cycle; the max favorable / max adverse excursion accumulates.
+    const pct = change * 100;
+    if (entry.mfePct === undefined || pct > entry.mfePct) entry.mfePct = pct;
+    if (entry.maePct === undefined || pct < entry.maePct) entry.maePct = pct;
+    if (change >= 1.0) {
+      entry.status = 'TP';
+      if (entry.timeToTpMs === undefined) entry.timeToTpMs = ageMs;
+    } else if (change <= -0.5) {
+      entry.status = 'SL';
+      if (entry.timeToSlMs === undefined) entry.timeToSlMs = ageMs;
+    }
     this.scheduleSave();
   }
 

@@ -178,4 +178,30 @@ describe('StateStore trackedTokens persistence', () => {
     const entry = reloaded.getScorecard().find((e) => e.id === 'SC_L1');
     expect(entry?.opportunityId).toBe('OPP_abc123'); // decision↔scorecard↔outcome trace survives reload
   });
+
+  it('P4.4: records multi-horizon returns + MFE/MAE on mark-to-market', () => {
+    const store = newStore();
+    store.appendScorecardEntry({
+      id: 'SC_MH', symbol: 'X', chain: 'robinhood', contractAddress: '0xmh',
+      confidence: 90, entryPriceUsd: 1, currentPriceUsd: 1,
+      entryTimestampIso: '2026-09-19T00:00:00.000Z', updatedAtIso: '2026-09-19T00:00:00.000Z',
+      status: 'OPEN',
+    });
+    // +50% after 10 minutes → return1m + return5m captured (15m not yet); MFE tracks high.
+    store.updateScorecardPrice('SC_MH', 1.5, '2026-09-19T00:10:00.000Z');
+    let e = store.getScorecard().find((x) => x.id === 'SC_MH')!;
+    expect(e.return1m).toBeCloseTo(0.5);
+    expect(e.return5m).toBeCloseTo(0.5);
+    expect(e.return15m).toBeUndefined(); // 10min < 15min horizon
+    expect(e.mfePct).toBeCloseTo(50);
+    // At 20 minutes the 15m horizon fires; later -40% tracks MAE + 30m return.
+    store.updateScorecardPrice('SC_MH', 1.6, '2026-09-19T00:20:00.000Z');
+    e = store.getScorecard().find((x) => x.id === 'SC_MH')!;
+    expect(e.return15m).toBeCloseTo(0.6);
+    store.updateScorecardPrice('SC_MH', 0.6, '2026-09-19T00:40:00.000Z');
+    e = store.getScorecard().find((x) => x.id === 'SC_MH')!;
+    expect(e.return30m).toBeCloseTo(-0.4);
+    expect(e.maePct).toBeCloseTo(-40);
+    expect(e.mfePct).toBeCloseTo(60); // high-water mark preserved
+  });
 });
