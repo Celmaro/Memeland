@@ -9,6 +9,9 @@ import { globalFreshPairWatchlist } from '../../services/fresh-pair-watchlist.js
 import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
+import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
+import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
+import { calibratedDecision } from '../../features/calibrated-decision.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
@@ -769,6 +772,21 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               reasons: [...det.reasons, `⚡ Cluster of ${trackEntry.buyWalletCount} smart-money wallets bought $${(trackEntry.totalBuyUsd / 1000).toFixed(0)}k (+20)`],
             };
           }
+          // Evidence-group cap (#2): the SAME smart-money flow can be counted
+          // multiple times — detectMemeSignal (smartDegen), applySignalBoost
+          // (+15), track-cluster (+20), strategy (+20). Count the contributing
+          // readouts and debias so one phenomenon can't inflate confidence 4×.
+          const redundancy =
+            (t.smartDegenCount >= 1 ? 1 : 0) +
+            (t.ctoFlag ? 1 : 0) +
+            (t.renownedCount >= 1 ? 1 : 0) +
+            (signalBoostMap.has(t.address.toLowerCase()) ? 1 : 0) +
+            (trackEntry && trackEntry.buyWalletCount >= 3 ? 1 : 0);
+          const cappedConfidence = capSignalConfidence(det.confidence, Math.max(1, redundancy));
+          if (cappedConfidence !== det.confidence) {
+            console.log(`[EVIDENCE CAP] ${t.symbol}: ${det.confidence}% debiased ${redundancy} correlated readouts → ${cappedConfidence}%`);
+            det = { ...det, confidence: cappedConfidence };
+          }
           if (det.type === 'NONE' || det.confidence < this.config.passThreshold) {
             console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${det.confidence}% < ${this.config.passThreshold}% (${det.reasons.join(' | ')})`);
             continue;
@@ -818,6 +836,38 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
           const thesis = buildMemeThesis(t, det.type, confidence, det.reasons, strategyReason);
           const payload = this.buildPayload(t, confidence, thesis, trackLabel, chain);
+
+          // #1 Point-in-time FeatureSnapshot: immutable, provenance-tagged capture
+          // of the decision-time data. Wired so any later observer (Jev/ML/audit)
+          // can reconstruct EXACTLY what the bot knew when it called this a signal —
+          // no future information can be back-read into it.
+          try {
+            const snap = buildFeatureSnapshot({
+              candidateId: `${chain.toLowerCase()}:${t.address.toLowerCase()}`,
+              timestamp: Date.now(),
+              strategyVersion: this.strategyEngine.getActiveStrategy('meme-robinhood')?.id,
+              modelVersion: 'arch-3-5slot',
+              source: { name: t.source ?? 'unknown', fetchedAt: Date.now() },
+              market: {
+                priceUsd: t.priceUsd,
+                liquidityUsd: t.liquidityUsd,
+                volume24hUsd: volume24hOf(t),
+              },
+              flow: {
+                buyUsd1h: t.buyUsd1h ?? t.volume1hUsd / 2,
+                sellUsd1h: t.sellUsd1h ?? t.volume1hUsd / 2,
+              },
+              security: { sellable: true }, // sellability proven later in the security block; snapshot defaults conservative
+              momentum: { change1hPct: t.priceChange1h ?? 0, mlProb: klines ? predictUpMomentum(klines).score : undefined },
+              smartMoney: { smartDegenCount: t.smartDegenCount, kolCount: t.renownedCount },
+            });
+            (payload as unknown as Record<string, unknown>).featureSnapshot = snap;
+            console.log(
+              `[SNAPSHOT] ${t.symbol} dq=${snap.dataQuality} groups=${snap.evidenceLineage.length} lineage=[${snap.evidenceLineage.map((e) => `${e.group}.${e.field}`).join(',')}]`,
+            );
+          } catch (snapErr: any) {
+            console.warn(`[SNAPSHOT] build failed (signal still fires): ${snapErr.message}`);
+          }
 
           // Arch-3 voter swarm: assemble opinions for this FINALIST and attach them to the
           // payload — the consensus gate in index.ts re-derives confidence from the weighted
@@ -949,6 +999,21 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           }
 
           const signal: RobinhoodSignal = { token: t, signalType: det.type, confidence, reasons: det.reasons };
+
+          // #5 Calibrated decision: rawScore (the additive heuristic) and
+          // calibratedProbability (real P(win)) are DISTINCT. We always expose
+          // the raw score; the probability stays null until a live calibration
+          // model is wired — a fabricated probability is worse than none.
+          const cal = calibratedDecision({
+            rawScore: confidence,
+            horizon: '1h',
+            model: 'arch3-5slot',
+          });
+          (payload as unknown as Record<string, unknown>).calibratedDecision = cal;
+          console.log(
+            `[CALIBRATED] ${t.symbol} raw=${cal.rawScore} prob=${cal.calibratedProbability !== null ? cal.calibratedProbability.toFixed(2) : 'null (no model yet)'} horizon=${cal.horizon}`,
+          );
+
           reports.push({ passed: true, signal, reason: thesis, confidence, payload });
           console.log(`[MEME AGENT] 🎯 ${det.type} ${t.symbol} ${confidence}% (${chain})`);
         }
