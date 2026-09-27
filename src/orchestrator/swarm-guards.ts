@@ -133,3 +133,27 @@ export class StickyConviction {
     this.entries.set(key, { value, at: this.now() });
   }
 }
+
+/**
+ * Evidence-group cap (#2). The same underlying smart-money flow can be counted
+ * MULTIPLE times in the pre-consensus confidence: detectMemeSignal reads
+ * smartDegenCount, applySignalBoost adds +15 for the same token_signal event,
+ * trackAccumulationLabel adds +20 for the cluster, and the strategy adds +20
+ * for smartDegen — four additive readouts of ONE phenomenon. This strips the
+ * redundant stacking so a single smart-money event cannot inflate confidence
+ * four times.
+ *
+ * `redundancy` = how many distinct code paths contributed the same smart-money
+ * read. 1 = a single clean signal (no cap). N>1 = debias by a bounded amount;
+ * the reduction caps so a strong signal stays strong, never collapsing to the
+ * floor.
+ */
+export function capSignalConfidence(raw: number, redundancy?: number): number {
+  if (raw <= 0) return raw;
+  const n = typeof redundancy === 'number' && Number.isFinite(redundancy) ? Math.max(0, redundancy) : 1;
+  if (n <= 1) return Math.max(0, Math.min(100, raw));
+  // Debias 4 points per extra readout of the same flow, bounded to a max 25pt
+  // haircut — enough to strip the +15/+20 stacks without killing a real signal.
+  const penalty = Math.min(25, (n - 1) * 4);
+  return Math.max(0, Math.min(100, raw - penalty));
+}

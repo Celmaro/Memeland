@@ -9,6 +9,7 @@ import { globalFreshPairWatchlist } from '../../services/fresh-pair-watchlist.js
 import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
+import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
@@ -768,6 +769,21 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               confidence: Math.min(100, det.confidence + 20),
               reasons: [...det.reasons, `⚡ Cluster of ${trackEntry.buyWalletCount} smart-money wallets bought $${(trackEntry.totalBuyUsd / 1000).toFixed(0)}k (+20)`],
             };
+          }
+          // Evidence-group cap (#2): the SAME smart-money flow can be counted
+          // multiple times — detectMemeSignal (smartDegen), applySignalBoost
+          // (+15), track-cluster (+20), strategy (+20). Count the contributing
+          // readouts and debias so one phenomenon can't inflate confidence 4×.
+          const redundancy =
+            (t.smartDegenCount >= 1 ? 1 : 0) +
+            (t.ctoFlag ? 1 : 0) +
+            (t.renownedCount >= 1 ? 1 : 0) +
+            (signalBoostMap.has(t.address.toLowerCase()) ? 1 : 0) +
+            (trackEntry && trackEntry.buyWalletCount >= 3 ? 1 : 0);
+          const cappedConfidence = capSignalConfidence(det.confidence, Math.max(1, redundancy));
+          if (cappedConfidence !== det.confidence) {
+            console.log(`[EVIDENCE CAP] ${t.symbol}: ${det.confidence}% debiased ${redundancy} correlated readouts → ${cappedConfidence}%`);
+            det = { ...det, confidence: cappedConfidence };
           }
           if (det.type === 'NONE' || det.confidence < this.config.passThreshold) {
             console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${det.confidence}% < ${this.config.passThreshold}% (${det.reasons.join(' | ')})`);
