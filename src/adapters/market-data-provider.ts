@@ -59,7 +59,15 @@ export interface MarketDataProvider {
   tokenDetail?(
     chain: string,
     address: string,
-  ): Promise<{ volume1hUsd?: number; volume15mUsd?: number; volume5mUsd?: number } | null>;
+  ): Promise<{
+    volume1hUsd?: number;
+    volume15mUsd?: number;
+    volume5mUsd?: number;
+    buyUsd1h?: number;
+    sellUsd1h?: number;
+    buyUsd15m?: number;
+    sellUsd15m?: number;
+  } | null>;
 }
 
 /** Canonical chain-name → chain-id map used by normalized providers. */

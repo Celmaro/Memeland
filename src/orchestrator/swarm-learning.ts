@@ -121,7 +121,17 @@ export class SwarmLearningEngine {
   }
 
   public updateSignalPrice(id: string, currentPriceUsd: number): void {
-    const item = this.outcomes.find(o => o.id === id);
+    // The wallet-tracker calls updateSignalPrice(holding.address, price) — the
+    // CONTRACT ADDRESS, not the CALL_<ts>_<rand> id recordSignalCall returns.
+    // Resolve by id first, then fall back to contract address (case-insensitive)
+    // so live position updates actually reach the outcome (audit finding: the
+    // old `o.id === id` never matched an address, silently dropping every
+    // update and disabling learning on real trades).
+    let item = this.outcomes.find(o => o.id === id);
+    if (!item) {
+      const addr = id.toLowerCase();
+      item = this.outcomes.find(o => o.contractAddress.toLowerCase() === addr && o.result === 'OPEN');
+    }
     if (!item) return;
 
     if (currentPriceUsd > item.maxPriceReachedUsd) {
@@ -129,6 +139,15 @@ export class SwarmLearningEngine {
     }
     if (currentPriceUsd < item.lowestPriceReachedUsd) {
       item.lowestPriceReachedUsd = currentPriceUsd;
+    }
+
+    // Terminal-state guard: once a TAKE_PROFIT/STOP_LOSS has fired, do NOT
+    // recalibrate again on subsequent high/low prices (audit finding: the same
+    // 2x+ price would trip recalibrate on every cycle). Track closed outcomes
+    // separately so they never re-trip.
+    if (item.result !== 'OPEN') {
+      this.saveState();
+      return;
     }
 
     const gainRatio = item.maxPriceReachedUsd / item.initialPriceUsd;

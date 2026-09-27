@@ -9,6 +9,7 @@ export interface ApprovalOrderInput {
   contractAddress: string;
   chain: string;
   entryPriceUsd: number;
+  liquidityUsd?: number;
   suggestedSizeUsd: number;
   confidence: number;
   thesis: string;
@@ -64,6 +65,7 @@ export class ApprovalQueueService {
       contractAddress: input.contractAddress,
       chain: input.chain,
       entryPriceUsd: input.entryPriceUsd,
+      liquidityUsd: input.liquidityUsd,
       suggestedSizeUsd: input.suggestedSizeUsd,
       confidence: input.confidence,
       thesis: input.thesis,
@@ -93,9 +95,12 @@ export class ApprovalQueueService {
     };
   }
 
-  /** Count of APPROVED fills — the Phase-3 AUTO unlock numerator. */
+  /** Count of CONFIRMED (actually-executed) fills — the Phase-3 AUTO unlock
+   *  numerator. Audit fix: this used to count APPROVED orders, so approvals
+   *  that were blocked/failed still accrued toward the 50-fill floor. Only
+   *  orders that reached CONFIRMED_FILL (fill executed + recorded) count. */
   public getApprovedFills(): number {
-    return this.requireStore().getApprovalOrders().filter((o) => o.status === 'APPROVED').length;
+    return this.requireStore().getApprovalOrders().filter((o) => o.status === 'CONFIRMED_FILL').length;
   }
 
   /** Approve a pending order; no-op (returns null) if not PENDING. */
@@ -142,12 +147,23 @@ export class ApprovalQueueService {
     return order;
   }
 
-  /** Bump the executed funnel stage for an approved order once the fill runs. */
+  /** Bump the executed funnel stage AND confirm the fill — only call when the
+   *  fill actually executed (audit fix: APPROVED alone must not unlock Phase-3
+   *  AUTO; only confirmed, executed fills count toward the floor). */
   public recordExecuted(id: string): void {
     const store = this.requireStore();
     const order = store.getApprovalOrder(id);
     if (!order) return;
     store.incrementFunnel(order.domain, 'executed');
+    // APPROVED -> CONFIRMED_FILL (terminal) once the fill runs. Fail-safe: if
+    // the order already reached a terminal state, leave it (never downgrade).
+    if (order.status === 'APPROVED') {
+      const sm = new ApprovalOrderStateMachine(order.status);
+      if (sm.canTransitionTo('CONFIRMED_FILL')) {
+        order.status = sm.transitionTo('CONFIRMED_FILL');
+        store.updateApprovalOrder(order);
+      }
+    }
   }
 
   /**

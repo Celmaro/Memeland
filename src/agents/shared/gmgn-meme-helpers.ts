@@ -483,6 +483,10 @@ export function toStrategyGmgn(t: GMGNRawToken): Record<string, unknown> {
     buys: t.buys,
     sells: t.sells,
     swaps: t.swaps,
+    // USD-window buy/sell flow (fresh-lane DEXPaprika detail); absent otherwise.
+    // Strategy prefers buy_usd_ratio over count ratio when present (audit finding).
+    buy_usd_1h: t.buyUsd1h ?? null,
+    sell_usd_1h: t.sellUsd1h ?? null,
     holder_count: t.holderCount,
     market_cap_usd: t.marketCapUsd,
     price_change_percent5m: t.priceChange5m,

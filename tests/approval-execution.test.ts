@@ -94,7 +94,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     expect(ledger.audit.some((e) => e.kind === 'send' && e.outcome === 'confirmed')).toBe(true);
   });
 
-  it('still journals and bumps the funnel even when the EVM fill reports failure (audit trail)', async () => {
+  it('journals a failed fill for audit trail but does NOT fire onExecuted (audit fix)', async () => {
     const { journal, evm, wallet } = makeDeps();
     (evm.executeBuyToken as ReturnType<typeof vi.fn>).mockResolvedValue({
       success: false,
@@ -120,7 +120,10 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     });
     expect(res.success).toBe(false);
     expect(res.error).toBe('quote failed');
-    expect(onExecuted).toHaveBeenCalledTimes(1);
+    // Audit fix (#10): onExecuted fires ONLY on confirmed fills — a failed fill
+    // must NOT bump the executed counter nor confirm the approval order. But the
+    // failed fill is still journaled for the audit trail.
+    expect(onExecuted).toHaveBeenCalledTimes(0);
     expect(journal.listTrades()).toHaveLength(1);
   });
 
@@ -302,6 +305,37 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         expect(res.success).toBe(false);
         expect(res.error).toMatch(/fill-sim gate refused/);
         expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q08 fill-sim FAILS CLOSED when real liquidity is unknown (no entryPriceUsd*1000)', async () => {
+        // Audit fix: the old code synthesized liquidity as entryPriceUsd*1000.
+        // Now the gate refuses when real pool depth is absent — never fabricates.
+        const { journal, evm, wallet } = makeDeps();
+        const check = vi.fn(() => ({ allowed: true, impactPct: 1, reason: 'ok' }));
+        const res = await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          fillSim: { check },
+          // NOTE: no liquidityUsd provided
+        });
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/unknown pool liquidity/);
+        expect(check).not.toHaveBeenCalled(); // never fabricate depth
+        expect(evm.executeBuyToken).not.toHaveBeenCalled();
+      });
+
+      it('Q08 fill-sim uses REAL liquidity when provided', async () => {
+        const { journal, evm, wallet } = makeDeps();
+        const check = vi.fn(() => ({ allowed: true, impactPct: 1, reason: 'ok' }));
+        await executeMemeBuy({
+          evm, wallet, journal, onExecuted: () => {},
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          fillSim: { check },
+          liquidityUsd: 25000, // real pool depth from the candidate
+        });
+        expect(check).toHaveBeenCalledWith(
+          expect.objectContaining({ liquidityUsd: 25000 })
+        );
       });
 
       it('Q13 cost gate refused → fill blocked after budget exhausted', async () => {

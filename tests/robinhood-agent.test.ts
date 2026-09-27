@@ -339,6 +339,63 @@ describe('RobinhoodScreeningAgent', () => {
     expect(feeOff.recommendedAction).not.toBe('SKIP');
   });
 
+  it('strategy: USD buy/sell flow beats count ratio (80% buys by count, net SELLER by USD)', async () => {
+    // The audit's critical finding: 800×$20 buys vs 200×$500 sells = 80% 'BUY'
+    // by count but net SELLER by USD. The +20 momentum bonus must NOT fire on an
+    // actual net-seller. Regression: DEXPaprika now feeds buyUsd1h/sellUsd1h.
+    const agent = new RobinhoodScreeningAgent();
+    const token = mkToken({ ctoFlag: false, priceChange1h: 35 }); // non-CTO → MOMENTUM path
+    const gmgnCtx = {
+      ...agent.toStrategyGmgn(token),
+      native_price_usd: ETH_PRICE,
+      buys: 800, sells: 200, // 80% BUY by count
+      buy_usd_1h: 16000, sell_usd_1h: 100000, // net -$84k by USD
+    };
+    const { createRequire } = await import('module');
+    const path = (await import('path')).default;
+    const requireEsm = createRequire(import.meta.url);
+    const stratPath = path.resolve(process.cwd(), 'strategies', 'meme-robinhood-default.mjs');
+    const strat = requireEsm(stratPath).default;
+    const ctx = {
+      domain: 'MEME_ROBINHOOD', symbol: token.symbol, contractAddress: token.address,
+      priceUsd: token.priceUsd, liquidityUsd: token.liquidityUsd,
+      volume24hUsd: token.volume24hUsd, volume1hUsd: token.volume24hUsd / 24,
+      smartMoneyCount: token.smartDegenCount, securityAuditPassed: true,
+      socialHypeScore: 88, gmgn: gmgnCtx,
+    };
+    const ev = strat.evaluate(ctx);
+    // Net seller by USD must NOT count the +20 buy bonus — and the reason must
+    // flag the contradiction (not award "Buy 80%").
+    expect(ev.reason).not.toContain('(+20)');
+    expect(ev.reason).toMatch(/Net .* but net flow -/);
+  });
+
+  it('strategy: USD buy/sell flow awards +20 when net BUYER by USD', async () => {
+    // Net buyer by USD (with USD data present) awards +20 and cites USD, not count.
+    const agent = new RobinhoodScreeningAgent();
+    const token = mkToken({ ctoFlag: false, priceChange1h: 35 }); // non-CTO → MOMENTUM path
+    const gmgnCtx = {
+      ...agent.toStrategyGmgn(token),
+      native_price_usd: ETH_PRICE,
+      buys: 100, sells: 900, // 10% buy by count
+      buy_usd_1h: 100000, sell_usd_1h: 16000, // net +$84k by USD
+    };
+    const { createRequire } = await import('module');
+    const path = (await import('path')).default;
+    const requireEsm = createRequire(import.meta.url);
+    const strat = requireEsm(path.resolve(process.cwd(), 'strategies', 'meme-robinhood-default.mjs')).default;
+    const ctx = {
+      domain: 'MEME_ROBINHOOD', symbol: token.symbol, contractAddress: token.address,
+      priceUsd: token.priceUsd, liquidityUsd: token.liquidityUsd,
+      volume24hUsd: token.volume24hUsd, volume1hUsd: token.volume24hUsd / 24,
+      smartMoneyCount: token.smartDegenCount, securityAuditPassed: true,
+      socialHypeScore: 88, gmgn: gmgnCtx,
+    };
+    const ev = strat.evaluate(ctx);
+    expect(ev.reason).toMatch(/Buy \$\d+k \/ Sell \$\d+k/); // USD-based, not count
+    expect(ev.reason).toMatch(/net \+\$/);
+  });
+
   it('dedupe prunes seenTokens entries older than 5 minutes', () => {
     const { dedupe } = createDedupe();
     const first = dedupe([mkToken({ address: 'repeat1' }), mkToken({ address: 'fresh1' })]);

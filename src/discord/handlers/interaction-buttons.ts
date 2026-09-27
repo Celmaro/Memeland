@@ -129,6 +129,7 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         symbol: approved.symbol,
         contractAddress: approved.contractAddress,
         entryPriceUsd: approved.entryPriceUsd,
+        liquidityUsd: approved.liquidityUsd,
         amountEth,
         confidence: approved.confidence,
         thesis: approved.thesis,

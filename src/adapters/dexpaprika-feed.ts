@@ -51,11 +51,22 @@ interface RawTokenDetail {
   summary?: {
     price_usd?: number | string;
     liquidity_usd?: number | string;
-    '1h'?: { volume_usd?: number | string };
-    '15m'?: { volume_usd?: number | string };
-    '5m'?: { volume_usd?: number | string };
+    '1h'?: { volume_usd?: number | string; buy_usd?: number | string; sell_usd?: number | string };
+    '15m'?: { volume_usd?: number | string; buy_usd?: number | string; sell_usd?: number | string };
+    '5m'?: { volume_usd?: number | string; buy_usd?: number | string; sell_usd?: number | string };
     '24h'?: { volume_usd?: number | string };
   };
+}
+
+/** Granular token-detail breakdown (DEXPaprika /networks/{n}/tokens/{addr}). */
+export interface TokenDetail {
+  volume1hUsd?: number;
+  volume15mUsd?: number;
+  volume5mUsd?: number;
+  buyUsd1h?: number;
+  sellUsd1h?: number;
+  buyUsd15m?: number;
+  sellUsd15m?: number;
 }
 
 export interface DexpaprikaFeedOptions {
@@ -192,7 +203,7 @@ export class DexpaprikaFeed implements MarketDataProvider {
   public async tokenDetail(
     chain: string,
     address: string,
-  ): Promise<{ volume1hUsd?: number; volume15mUsd?: number; volume5mUsd?: number } | null> {
+  ): Promise<TokenDetail | null> {
     try {
       // Chain-name aliasing: the agent passes chain keys ('sol','eth') but
       // DEXPaprika networks are named ('solana','ethereum'). Resolve to the
@@ -209,10 +220,17 @@ export class DexpaprikaFeed implements MarketDataProvider {
         const n = Number(v);
         return Number.isFinite(n) && n > 0 ? n : undefined;
       };
+      // Item 4: the summary windows carry REAL buy_usd/sell_usd — the basis for
+      // replacing the count-only buy/sell ratio in the strategy (audit finding:
+      // 800×$20 buys vs 200×$500 sells = 80% 'BUY' by count but net SELLER by USD).
       return {
         volume1hUsd: vol(s['1h']?.volume_usd),
         volume15mUsd: vol(s['15m']?.volume_usd),
         volume5mUsd: vol(s['5m']?.volume_usd),
+        buyUsd1h: vol(s['1h']?.buy_usd),
+        sellUsd1h: vol(s['1h']?.sell_usd),
+        buyUsd15m: vol(s['15m']?.buy_usd),
+        sellUsd15m: vol(s['15m']?.sell_usd),
       };
     } catch {
       return null;
