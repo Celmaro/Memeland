@@ -11,6 +11,7 @@ import { SellabilitySimulator } from '../../services/sellability/sellability-sim
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
 import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
+import { calibratedDecision } from '../../features/calibrated-decision.js';
 import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
@@ -998,6 +999,21 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           }
 
           const signal: RobinhoodSignal = { token: t, signalType: det.type, confidence, reasons: det.reasons };
+
+          // #5 Calibrated decision: rawScore (the additive heuristic) and
+          // calibratedProbability (real P(win)) are DISTINCT. We always expose
+          // the raw score; the probability stays null until a live calibration
+          // model is wired — a fabricated probability is worse than none.
+          const cal = calibratedDecision({
+            rawScore: confidence,
+            horizon: '1h',
+            model: 'arch3-5slot',
+          });
+          (payload as unknown as Record<string, unknown>).calibratedDecision = cal;
+          console.log(
+            `[CALIBRATED] ${t.symbol} raw=${cal.rawScore} prob=${cal.calibratedProbability !== null ? cal.calibratedProbability.toFixed(2) : 'null (no model yet)'} horizon=${cal.horizon}`,
+          );
+
           reports.push({ passed: true, signal, reason: thesis, confidence, payload });
           console.log(`[MEME AGENT] 🎯 ${det.type} ${t.symbol} ${confidence}% (${chain})`);
         }
