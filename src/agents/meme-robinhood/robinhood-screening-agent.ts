@@ -13,7 +13,7 @@ import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
 import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js';
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
-import { globalCandidateRegistry } from '../../discovery/discovery-registry.js';
+import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
 import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
 import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
@@ -124,6 +124,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private solTimeOnCurveLoader: TimeOnCurveAssessOptions['loader'] | null;
   /** P4.1 CMC keyless DEX feed (new-pair walking + holders). Empty until injected. */
   private cmcDex: MarketDataProvider | null;
+  /** P4.3 Helius Solana INTRODUCER feed (bounded, cursor-persisted SPL mint walk). Empty until injected. */
+  private helius: MarketDataProvider | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -155,6 +157,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       routescan?: MarketDataProvider | null;
       solTimeOnCurveLoader?: TimeOnCurveAssessOptions['loader'] | null;
       cmcDex?: MarketDataProvider | null;
+      helius?: MarketDataProvider | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
@@ -179,6 +182,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.routescan = opts.routescan ?? null;
     this.solTimeOnCurveLoader = opts.solTimeOnCurveLoader ?? null;
     this.cmcDex = opts.cmcDex ?? null;
+    this.helius = opts.helius ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
@@ -322,6 +326,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.cmcDex, 'cmc', 'CMC_DEX_FEED_ENABLED', chain);
   }
 
+  /** P4.3 Helius Solana INTRODUCER (bounded, cursor-persisted SPL mint walk).
+   *  Guarded by HELIUS_FEED_ENABLED=true and the DISCOVERY_INTRODUCERS list. */
+  public async collectHeliusCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.helius, 'helius', 'HELIUS_FEED_ENABLED', chain);
+  }
+
   /**
    * Shared keyless-feed collector. Fails open (empty) unless the env gate is on
    * and a provider is injected. Normalizes discovered MarketTokens (filtered to
@@ -329,12 +339,14 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'helius',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
     if (process.env[envVar] !== 'true') return [];
     if (!provider) return [];
+    // DISCOVERY_INTRODUCERS allowlist gate (unset → every enabled feed participates).
+    if (!isIntroducerEnabled(source, process.env.DISCOVERY_INTRODUCERS)) return [];
     try {
       const chainId = chainIdFor(chain);
       const tokens = await provider.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
@@ -637,6 +649,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const ankrCandidates = await this.collectAnkrCandidates(chain);
                   const routescanCandidates = await this.collectRoutescanCandidates(chain);
                   const cmcDexCandidates = await this.collectCmcDexCandidates(chain);
+                  const heliusCandidates = await this.collectHeliusCandidates(chain);
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
                   // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
@@ -649,7 +662,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // addresses a keyless feed already found (smartDegen/CTO/KOL
                   // fields that detectMemeSignal needs), and GMGN-only
                   // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates]) {
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...heliusCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN

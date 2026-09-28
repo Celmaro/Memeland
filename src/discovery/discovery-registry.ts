@@ -10,6 +10,20 @@
 
 export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'cmc' | 'birdeye' | 'helius' | 'pons';
 
+/**
+ * DISCOVERY_INTRODUCERS allowlist gate. When the env var is set it is a
+ * comma-separated list of active introducers (coarse names like `dexpaprika`
+ * OR provider-architecture style `helius-sol` / `ankr-eth`); a source is
+ * enabled if it equals a token or matches a `<source>-*` token (so `helius-sol`
+ * enables `helius`). Unset → every enabled feed participates (back-compat).
+ */
+export function isIntroducerEnabled(source: string, list?: string): boolean {
+  if (!list) return true;
+  const tokens = list.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (tokens.length === 0) return true;
+  return tokens.some((tok) => tok === source || tok.startsWith(`${source}-`));
+}
+
 export type CandidateLifecycle = 'fresh' | 'enriching' | 'revalidated' | 'eligible' | 'dead';
 
 export interface CandidateRecord {

@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { CandidateRegistry } from '../src/discovery/discovery-registry.js';
+import { CandidateRegistry, isIntroducerEnabled } from '../src/discovery/discovery-registry.js';
+
+describe('isIntroducerEnabled (DISCOVERY_INTRODUCERS gate)', () => {
+  it('enables every feed when the env list is unset (back-compat)', () => {
+    expect(isIntroducerEnabled('ankr')).toBe(true);
+    expect(isIntroducerEnabled('helius', '')).toBe(true);
+    expect(isIntroducerEnabled('helius', '   ')).toBe(true);
+  });
+
+  it('enables a source when listed exactly or as a <source>-* token', () => {
+    expect(isIntroducerEnabled('dexpaprika', 'dexpaprika,ankr')).toBe(true);
+    expect(isIntroducerEnabled('ankr', 'dexpaprika,ankr')).toBe(true);
+    // provider-architecture style: helius-sol enables helius; gecko-base gecko.
+    expect(isIntroducerEnabled('helius', 'helius-sol,dexpaprika')).toBe(true);
+    expect(isIntroducerEnabled('gecko', 'gecko-base')).toBe(true);
+  });
+
+  it('blocks a source absent from the allowlist', () => {
+    expect(isIntroducerEnabled('cmc', 'ankr,helius-sol')).toBe(false);
+    expect(isIntroducerEnabled('gecko', 'dexpaprika')).toBe(false);
+  });
+});
+
 
 describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
   it('records firstSeen per source and keeps the FIRST sighting', () => {

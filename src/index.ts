@@ -21,6 +21,7 @@ import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
 import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
 import { RoutescanFeed } from './adapters/routescan-feed.js';
 import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
+import { HeliusDiscoveryFeed } from './adapters/helius-discovery-feed.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
@@ -196,6 +197,13 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     // CMC keyless DEX stack: new-pair walking + holders + security detail.
     // Inert unless CMC_DEX_FEED_ENABLED=true.
     ...(process.env.CMC_DEX_FEED_ENABLED === 'true' ? { cmcDex: new CmcDexFeed() } : {}),
+    // P4.3 Helius SOL introducer (bounded, cursor-persisted SPL mint walk).
+    // Inert unless HELIUS_FEED_ENABLED=true AND HELIUS_API_KEY is set. Live-key
+    // validation of the launch-program walk remains outstanding; the feed is
+    // fail-soft and consumes the caller's DISCOVERY_INTRODUCERS allowlist.
+    ...(process.env.HELIUS_FEED_ENABLED === 'true' && process.env.HELIUS_API_KEY
+      ? { helius: new HeliusDiscoveryFeed({ apiKey: process.env.HELIUS_API_KEY }) }
+      : {}),
   },
 );
 // Wire shared adapters + singleton agent instances into the Hub
