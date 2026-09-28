@@ -18,6 +18,8 @@ import { globalDecisionCache } from '../services/decision-cache.js';
 import { globalWalletGraph } from '../graph/wallet-graph.js';
 import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { sellabilityConfigured } from '../services/execution-gates.js';
+import type { PaperTradingLedger } from '../services/paper-trading.js';
+import { bookFromMid } from '../services/paper-trading.js';
 
 /** Cycle cadence (default 5 min) — used by the stale-gate hours calculation. */
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
@@ -69,6 +71,12 @@ export interface ScreeningCycleDeps {
   walletTracker: any;
   positionManager: any;
   globalReputationMemory: any;
+  /** P6.2 paper-trading ledger (mid-market fills + regime-coverage gate). */
+  paperTrading?: PaperTradingLedger | null;
+  /** P6.2 gate threshold env: regimes, per-regime trades, expectancy floor. */
+  paperMinRegimes?: number;
+  paperMinPerRegime?: number;
+  paperMinExpectancyPct?: number;
   GMGNAdapter: any;
   notifyControlRoom: (client: any, key: string, content: string) => Promise<void>;
   opportunityPostMortem: any;
@@ -88,6 +96,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     gateFillSim, gateCostGate, gateGovernance, gateSellability, globalLifiExecutor,
     globalDecisionLedger, normalizeExecutionChainKey, executableChainsFromEnv, buildCallEmbed,
     telegramService, getActiveClient, walletTracker, positionManager, globalReputationMemory,
+    paperTrading, paperMinRegimes, paperMinPerRegime, paperMinExpectancyPct,
     GMGNAdapter, notifyControlRoom, opportunityPostMortem, ChannelType,
     SCREENING_TIMEOUT_MS, withScreeningTimeout,
   } = deps;
@@ -210,6 +219,10 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
 
     // Dispatch all passed signals to Discord channels & Telegram topics (with dedup)
     const now = Date.now();
+    // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates
+    // with real market quotes, SIGNAL_ONLY skips trade execution. Declared here
+    // (before the dispatch loop) so paper trading and the AUTO gate share one flag.
+    const AUTO_EXECUTE_ENABLED = isAutoExecute() || process.env.AUTO_EXECUTE_ENABLED === 'true';
     const firedOpportunities: Array<{ id: string; confidence: number }> = [];
     for (const item of dispatchedPayloads) {
       const dedupKey = `${item.channelName}:${item.payload.symbol}:${item.payload.contractAddress || 'N/A'}`;
@@ -250,10 +263,9 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       // Phase-1 scorecard + funnel: this signal FIRED — open a predicted-vs-actual entry
       stateStore.incrementFunnel('meme-robinhood', 'fired');
       let scorecardId: string | undefined;
-      {
-        const firedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
-        if (firedPrice > 0) {
-          scorecardId = `SC_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const firedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
+      if (firedPrice > 0) {
+        scorecardId = `SC_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
           stateStore.appendScorecardEntry({
             id: scorecardId,
             symbol: item.payload.symbol || 'TOKEN',
@@ -268,6 +280,40 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             opportunityId,
           });
           console.log(`[LINEAGE] ${item.payload.symbol}: opportunity=${opportunityId ?? 'n/a'} scorecard=${scorecardId} → decision chain linked`);
+      }
+
+      // P6.2 paper trading: open a mid-market paper position for every fired
+      // signal while in DRY_RUN (never live). The two-sided book is modeled
+      // from the REAL mid + REAL pooled depth via the splash model; when depth
+      // is unknown the open fails closed (no paper fill without a proofable
+      // book). The paper position closes when the scorecard flips TP/SL, and
+      // the regime-coverage gate (≥N regimes × positive expectancy) is what
+      // later unlocks Phase-3 AUTO.
+      if (paperTrading && !AUTO_EXECUTE_ENABLED && firedPrice > 0) {
+        const paperRegime = (item.payload as { regime?: string }).regime as
+          | 'FAST_MOMENTUM' | 'REVIVAL' | 'CTO' | 'SMART_MONEY' | undefined;
+        const paperBook = bookFromMid(firedPrice, item.payload.liquidityUsd, 10);
+        if (paperBook === null) {
+          console.log(`[PAPER] ${item.payload.symbol}: open refused — no proofable two-sided book (depth=${item.payload.liquidityUsd ?? 'unknown'})`);
+        } else {
+          const paperOpen = paperTrading.openTrade({
+            symbol: item.payload.symbol || 'TOKEN',
+            chain: String(item.payload.network || 'robinhood').toLowerCase(),
+            contractAddress: item.payload.contractAddress || '',
+            book: paperBook,
+            liquidityUsd: item.payload.liquidityUsd,
+            sizeUsd: 10,
+            confidence: Number(item.payload.confidenceScore) || 0,
+            regime: paperRegime,
+            strategyUsed: 'paper-screening',
+            thesis: item.rawReason || item.payload.aiThesis || '',
+            scorecardId,
+          });
+          if (paperOpen.ok) {
+            console.log(`[PAPER] opened ${paperOpen.trade!.id} ${item.payload.symbol} @ ${paperOpen.trade!.entryFillPriceUsd.toFixed(6)} (slip ${paperOpen.trade!.slipPct.toFixed(2)}%) regime=${paperRegime ?? 'none'}`);
+          } else {
+            console.log(`[PAPER] ${item.payload.symbol}: open refused — ${paperOpen.reason}`);
+          }
         }
       }
 
@@ -303,11 +349,21 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       }
 
       // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates with real market quotes, SIGNAL_ONLY skips trade execution.
-      const AUTO_EXECUTE_ENABLED = isAutoExecute() || process.env.AUTO_EXECUTE_ENABLED === 'true';
       if (autoExecDomain && AUTO_EXECUTE_ENABLED && !isSignalOnly()) {
         // Phase-3 AUTO gate: execution only opens once the approved-fill floor
-        // (N > 50) AND positive expectancy (closed win rate > 50%) are proven.
-        const phaseGate = approvalQueueService.canAutoExecute(scorecardExpectancy());
+        // (N > 50) AND positive expectancy (closed win rate > 50%) AND the
+        // P6.2 paper-regime precondition (several regimes × positive paper
+        // expectancy) are proven.
+        // P6.2: the paper ledger unlocks AUTO only after ≥N regimes each with
+        // ≥M closed paper trades at positive expectancy — fail-closed.
+        const paperGate = paperTrading
+          ? paperTrading.unlockStatus({
+              minRegimes: paperMinRegimes ?? 3,
+              minPerRegime: paperMinPerRegime ?? 5,
+              minExpectancyPct: paperMinExpectancyPct ?? 0,
+            })
+          : undefined;
+        const phaseGate = approvalQueueService.canAutoExecute(scorecardExpectancy(), paperGate);
         if (!phaseGate.allowed) {
           console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by Phase-3 AUTO gate — ${phaseGate.reason}`);
         } else {
@@ -487,6 +543,16 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
         const info = await scorecardAdapter.fetchTokenInfo(chain, entry.contractAddress);
         if (info && info.priceUsd > 0) {
           stateStore.updateScorecardPrice(entry.id, info.priceUsd, nowIso);
+          // P6.2 paper trading: a scorecard TP/SL flip closes the mirroring
+          // paper position at the same price → realized outcome for the
+          // regime-coverage gate and the walk-forward OOS harness.
+          if (entry.status === 'TP') {
+            const closed = paperTrading?.closeByScorecard(entry.id, info.priceUsd, 'CLOSED_TP');
+            if (closed?.ok) console.log(`[PAPER] closed ${entry.symbol} TP @ ${info.priceUsd} (pnl ${closed.pnlPct!.toFixed(1)}%)`);
+          } else if (entry.status === 'SL') {
+            const closed = paperTrading?.closeByScorecard(entry.id, info.priceUsd, 'CLOSED_SL');
+            if (closed?.ok) console.log(`[PAPER] closed ${entry.symbol} SL @ ${info.priceUsd} (pnl ${closed.pnlPct!.toFixed(1)}%)`);
+          }
         }
       }
       const scorecard = stateStore.getScorecard();

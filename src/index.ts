@@ -36,6 +36,7 @@ import { globalDecisionCache } from './services/decision-cache.js';
 import { globalReputationMemory } from './services/reputation-memory.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { WalletTracker } from './services/wallet-tracker.js';
+import { PaperTradingLedger } from './services/paper-trading.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability } from './services/execution-gates.js';
 import { executableChainsFromEnv, normalizeExecutionChainKey } from './config/execution-registry.js';
@@ -209,6 +210,14 @@ tradeJournalService.attachStateStore(stateStore);
 walletService.attachStateStore(stateStore);
 approvalQueueService.attachStateStore(stateStore);
 
+// P6.2 paper trading: the mid-market paper ledger (DRY_RUN fills + regime-
+// coverage gate). In-memory per process; journal entries persist via the
+// attached trade journal.
+const paperTrading = new PaperTradingLedger(tradeJournalService);
+const paperMinRegimes = Number(process.env.PAPER_MIN_REGIMES ?? 3) || 3;
+const paperMinPerRegime = Number(process.env.PAPER_MIN_PER_REGIME ?? 5) || 5;
+const paperMinExpectancyPct = Number(process.env.PAPER_MIN_EXPECTANCY_PCT ?? 0) || 0;
+
 const loadedSkills = skillLoader.loadAllSkills();
 
 // Memeland fork boot summary. Names the live 9-voter swarm, the only execution
@@ -247,7 +256,8 @@ const runScreeningCycle = createScreeningCycle({
   gateFillSim, gateCostGate, gateGovernance, gateSellability, globalLifiExecutor,
   globalDecisionLedger, normalizeExecutionChainKey, executableChainsFromEnv, buildCallEmbed,
   telegramService, getActiveClient: () => activeClient, walletTracker, positionManager,
-  globalReputationMemory, GMGNAdapter, notifyControlRoom, opportunityPostMortem,
+  globalReputationMemory, paperTrading, paperMinRegimes, paperMinPerRegime,
+  paperMinExpectancyPct, GMGNAdapter, notifyControlRoom, opportunityPostMortem,
   ChannelType, SCREENING_TIMEOUT_MS, withScreeningTimeout,
 });
 // Scheduler and the independent market-risk monitor are owned by the startup module.

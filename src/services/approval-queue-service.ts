@@ -27,6 +27,16 @@ export interface AutoGateResult {
   approvedFills: number;
   winRatePct: number;
   reason: string;
+  /** P6.2 paper-regime gate (when provided): unlocked only across ≥N regimes. */
+  paperRegimeGate?: { passed: boolean; coverage: Record<string, number>; expectancyPct: number; reason: string };
+}
+
+/** P6.2 paper-regime precondition handed to the AUTO gate (fail-closed). */
+export interface PaperRegimePrecondition {
+  passed: boolean;
+  coverage: Record<string, number>;
+  expectancyPct: number;
+  reason: string;
 }
 
 /**
@@ -168,25 +178,38 @@ export class ApprovalQueueService {
 
   /**
    * Phase-3 AUTO gate: unlocked ONLY when approved fills reach the floor AND
-   * the scorecard shows positive expectancy (win rate > 50% on closed entries).
+   * the scorecard shows positive expectancy (win rate > 50% on closed entries)
+   * AND the P6.2 paper-regime precondition passes (when provided).
    * Fail-closed: no approved fills / no closed entries → not allowed.
    */
-  public canAutoExecute(scorecardClosed: { tp: number; sl: number }): AutoGateResult {
+  public canAutoExecute(scorecardClosed: { tp: number; sl: number }, paperGate?: PaperRegimePrecondition): AutoGateResult {
     const approvedFills = this.getApprovedFills();
     const closed = scorecardClosed.tp + scorecardClosed.sl;
     const winRatePct = closed > 0 ? Math.round((scorecardClosed.tp / closed) * 100) : 0;
 
     const fillLocked = approvedFills < this.minApprovedFills;
     const noExpectancy = closed === 0 || winRatePct <= 50;
+    // P6.2: when a paper-regime precondition is supplied, it is CONJUNCTIVE
+    // with the fill floor + expectancy — the paper ledger must prove several
+    // regimes before AUTO can open. Absent gate → treated as passed (callers
+    // that don't run paper trading keep their current behavior).
+    const paperRegimeGate: PaperRegimePrecondition = paperGate ?? {
+      passed: true,
+      coverage: {},
+      expectancyPct: 0,
+      reason: 'paper-regime gate not configured',
+    };
 
-    if (fillLocked || noExpectancy) {
+    if (fillLocked || noExpectancy || !paperRegimeGate.passed) {
       const reasons: string[] = [];
       if (fillLocked) reasons.push(`approved fills ${approvedFills}/${this.minApprovedFills}`);
       if (noExpectancy) reasons.push(`expectancy not proven (${closed === 0 ? 'no closed entries' : `winRate ${winRatePct}%`})`);
+      if (!paperRegimeGate.passed) reasons.push(`paper regimes not proven (${paperRegimeGate.reason})`);
       return {
         allowed: false,
         approvedFills,
         winRatePct,
+        paperRegimeGate,
         reason: `AUTO locked — ${reasons.join('; ')}`,
       };
     }
@@ -195,7 +218,8 @@ export class ApprovalQueueService {
       allowed: true,
       approvedFills,
       winRatePct,
-      reason: `AUTO unlocked (${approvedFills} approved fills, ${winRatePct}% win rate)`,
+      paperRegimeGate,
+      reason: `AUTO unlocked (${approvedFills} approved fills, ${winRatePct}% win rate, paper regimes proven)`,
     };
   }
 }

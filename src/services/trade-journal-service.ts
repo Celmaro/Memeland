@@ -30,6 +30,10 @@ export interface TradeJournalEntry {
   slippagePct?: number;
   failureReason?: string;
   reconciled?: boolean;
+  // ── P6.2 paper trading: this entry is a simulated paper fill, not a live trade ──
+  paper?: boolean;
+  /** Regime at entry (P1.4) — drives the regime-coverage approval gate. */
+  regime?: string;
 }
 
 export interface JournalSummaryStats {
