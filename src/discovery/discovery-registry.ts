@@ -13,9 +13,9 @@ export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | '
 /**
  * DISCOVERY_INTRODUCERS allowlist gate. When the env var is set it is a
  * comma-separated list of active introducers (coarse names like `dexpaprika`
- * OR provider-architecture style `helius-sol` / `ankr-eth`); a source is
- * enabled if it equals a token or matches a `<source>-*` token (so `helius-sol`
- * enables `helius`). Unset → every enabled feed participates (back-compat).
+ * OR provider-architecture style `solana-rpc-sol` / `ankr-eth`); a source is
+ * enabled if it equals a token or matches a `<source>-*` token (so `solana-rpc-sol`
+ * enables `solana-rpc`). Unset → every enabled feed participates (back-compat).
  */
 export function isIntroducerEnabled(source: string, list?: string): boolean {
   if (!list) return true;

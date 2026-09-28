@@ -4,20 +4,20 @@ import { CandidateRegistry, isIntroducerEnabled } from '../src/discovery/discove
 describe('isIntroducerEnabled (DISCOVERY_INTRODUCERS gate)', () => {
   it('enables every feed when the env list is unset (back-compat)', () => {
     expect(isIntroducerEnabled('ankr')).toBe(true);
-    expect(isIntroducerEnabled('helius', '')).toBe(true);
-    expect(isIntroducerEnabled('helius', '   ')).toBe(true);
+    expect(isIntroducerEnabled('solana-rpc', '')).toBe(true);
+    expect(isIntroducerEnabled('solana-rpc', '   ')).toBe(true);
   });
 
   it('enables a source when listed exactly or as a <source>-* token', () => {
     expect(isIntroducerEnabled('dexpaprika', 'dexpaprika,ankr')).toBe(true);
     expect(isIntroducerEnabled('ankr', 'dexpaprika,ankr')).toBe(true);
-    // provider-architecture style: helius-sol enables helius; gecko-base gecko.
-    expect(isIntroducerEnabled('helius', 'helius-sol,dexpaprika')).toBe(true);
+    // provider-architecture style: solana-rpc-sol enables solana-rpc; gecko-base gecko.
+    expect(isIntroducerEnabled('solana-rpc', 'solana-rpc-sol,dexpaprika')).toBe(true);
     expect(isIntroducerEnabled('gecko', 'gecko-base')).toBe(true);
   });
 
   it('blocks a source absent from the allowlist', () => {
-    expect(isIntroducerEnabled('cmc', 'ankr,helius-sol')).toBe(false);
+    expect(isIntroducerEnabled('cmc', 'ankr,solana-rpc-sol')).toBe(false);
     expect(isIntroducerEnabled('gecko', 'dexpaprika')).toBe(false);
   });
 });
@@ -74,10 +74,10 @@ describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
 
   it('tracks coverage, dup-rate, spend and false-positive attribution per source', () => {
     const reg = new CandidateRegistry();
-    // helius first-sees three tokens; dexpaprika adds one new token and
+    // solana-rpc first-sees three tokens; dexpaprika adds one new token and
     // re-observes the same address (that repeat is the dup-rate signal).
     for (const addr of ['0xa', '0xb', '0xc']) {
-      reg.observe({ chain: 'sol', tokenAddress: addr, source: 'helius', at: 100, costCredits: 10 });
+      reg.observe({ chain: 'sol', tokenAddress: addr, source: 'solana-rpc', at: 100, costCredits: 10 });
     }
     reg.observe({ chain: 'sol', tokenAddress: '0xa', source: 'dexpaprika', at: 500, costCredits: 1 });
     reg.observe({ chain: 'sol', tokenAddress: '0xa', source: 'dexpaprika', at: 600, costCredits: 1 }); // repeat
@@ -85,20 +85,20 @@ describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
 
     const s = reg.stats();
     expect(s.totalCandidates).toBe(4);
-    // helius coverage 3; dexpaprika coverage 2 (0xa,0xd) across 3 sightings → dup 1/3.
-    expect(s.coverage.helius).toBe(3);
+    // solana-rpc coverage 3; dexpaprika coverage 2 (0xa,0xd) across 3 sightings → dup 1/3.
+    expect(s.coverage['solana-rpc']).toBe(3);
     expect(s.coverage.dexpaprika).toBe(2);
     expect(s.dupRate.dexpaprika).toBeCloseTo(1 / 3);
-    expect(s.dupRate.helius).toBe(0);
-    expect(s.spend.helius).toBe(30);
+    expect(s.dupRate['solana-rpc']).toBe(0);
+    expect(s.spend['solana-rpc']).toBe(30);
     expect(s.spend.dexpaprika).toBe(3);
-    // first-seen shares: helius first for 0xa/b/c; dexpaprika first only for 0xd.
-    expect(s.firstSeenBySource.helius).toBe(3);
+    // first-seen shares: solana-rpc first for 0xa/b/c; dexpaprika first only for 0xd.
+    expect(s.firstSeenBySource['solana-rpc']).toBe(3);
     expect(s.firstSeenBySource.dexpaprika).toBe(1);
 
     // False positives attribute to the source that first listed the token.
     reg.markDead('sol:0xa');
     reg.markDead('sol:0xb');
-    expect(reg.stats().falsePositive.helius).toBe(2);
+    expect(reg.stats().falsePositive['solana-rpc']).toBe(2);
   });
 });

@@ -1,13 +1,12 @@
 /**
  * Solana RPC introducer (provider-architecture v2: `solana-rpc`).
  *
- * The canonical SOL introducer, repointed off Helius onto a generic Solana
+ * The canonical SOL introducer on a generic Solana
  * JSON-RPC host. It runs over the RPC-failover manager's active Sol RPC
  * (Shyft → Chainstack → PublicNode sol — see docs/research/solana-evm-rpc-providers.md),
  * so the raw mainnet Sol RPCs the operator supplied are the TRANSPORT housing it.
  *
- * The logic is the proven, credit-free SPL-create walk (identical to the old
- * Helius discovery feed, minus any provider billing):
+ * The logic is the proven, credit-free SPL-create walk:
  *   - never polls getProgramAccounts (the huge-cost trap)
  *   - walks getSignaturesForAddress on the pump.fun launch program with a
  *     PERSISTED per-program cursor, so each cycle only re-reads new signatures

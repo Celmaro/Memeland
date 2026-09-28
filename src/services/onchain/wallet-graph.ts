@@ -2,8 +2,8 @@
  * P0.4 — WalletGraph (provider-architecture v2: durable on-chain moat).
  *
  * A lightweight in-memory wallet graph seeded from the trader-intelligence
- * layer (FOMO identity-resolve / leaderboard wallet ids + Helius
- * getAssetsByOwner) and co-trade evidence. The moat is that third parties
+ * layer (FOMO identity-resolve / leaderboard wallet ids) and co-trade evidence.
+ * The moat is that third parties
  * (FOMO, GMGN) only expose *their* curated wallets — the graph we build from
  * transport data is ours. Used to:
  *   - find wallets co-active on the same persistent trader list (clusters)
