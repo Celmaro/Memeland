@@ -72,6 +72,11 @@ export async function handleControlRoomMessage(
   // 0a. Sub-agent PAUSE / STOP intent
   if (lowerQuery.includes('pause') || lowerQuery.includes('stop') || lowerQuery.includes('matikan') || lowerQuery.includes('hentikan')) {
     if (lowerQuery.includes('agent') || lowerQuery.includes('sub agent') || lowerQuery.includes('screening')) {
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — pausing agents is restricted. ${op.reason ?? ''}`);
+    return;
+  }
   const agentDomains = ['meme-robinhood', 'all'];
       const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'all';
       const result = await toolRegistry.executeToolCall('pause_sub_agent', { agentId: foundDomain });
@@ -83,6 +88,11 @@ export async function handleControlRoomMessage(
   // 0b. Sub-agent RESUME / START intent
   if (lowerQuery.includes('resume') || lowerQuery.includes('start') || lowerQuery.includes('nyalakan') || lowerQuery.includes('aktifkan')) {
     if (lowerQuery.includes('agent') || lowerQuery.includes('sub agent') || lowerQuery.includes('screening')) {
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — starting agents is restricted. ${op.reason ?? ''}`);
+    return;
+  }
   const agentDomains = ['meme-robinhood', 'all'];
       const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'all';
       const result = await toolRegistry.executeToolCall('resume_sub_agent', { agentId: foundDomain });
@@ -111,6 +121,11 @@ export async function handleControlRoomMessage(
   if ((lowerQuery.includes('drawdown limit') || lowerQuery.includes('drawdown')) && (lowerQuery.includes('set') || lowerQuery.includes('change') || lowerQuery.includes('update') || lowerQuery.includes('adjust'))) {
     const numbers = userQuery.match(/\b\d+(\.\d+)?\b/g);
     if (numbers && numbers.length > 0) {
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — changing risk limits is restricted. ${op.reason ?? ''}`);
+    return;
+  }
       const val = parseFloat(numbers[0]);
       const result = await toolRegistry.executeToolCall('set_risk_limit', { maxDrawdownPct: val });
       await safeReply(message, `🛡️ **OPENCATZ RISK MANAGER UPDATED**: ${result.message}`);
@@ -133,6 +148,11 @@ export async function handleControlRoomMessage(
   // 0f. Natural Language Schedule Automation intent
   if (lowerQuery.includes('every') || lowerQuery.includes('schedule')) {
     if (lowerQuery.includes('hour') || lowerQuery.includes('min') || lowerQuery.includes('minute')) {
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — scheduling automation is restricted. ${op.reason ?? ''}`);
+    return;
+  }
   const agentDomains = ['meme-robinhood'];
       const foundDomain = agentDomains.find(d => lowerQuery.includes(d)) || 'meme-robinhood';
       const result = await toolRegistry.executeToolCall('schedule_automation', {
@@ -232,6 +252,11 @@ export async function handleControlRoomMessage(
   // 1c. Detect if user is asking to Swap tokens
   const isSwapIntent = ['swap', 'exchange', 'convert'].some(kw => lowerQuery.includes(kw));
   if (isSwapIntent) {
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — on-chain swaps are restricted. ${op.reason ?? ''}`);
+    return;
+  }
     const { globalLifiExecutor } = await import('../../adapters/lifi-executor.js');
 
     const chains = ['robinhood', 'ethereum', 'eth'];
@@ -274,6 +299,11 @@ export async function handleControlRoomMessage(
   const isSendIntent = ['send', 'transfer'].some(kw => lowerQuery.includes(kw));
   const evmAddrMatch = userQuery.match(/\b0x[a-fA-F0-9]{40}\b/);
   if (isSendIntent && evmAddrMatch) {
+  const op = requireOperator(message as unknown as Parameters<typeof requireOperator>[0]);
+  if (!op.allowed) {
+    await safeReply(message, `⛔ **Operator required** — on-chain transfers are restricted. ${op.reason ?? ''}`);
+    return;
+  }
     const { globalLifiExecutor } = await import('../../adapters/lifi-executor.js');
 
     const recipientAddress = evmAddrMatch[0];

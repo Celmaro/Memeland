@@ -18,6 +18,16 @@ import { priceAlertService, walletService, walletBalanceReader, tradeJournalServ
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (interaction.customId === 'wallet_setup_modal') {
+    // Overwriting the bot's signing key is operator-only. Channel membership is
+    // not authorization; fail closed unless the actor is an operator.
+    const op = requireOperator(interaction);
+    if (!op.allowed) {
+      await interaction.reply({
+        content: `⛔ **Operator required** — wallet setup/replace is restricted. ${op.reason ?? ''}`,
+        ephemeral: true,
+      });
+      return;
+    }
     const pk = interaction.fields.getTextInputValue('wallet_pk').trim();
 
     const chainType = 'evm';
@@ -44,6 +54,14 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
 export async function handleSelectMenu(interaction: StringSelectMenuInteraction, hub: OpenCatzHub): Promise<void> {
   if (interaction.customId === 'select_toggle_agent') {
+    const op = requireOperator(interaction);
+    if (!op.allowed) {
+      await interaction.reply({
+        content: `⛔ **Operator required** — toggling agents is restricted. ${op.reason ?? ''}`,
+        ephemeral: true,
+      });
+      return;
+    }
     const selectedAgent = interaction.values[0];
     const currentState = hub.isAgentActive(selectedAgent);
     const newState = !currentState;

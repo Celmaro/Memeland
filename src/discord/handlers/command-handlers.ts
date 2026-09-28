@@ -16,6 +16,7 @@ import {
 } from 'discord.js';
 import { OpenCatzHub } from '../../orchestrator/hub.js';
 import { isDryRun as isDryRunMode, getExecutionMode } from '../../config/config.js';
+import { requireOperator } from '../require-operator.js';
 import { globalPriceFeedService } from '../../services/price-feed-service.js';
 import { PriceAlertService } from '../../services/price-alert-service.js';
 import { TradeJournalService } from '../../services/trade-journal-service.js';
@@ -46,14 +47,36 @@ export async function buildDashboardOptions(): Promise<import('../embeds/dashboa
   return { ethBalance, activeAlerts };
 }
 
+/**
+ * Gate a sensitive handler on operator authorization. Replies (respecting
+ * deferred/replied state) and returns false when the actor is not an operator.
+ * Fail-closed: no allowlist => only owner/admin.
+ */
+async function gateOperator(interaction: ChatInputCommandInteraction): Promise<boolean> {
+  const op = requireOperator(interaction);
+  if (op.allowed) return true;
+  const msg = `⛔ **Operator required** — this action is restricted. ${op.reason ?? ''}`;
+  if (interaction.deferred || interaction.replied) {
+    await interaction.editReply({ content: msg });
+  } else {
+    await interaction.reply({ content: msg, ephemeral: true });
+  }
+  return false;
+}
+
 export async function handleChatInput(
   interaction: ChatInputCommandInteraction,
   hub: OpenCatzHub
 ): Promise<void> {
   const commandName = interaction.commandName;
-
   if (commandName === 'wallet') {
     const subcommand = interaction.options.getSubcommand();
+    if (subcommand === 'setup' || subcommand === 'replace' || subcommand === 'remove' || subcommand === 'withdraw') {
+      // Wallet-key mutation and fund movement are operator-only: /setup and
+      // /replace overwrite the bot's signing key, /remove deletes it, /withdraw
+      // moves funds. Channel membership is NOT authorization.
+      if (!(await gateOperator(interaction))) return;
+    }
     if (subcommand === 'setup' || subcommand === 'replace') {
       const isReplace = subcommand === 'replace';
       const modal = new ModalBuilder()
@@ -160,6 +183,10 @@ export async function handleChatInput(
       content: `🔎 **OPENCATZ ON-DEMAND TOKEN AUDIT REPORT**\n📌 **Target Contract:** \`${contract}\` (${chainName})\n\n${audit.content}`,
     });
   } else if (commandName === 'screening') {
+    const screeningSub = interaction.options.getSubcommand();
+    if (screeningSub === 'start' || screeningSub === 'stop' || screeningSub === 'trigger') {
+      if (!(await gateOperator(interaction))) return;
+    }
     await interaction.deferReply({ ephemeral: false });
     const subcommand = interaction.options.getSubcommand();
     const explicitAgent = interaction.options.getString('agent');
@@ -306,6 +333,10 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
     });
   } else if (commandName === 'strategy') {
     const subcommand = interaction.options.getSubcommand();
+    // activate/rollback change live strategy behavior; view discloses strategy source.
+    if (subcommand === 'activate' || subcommand === 'rollback' || subcommand === 'view') {
+      if (!(await gateOperator(interaction))) return;
+    }
     const { StrategyEngine } = await import('../../orchestrator/strategy-engine.js');
     const engine = new StrategyEngine();
     if (subcommand === 'list') {
@@ -335,6 +366,7 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
     }
 
     if (subcommand === 'create') {
+      if (!(await gateOperator(interaction))) return;
       const channelName = interaction.options.getString('name', true).toLowerCase().replace(/\s+/g, '-');
       const newChannel = await guild.channels.create({
         name: channelName,
@@ -459,6 +491,7 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
       });
     }
   } else if (commandName === 'update') {
+    if (!(await gateOperator(interaction))) return;
     await interaction.reply({
       content: '🔄 **OpenCatz Self-Update Sequence Initiated...**\nPulling latest patches, installing dependencies, re-building, and restarting the agent...',
       ephemeral: true,
@@ -478,6 +511,7 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
       });
     }
   } else if (commandName === 'swap') {
+    if (!(await gateOperator(interaction))) return;
     const from = interaction.options.getString('from', true);
     const to = interaction.options.getString('to', true);
     const amount = interaction.options.getNumber('amount', true);
@@ -512,6 +546,7 @@ const keyNames = ['GMGN_API_KEY', 'GMGN_API_KEY_ROBINHOOD', 'GOPLUS_API_KEY', 'U
 
     await interaction.reply({ embeds: [embed], components: [actionRow] });
   } else if (commandName === 'send') {
+    if (!(await gateOperator(interaction))) return;
     const to = interaction.options.getString('to', true);
     const amount = interaction.options.getNumber('amount', true);
     const token = interaction.options.getString('token') || 'ETH';

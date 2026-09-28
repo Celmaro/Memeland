@@ -235,11 +235,35 @@ Use buttons below to toggle agents, view wallet status, or execute withdrawals:`
     poll();
   }
 
+  /** Sender user-id for an inbound update (callback or message). */
+  private telegramActorId(update: any): string | null {
+    const from = update.callback_query?.from?.id ?? update.message?.from?.id;
+    return from != null ? String(from) : null;
+  }
+
+  /**
+   * Fail-closed Telegram authorization. Only actors whose user id is in
+   * TELEGRAM_ALLOWED_USER_IDS (comma-separated) may use control/withdraw
+   * actions. No allowlist configured => deny (cannot prove who is legit).
+   */
+  private telegramAuthorized(update: any): boolean {
+    const allowed = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? '')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    if (allowed.length === 0) return false;
+    const actor = this.telegramActorId(update);
+    return actor !== null && allowed.includes(actor);
+  }
+
   private async handleTelegramUpdate(update: any, hub: OpenCatzHub, walletService: WalletService, aiService?: AIService): Promise<void> {
     if (update.callback_query) {
       const query = update.callback_query;
       const data = query.data;
       const threadId = query.message?.message_thread_id;
+
+      if (!this.telegramAuthorized(update)) {
+        await this.sendMessage('⛔ **Unauthorized** — Telegram control actions require an allowlisted user (set TELEGRAM_ALLOWED_USER_IDS).', 'Markdown', undefined, threadId);
+        return;
+      }
 
       if (data.startsWith('toggle_')) {
         const domain = data.replace('toggle_', '');
@@ -277,6 +301,10 @@ Use buttons below to toggle agents, view wallet status, or execute withdrawals:`
       const threadId = msg.message_thread_id;
 
       if (text.startsWith('/withdraw')) {
+        if (!this.telegramAuthorized(update)) {
+          await this.sendMessage('⛔ **Unauthorized** — /withdraw requires an allowlisted user (set TELEGRAM_ALLOWED_USER_IDS).', 'Markdown', undefined, threadId);
+          return;
+        }
         const parts = text.split(/\s+/);
         if (parts.length < 3) {
           await this.sendMessage('⚠️ Format invalid. Use: `/withdraw <recipient_address> <amount>`', 'Markdown', undefined, threadId);
