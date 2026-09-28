@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { OpenCatHub } from '../orchestrator/hub.js';
 import { globalHealthWatcher } from '../services/health-watcher.js';
 import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
@@ -92,7 +93,7 @@ export class OpenCatzRESTServer {
       const authKey = process.env.OPENCATZ_API_KEY || process.env.OPENCAT_API_KEY;
       if (authKey && authKey.trim() !== '') {
         const clientKey = req.headers['x-opencatz-api-key'] || req.headers['x-opencat-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-        if (clientKey !== authKey.trim()) {
+        if (!safeApiKeyEqual(clientKey, authKey.trim())) {
           res.statusCode = 401;
           res.end(JSON.stringify({ success: false, error: 'Unauthorized: Invalid or missing API Key' }));
           return;
@@ -180,7 +181,8 @@ export class OpenCatzRESTServer {
 
         // 2. GET /api/calls (Signal call cards ledger from StateStore)
         if (req.method === 'GET' && pathname === '/api/calls') {
-          const limit = Number(urlObj.searchParams.get('limit')) || 50;
+          const requested = Number(urlObj.searchParams.get('limit'));
+          const limit = Number.isFinite(requested) && requested > 0 ? Math.min(Math.floor(requested), 200) : 50;
           const domain = urlObj.searchParams.get('domain') || undefined;
           const calls = globalStateStore.getSignalLedger(domain, limit);
           res.statusCode = 200;
@@ -234,6 +236,17 @@ export class OpenCatzRESTServer {
 
         // 6. POST /api/agents/toggle (Toggle sub-agent active state)
         if (req.method === 'POST' && pathname === '/api/agents/toggle') {
+          // Mutating control endpoint — require a valid API key (fail-closed),
+          // consistent with /api/command. Agent toggling changes live trading
+          // behavior, so it must never be reachable unauthenticated even on a
+          // loopback bind.
+          const toggleAuthKey = process.env.OPENCATZ_API_KEY || process.env.OPENCAT_API_KEY;
+          const toggleClientKey = req.headers['x-opencatz-api-key'] || req.headers['x-opencat-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+          if (!toggleAuthKey || toggleAuthKey.trim() === '' || !safeApiKeyEqual(toggleClientKey, toggleAuthKey.trim())) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ success: false, error: 'Unauthorized: /api/agents/toggle requires a valid API key (set OPENCATZ_API_KEY or OPENCAT_API_KEY).' }));
+            return;
+          }
           const body = await parseJsonBody(req);
           const domain = String(body.domain || '').trim().toLowerCase();
           const active = typeof body.active === 'boolean' ? body.active : undefined;
@@ -267,7 +280,7 @@ export class OpenCatzRESTServer {
           // exposing command execution (write_strategy_file, read_file, set_api_key...).
           const authKey = process.env.OPENCATZ_API_KEY || process.env.OPENCAT_API_KEY;
           const clientKey = req.headers['x-opencatz-api-key'] || req.headers['x-opencat-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-          if (!authKey || authKey.trim() === '' || clientKey !== authKey) {
+          if (!authKey || authKey.trim() === '' || !safeApiKeyEqual(clientKey, authKey.trim())) {
             res.statusCode = 401;
             res.end(JSON.stringify({ success: false, error: 'Unauthorized: /api/command requires a valid API key (set OPENCATZ_API_KEY or OPENCAT_API_KEY).' }));
             return;
@@ -311,6 +324,22 @@ export class OpenCatzRESTServer {
 /** Backward-compatible alias */
 export const OpenCatRESTServer = OpenCatzRESTServer;
 export type OpenCatRESTServer = OpenCatzRESTServer;
+
+/**
+ * Constant-time comparison of a client-supplied API key header value against
+ * the configured server key. Avoids the timing side-channel of a plain `!==`
+ * string comparison used for security. Header values may be a string or
+ * string[] (Node collates repeated headers); length mismatch short-circuits.
+ */
+function safeApiKeyEqual(client: string | string[] | undefined, serverKey: string): boolean {
+  if (typeof client === 'undefined' || Array.isArray(client) || typeof client !== 'string') {
+    return false;
+  }
+  const a = Buffer.from(client, 'utf8');
+  const b = Buffer.from(serverKey, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 function parseJsonBody(req: http.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {

@@ -262,7 +262,17 @@ export class SwarmConsensusEngine {
               socialHypeScore: candidate.socialHypeScore,
             });
           } finally {
-            process.env = snapshot;
+            // Restore the original environment ON THE SAME process.env object
+            // (never reassign process.env to a fresh copy). Reassigning strands
+            // any earlier-captured `process.env` reference on a detached object
+            // that permanently lacks its secrets. Key-by-key restore preserves
+            // object identity for all modules that cached the reference.
+            for (const k of Object.keys(process.env)) {
+              if (!(k in snapshot)) delete process.env[k];
+            }
+            for (const [k, v] of Object.entries(snapshot)) {
+              process.env[k] = v;
+            }
           }
           if (ev && typeof ev.confidence === 'number') {
             confidenceScore = Math.round(confidenceScore * 0.5 + Math.max(0, Math.min(100, ev.confidence)) * 0.5);
@@ -280,7 +290,20 @@ export class SwarmConsensusEngine {
     // BEFORE any weighted-average math — hype can never trade off against
     // safety at the final gate.
     const securityHardFloor = 70;
-    const securityVoteScore = voterBreakdown?.security ?? (candidate.securityAuditPassed ? 100 : 0);
+    // Security hard-gate MUST be fail-closed. On the voter path, an absent
+    // security slot (voter abstained / its feed was UNAVAILABLE) is NOT
+    // evidence of safety — it must never fabricate a perfect 100 from the audit
+    // boolean alone, or a candidate with zero security evidence clears the gate
+    // while the security weight is silently dropped from renormalization.
+    // score <-1 forces refusal below the floor (UNAVAILABLE != 0).
+    const securityVoteScore =
+      voterBreakdown && voterBreakdown.security !== undefined
+        ? voterBreakdown.security
+        : voterBreakdown !== null
+          ? -1
+          : candidate.securityAuditPassed
+            ? 100
+            : 0;
     if (securityVoteScore < securityHardFloor) {
       const id = `CONSENSUS_${candidate.domain}_${symbolKey}_SECURITY_${Date.now()}`;
       const result: ConsensusResult = {
@@ -318,11 +341,15 @@ export class SwarmConsensusEngine {
     // Single flat 80% quorum floor (regime voter removed — no edge; the floor
     // is a constant, never regime-aware).
     const floor = Math.round(CONSENSUS_FLOOR * 100);
-    const passed = confidenceScore >= floor && candidate.securityAuditPassed;
+    // Security stays a conjunctive hard gate in the final decision, never a
+    // single average: the rendered security vote must clear the hard floor AND
+    // the audit boolean must hold. A missing/abstained security vote (-1) can
+    // never slip through here.
+    const passed = confidenceScore >= floor && securityVoteScore >= securityHardFloor && candidate.securityAuditPassed;
 
     const checks = [
       { id: 'confidence', passed: confidenceScore >= floor, reason: `${confidenceScore}% confidence (floor ${floor}%)` },
-      { id: 'security', passed: candidate.securityAuditPassed, reason: candidate.securityAuditPassed ? 'audit passed' : 'audit failed' },
+      { id: 'security', passed: securityVoteScore >= securityHardFloor && candidate.securityAuditPassed, reason: candidate.securityAuditPassed ? `security vote ${Math.round(securityVoteScore)} >= ${securityHardFloor}` : 'audit failed' },
     ];
     const decision: DecisionResult<number> = passed
       ? allowDecision(confidenceScore, `CONSENSUS_${candidate.domain}_${symbolKey}_${Date.now()}_${Math.random().toString(36).substring(7)}`, checks)

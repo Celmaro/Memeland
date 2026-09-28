@@ -95,9 +95,10 @@ describe('OpenCatzRESTServer Test Suite', () => {
   });
 
   it('POST /api/agents/toggle toggles sub-agent active state', async () => {
+    process.env.OPENCATZ_API_KEY = 'secret_key_123';
     const res = await fetch(`http://localhost:${testPort}/api/agents/toggle`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-OpenCatz-Api-Key': 'secret_key_123' },
       body: JSON.stringify({ domain: 'alpha-robinhood', active: true }),
     });
 
@@ -107,6 +108,25 @@ describe('OpenCatzRESTServer Test Suite', () => {
     expect(data.domain).toBe('alpha-robinhood');
     expect(data.active).toBe(true);
     expect(hub.isAgentActive('alpha-robinhood')).toBe(true);
+  });
+
+  it('POST /api/agents/toggle is fail-closed: requires a valid API key', async () => {
+    // No key configured -> 401 (agent toggling mutates live trading behavior)
+    const noKey = await fetch(`http://localhost:${testPort}/api/agents/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain: 'meme-robinhood', active: true }),
+    });
+    expect(noKey.status).toBe(401);
+
+    // Key configured but request missing the header -> 401
+    process.env.OPENCATZ_API_KEY = 'secret_key_123';
+    const missingHeader = await fetch(`http://localhost:${testPort}/api/agents/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain: 'meme-robinhood', active: true }),
+    });
+    expect(missingHeader.status).toBe(401);
   });
 
   it('Enforces OPENCATZ_API_KEY authentication guard when set', async () => {
