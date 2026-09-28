@@ -107,16 +107,26 @@ describe('Memeland fork boot banner (logs reflect THIS fork, not the upstream Op
     }
   });
 
-  it('printStartupBanner names every kernel (A-G + L-R)', () => {
-    logs = [];
-    printStartupBanner();
-    const joined = logs.join('\n');
-    expect(joined).toContain('KERNELS');
-    expect(joined).toContain('A=reputation');
-    expect(joined).toContain('L=ttl-cache');
-    expect(joined).toContain('R=wallet-balance');
-    expect(joined).toContain('SWARM');
-    expect(joined).toContain('voters=9');
+  it('printStartupBanner reflects the current provider-role architecture ([PROVIDERS] four-role map)', () => {
+    const prev = { ...process.env };
+    delete process.env.DISCOVERY_INTRODUCERS;
+    try {
+      logs = [];
+      printStartupBanner();
+      const joined = logs.join('\n');
+      // The clean banner names the provider roles, not the old kernel map.
+      expect(joined).toContain('PROVIDERS');
+      expect(joined).toContain('introducer');
+      expect(joined).toContain('emitter');
+      expect(joined).toContain('enricher');
+      expect(joined).toContain('regime');
+      expect(joined).toContain('entity');
+      expect(joined).toContain('GOVERNOR');
+      expect(joined).toContain('SWARM');
+      expect(joined).toContain('voters=9');
+    } finally {
+      process.env = prev;
+    }
   });
 
   it('autonomy_ladder reflects env: defaults to Phase 2 APPROVAL when neither AUTO nor SIGNAL_ONLY set', () => {

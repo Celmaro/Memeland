@@ -46,9 +46,6 @@ export function printStartupBanner(): string {
   console.log(`         exec=${execMode} | dry_run=${isDryRunMode()} | auto_exec=${isAutoExecute()} | op_approval=${process.env.OPERATOR_APPROVAL_REQUIRED !== 'false'} | safety_gate=${process.env.SAFETY_GATE_ENFORCED === 'true'}`);
   console.log(`         execution_layer=LI.FI/Jumper (only) | chains=${chainsEnv.join('+')}`);
   console.log(`         autonomy_ladder=${isAutoExecute() ? 'Phase 3 AUTO (gated)' : isSignalOnly() ? 'Phase 1 SIGNAL_ONLY' : 'Phase 2 APPROVAL'}`);
-  // Memeland-fork kernel map. The 12-PR plan + KC1–KC9 consolidation + Kernels
-  // S/T/U/V all landed here. See docs/KERNEL_CATALOG.md for the full surface.
-  console.log('[KERNELS] A=reputation C=ledger D=sellability E=Result<T,E> F=decisionCache G=discovery | L=ttl-cache M=paced-http N=try-fetch-json O=staleness-clock P=chat-notifier Q=screening-runner R=wallet-balance');
   console.log('[SWARM] voters=9 (quant/ml/security/sentiment/whale/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED');
   console.log('[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork)');
   // Provider-role map: four-role model (introducer/emitter/enricher/regime/…)

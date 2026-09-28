@@ -248,12 +248,9 @@ const paperMinExpectancyPct = Number(process.env.PAPER_MIN_EXPECTANCY_PCT ?? 0) 
 
 const loadedSkills = skillLoader.loadAllSkills();
 
-// Memeland fork boot summary. Names the live 9-voter swarm, the only execution
-// layer (LI.FI/Jumper), and the skills the runtime actually loaded. The
-// kernel map (A–G + L–R) is printed earlier by printStartupBanner() in
-// startup/bootstrap.ts — see docs/KERNEL_CATALOG.md for the full surface.
-console.log(`[SWARM] voters=9 (quant/ml/security/sentiment/whale/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED`);
-console.log(`[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork) | adapters=evm-robinhood,gmgn-rest-client | cycles=${loadedSkills.length} skills loaded (${loadedSkills.map(s => s.name).join(', ')})`);
+// Memeland fork boot summary. The [SWARM]/[EXECUTION]/[PROVIDERS] banner lines
+// are printed earlier by printStartupBanner() in startup/bootstrap.ts — this
+// module only adds the AI model line (which depends on the live AIService).
 console.log(`[AI] provider=${aiService.getConfig().provider} model=${aiService.getConfig().modelName}`);
 
 const discordToken = process.env.DISCORD_BOT_TOKEN;

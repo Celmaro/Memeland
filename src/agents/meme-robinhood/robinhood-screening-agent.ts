@@ -716,6 +716,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     };
   }
 
+  /** Verbose per-token detail lines are gated behind LOG_VERBOSE=true (default
+   *  off) so the default Zeabur log stays clean — only cycle-level summaries
+   *  and emitted signals print unless an operator opts into the noisy detail. */
+  private isVerbose(): boolean {
+    return process.env.LOG_VERBOSE === 'true';
+  }
+
   /** Full pass: for each configured chain → collect → prefilter (audit GMGN) → detect → voters → report */
     public async runScreeningPass(): Promise<AgentReport<RobinhoodSignal>[]> {
       console.log('[MEME AGENT] Screening pass started (GMGN OpenAPI)...');
@@ -921,12 +928,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           }
           // Graduated-only: reject tokens still on the bonding curve (exchange='pump')
           if (!isGraduatedToken(t)) {
-            console.log(`[MEME AGENT] ⛔ ${t.symbol}: not yet graduated (bonding curve).`);
+            if (this.isVerbose()) console.log(`[MEME AGENT] ⛔ ${t.symbol}: not yet graduated (bonding curve).`);
             continue;
           }
 
           const filter = this.preFilter(t, nativePriceUsd);
-          if (!filter.ok) { console.log(`[MEME AGENT] ${filter.reason}`); continue; }
+          if (!filter.ok) { if (this.isVerbose()) console.log(`[MEME AGENT] ${filter.reason}`); continue; }
           // Fresh-pair enrichment (gap fix): a freshLane candidate passed the
           // low/bypass floor but carries ZERO market data — it can never score
           // momentum or mature that way. Hydrate from the batched pre-pass map
@@ -949,7 +956,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               if (fresh.sellUsd1h !== undefined) t.sellUsd1h = fresh.sellUsd1h;
               if (fresh.symbol) t.symbol = fresh.symbol;
               if (t.volume1hUsd >= this.config.minFreshVolume1hUsd) {
-                console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k${fresh.volume1hUsd !== undefined ? ' (real 1h)' : ''}`);
+                if (this.isVerbose()) console.log(`[FRESH LANE] ${t.symbol} (${t.chain}) enriched: vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k${fresh.volume1hUsd !== undefined ? ' (real 1h)' : ''}`);
               }
             }
           }
@@ -960,11 +967,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           if (t.freshLane === true && (t.priceUsd > 0 || t.liquidityUsd > 0 || t.volume24hUsd > 0)) {
             const matureCheck = preFilterToken(t, this.config, nativePriceUsd);
             if (!matureCheck.ok) {
-              console.log(`[REVALIDATE] ⛔ ${t.symbol}: fresh→mature re-check failed — ${matureCheck.reason}`);
+              if (this.isVerbose()) console.log(`[REVALIDATE] ⛔ ${t.symbol}: fresh→mature re-check failed — ${matureCheck.reason}`);
               continue;
             }
             if (t.volume1hUsd > 0 || t.liquidityUsd > 0) {
-              console.log(`[REVALIDATE] ✓ ${t.symbol}: fresh pair now passes mature gates (vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k)`);
+              if (this.isVerbose()) console.log(`[REVALIDATE] ✓ ${t.symbol}: fresh pair now passes mature gates (vol1h $${(t.volume1hUsd / 1000).toFixed(1)}k liq $${(t.liquidityUsd / 1000).toFixed(1)}k)`);
             }
           }
           // Security audit — GoPlus FIRST on EVM chains (keyless, no 429 wall):
@@ -989,7 +996,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             const goSec = goPlusAuditGate(goplus);
             if (goSec.source === 'goplus') {
               if (!goSec.ok) {
-                console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — GoPlus ${goSec.reasons.join(' ')}`);
+                if (this.isVerbose()) console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — GoPlus ${goSec.reasons.join(' ')}`);
                 continue;
               }
             } else {
@@ -998,7 +1005,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               const sec = securityAuditGate(gmgnAudit);
               if (!sec.ok) {
                 auditFailedReason = `GMGN ${sec.reasons.join(' ')}`;
-                console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${auditFailedReason}`);
+                if (this.isVerbose()) console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${auditFailedReason}`);
                 continue;
               }
             }
@@ -1019,7 +1026,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // signal reasons when present — the 1.5x/2.4x post-graduation edge.
           if (organicLiftReason && det.type !== 'NONE') {
             det = { ...det, reasons: [...det.reasons, organicLiftReason] };
-            console.log(`[QLO LIFT] ${t.symbol}: ${organicLiftReason}`);
+            if (this.isVerbose()) console.log(`[QLO LIFT] ${t.symbol}: ${organicLiftReason}`);
           }
           // Smart-money cluster (>= 3 wallets buying the same token, fresh) = boost +20
           const trackEntry = trackAcc.get(t.address.toLowerCase());
@@ -1034,7 +1041,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               [...trackEntry.buyWallets].map((h) => ({ handle: h, at: Date.now() })),
             );
             if (convergence && convergence.wallets.length >= 3) {
-              console.log(`[COHORT CONVERGENCE] ${t.symbol}: ${convergence.wallets.length} persistent wallets on same token <5min`);
+              if (this.isVerbose()) console.log(`[COHORT CONVERGENCE] ${t.symbol}: ${convergence.wallets.length} persistent wallets on same token <5min`);
             }
           }
           if (trackEntry && trackEntry.buyWalletCount >= 3 && det.type !== 'NONE') {
@@ -1056,11 +1063,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             (trackEntry && trackEntry.buyWalletCount >= 3 ? 1 : 0);
           const cappedConfidence = capSignalConfidence(det.confidence, Math.max(1, redundancy));
           if (cappedConfidence !== det.confidence) {
-            console.log(`[EVIDENCE CAP] ${t.symbol}: ${det.confidence}% debiased ${redundancy} correlated readouts → ${cappedConfidence}%`);
+            if (this.isVerbose()) console.log(`[EVIDENCE CAP] ${t.symbol}: ${det.confidence}% debiased ${redundancy} correlated readouts → ${cappedConfidence}%`);
             det = { ...det, confidence: cappedConfidence };
           }
           if (det.type === 'NONE' || det.confidence < this.config.passThreshold) {
-            console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${det.confidence}% < ${this.config.passThreshold}% (${det.reasons.join(' | ')})`);
+            if (this.isVerbose()) console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${det.confidence}% < ${this.config.passThreshold}% (${det.reasons.join(' | ')})`);
             continue;
           }
 
@@ -1090,7 +1097,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                 gmgn: { ...toStrategyGmgn(t), native_price_usd: nativePriceUsd },
               });
               if (ev?.recommendedAction === 'SKIP') {
-                console.log(`[MEME AGENT] ⛔ ${t.symbol}: strategy rejected (${ev.reason})`);
+                if (this.isVerbose()) console.log(`[MEME AGENT] ⛔ ${t.symbol}: strategy rejected (${ev.reason})`);
                 continue;
               }
               if (ev && typeof ev.confidence === 'number') {
@@ -1102,7 +1109,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
           // Fail-closed: the 80 gate must hold on the FINAL blended confidence
           if (confidence < this.config.passThreshold) {
-            console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${confidence}% < ${this.config.passThreshold}% (post-strategy)`);
+            if (this.isVerbose()) console.log(`[MEME AGENT] ⚪ ${t.symbol}: ${det.type} ${confidence}% < ${this.config.passThreshold}% (post-strategy)`);
             continue;
           }
 
@@ -1134,9 +1141,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               smartMoney: { smartDegenCount: t.smartDegenCount, kolCount: t.renownedCount },
             });
             (payload as unknown as Record<string, unknown>).featureSnapshot = snap;
-            console.log(
-              `[SNAPSHOT] ${t.symbol} dq=${snap.dataQuality} groups=${snap.evidenceLineage.length} lineage=[${snap.evidenceLineage.map((e) => `${e.group}.${e.field}`).join(',')}]`,
-            );
+            if (this.isVerbose()) {
+              console.log(
+                `[SNAPSHOT] ${t.symbol} dq=${snap.dataQuality} groups=${snap.evidenceLineage.length} lineage=[${snap.evidenceLineage.map((e) => `${e.group}.${e.field}`).join(',')}]`,
+              );
+            }
           } catch (snapErr: any) {
             console.warn(`[SNAPSHOT] build failed (signal still fires): ${snapErr.message}`);
           }
@@ -1146,7 +1155,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           // the token address) to a labeled entity and logs it for the operator —
           // entity/deployer/label is the valuable signal.
           const entity = await this.enrichFinalistEntity(t);
-          if (entity) {
+          if (entity && this.isVerbose()) {
             console.log(`[ARKHAM] ${t.symbol} deployer→ ${entity.displayName ?? entity.ownerType}${entity.tags && entity.tags.length ? ` [${entity.tags.slice(0, 3).join(',')}]` : ''}`);
           }
 
@@ -1181,7 +1190,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                 const cs = await this.coinstatsRisk.screen(EVM_AUDIT_CHAINS[chain], t.address);
                 if (cs && cs.penalties.length > 0) {
                   securityPenalties.push(...cs.penalties);
-                  console.log(`[COINSTATS RISK] ${t.symbol}: ${cs.penalties.join(', ')}`);
+                  if (this.isVerbose()) console.log(`[COINSTATS RISK] ${t.symbol}: ${cs.penalties.join(', ')}`);
                 }
               } catch {
                 // fail-open — never blocks the funnel
@@ -1316,14 +1325,16 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                 smartMoney: t.smartDegenCount,
               });
               (payload as unknown as Record<string, unknown>).jevDecision = jd;
-              console.log(`[JEV] ${t.symbol} source=${jd.source} regime=${jd.regime ?? '-'} next=${jd.nextAction ?? '-'} conf=${jd.confidence}`);
+              if (this.isVerbose()) console.log(`[JEV] ${t.symbol} source=${jd.source} regime=${jd.regime ?? '-'} next=${jd.nextAction ?? '-'} conf=${jd.confidence}`);
             } catch (jevErr: any) {
               console.warn(`[JEV] decide failed (swarm continues): ${jevErr.message}`);
             }
           }
-          console.log(
-            `[CALIBRATED] ${t.symbol} raw=${cal.rawScore} prob=${cal.calibratedProbability !== null ? cal.calibratedProbability.toFixed(2) : 'null (no model yet)'} horizon=${cal.horizon}`,
-          );
+          if (this.isVerbose()) {
+            console.log(
+              `[CALIBRATED] ${t.symbol} raw=${cal.rawScore} prob=${cal.calibratedProbability !== null ? cal.calibratedProbability.toFixed(2) : 'null (no model yet)'} horizon=${cal.horizon}`,
+            );
+          }
 
           reports.push({ passed: true, signal, reason: thesis, confidence, payload });
           console.log(`[MEME AGENT] 🎯 ${det.type} ${t.symbol} ${confidence}% (${chain})`);
