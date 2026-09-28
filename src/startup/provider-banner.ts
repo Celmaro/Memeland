@@ -8,7 +8,7 @@
  *
  *   introducer  — canonical on-chain introducers: only these PROMOTE a raw
  *                 address into the candidate universe. Gated by
- *                 DISCOVERY_INTRODUCERS (helius·sol, ankr·eth/base/bsc).
+ *                 DISCOVERY_INTRODUCERS (solana-rpc·sol, ankr·eth/base/bsc).
  *   emitter    — recall-only candidate emitter (fomo): emits CandidateHints;
  *                 promotion still requires the on-chain verify gate.
  *   enricher   — recall/hydrate, NEVER promote (dexpaprika/gecko/dexscreener/
@@ -49,7 +49,7 @@ const keyed = (keyName: string) => (gate: () => boolean) => () =>
 
 export const PROVIDER_FEEDS: FeedSpec[] = [
   // Canonical introducers (DISCOVERY_INTRODUCERS allowlist).
-  { id: 'helius', role: 'introducer', chains: 'sol', gate: keyed('HELIUS_API_KEY')(flag('HELIUS_FEED_ENABLED')) },
+  { id: 'solana-rpc', role: 'introducer', chains: 'sol', gate: keyed('SOLANA_RPC_URL')(flag('SOLANA_RPC_FEED_ENABLED')) },
   { id: 'ankr', role: 'introducer', chains: 'eth/base/bsc', gate: flag('ANKR_FEED_ENABLED') },
   // Recall-only emitter.
   { id: 'fomo', role: 'emitter', chains: 'multi', gate: keyed('FOMO_API_KEY')(flag('FOMO_FEED_ENABLED')) },

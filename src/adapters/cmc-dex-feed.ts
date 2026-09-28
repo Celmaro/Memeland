@@ -26,7 +26,7 @@ import { TtlCache } from '../cache/ttl-cache.js';
 export const CMC_PRO_BASE = 'https://pro-api.coinmarketcap.com';
 export const CMC_PUBLIC_BASE = 'https://pro-api.coinmarketcap.com/public-api';
 
-export type FetchLike = (url: string) => Promise<Pick<Response, 'ok' | 'json'>>;
+export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<Pick<Response, 'ok' | 'json'>>;
 
 /** Platform name ↔ our chain key. */
 const PLATFORM_BY_CHAIN: Record<string, string> = {
@@ -54,6 +54,7 @@ export interface CmcDexFeedOptions {
   fetch?: FetchLike;
   baseUrl?: string;
   ttlMs?: number;
+  apiKey?: string;
 }
 
 export class CmcDexFeed implements MarketDataProvider {
@@ -61,6 +62,7 @@ export class CmcDexFeed implements MarketDataProvider {
   private readonly fetch: FetchLike;
   private readonly baseUrl: string;
   private readonly ttlMs: number;
+  private readonly apiKey?: string;
   private readonly cache: TtlCache<MarketToken[]>;
 
   constructor(opts: CmcDexFeedOptions = {}) {
@@ -68,7 +70,13 @@ export class CmcDexFeed implements MarketDataProvider {
     this.fetch = f;
     this.baseUrl = opts.baseUrl ?? CMC_PUBLIC_BASE;
     this.ttlMs = opts.ttlMs ?? 120_000;
+    this.apiKey = opts.apiKey ?? process.env.CMC_API_KEY;
     this.cache = new TtlCache<MarketToken[]>({ ttlMs: this.ttlMs });
+  }
+
+  /** Auth headers: attach the pro key when present (else keyless public-api). */
+  private authHeaders(): Record<string, string> {
+    return this.apiKey ? { 'X-CMC_PRO_API_KEY': this.apiKey } : {};
   }
 
   async discover(options: MarketDiscoveryOptions = {}): Promise<MarketToken[]> {
@@ -83,7 +91,7 @@ export class CmcDexFeed implements MarketDataProvider {
         const network = chainId > 0 ? NETWORK_BY_CHAINID[chainId] : undefined;
         const qs = network ? `network_id=${encodeURIComponent(network)}&` : '';
         const url = `${this.baseUrl}/v4/dex/spot-pairs/latest?${qs}sort=volume_24h&sort_dir=desc&limit=50`;
-        const res = await this.fetch(url);
+        const res = await this.fetch(url, { headers: this.authHeaders() });
         if (!res.ok) continue;
         const body = (await res.json()) as { data?: RawSpotPair[] };
         const rows = Array.isArray(body?.data) ? body.data : [];
@@ -103,7 +111,7 @@ export class CmcDexFeed implements MarketDataProvider {
   public async fetchHolders(platform: string, address: string): Promise<{ count: number; top10Percent: number } | null> {
     try {
       const url = `${this.baseUrl}/v1/dex/holders/count?platform=${encodeURIComponent(platform)}&address=${encodeURIComponent(address)}`;
-      const res = await this.fetch(url);
+      const res = await this.fetch(url, { headers: this.authHeaders() });
       if (!res.ok) return null;
       const body = (await res.json()) as { data?: { holder_count?: number | string; distribution?: { top_10_percent?: number | string } } };
       const count = Number(body?.data?.holder_count);

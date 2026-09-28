@@ -41,6 +41,17 @@ describe('BlockscoutFeed (I0-1)', () => {
     expect(Array.isArray(events)).toBe(true);
     expect(events.length).toBe(0);
   });
+
+  it('appends the PRO apikey when BLOCKSCOUT_API_KEY is set (keyless otherwise)', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn().mockImplementation(async (url: string) => {
+      urls.push(url);
+      return { ok: true, json: async () => ({ items: [] }) };
+    });
+    const feed = new BlockscoutFeed({ fetch: fetch as never, apiKey: 'proapi_test' });
+    await feed.getBuyEvents(4663, '0xTOKEN');
+    expect(urls[0]).toContain('apikey=proapi_test');
+  });
 });
 
 describe('DexScreenerFeed (I0-2)', () => {

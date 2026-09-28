@@ -26,8 +26,8 @@ function withGates(gates: Record<string, string>, fn: () => void): void {
 describe('provider-banner', () => {
   afterEach(() => {
     delete process.env.DISCOVERY_INTRODUCERS;
-    delete process.env.HELIUS_FEED_ENABLED;
-    delete process.env.HELIUS_API_KEY;
+    delete process.env.SOLANA_RPC_FEED_ENABLED;
+    delete process.env.SOLANA_RPC_URL;
     delete process.env.ANKR_FEED_ENABLED;
     delete process.env.FOMO_FEED_ENABLED;
     delete process.env.FOMO_API_KEY;
@@ -47,12 +47,12 @@ describe('provider-banner', () => {
   it('classifies a source as promote when DISCOVERY_INTRODUCERS is unset', () => {
     expect(sourceParticipation('fomo')).toBe('promote');
     expect(sourceParticipation('gecko')).toBe('promote');
-    expect(sourceParticipation('helius')).toBe('promote');
+    expect(sourceParticipation('solana-rpc')).toBe('promote');
   });
 
   it('scopes non-introducers to recall-only when the allowlist is set', () => {
-    withGates({ DISCOVERY_INTRODUCERS: 'helius-sol,ankr-eth,ankr-base,ankr-bsc' }, () => {
-      expect(sourceParticipation('helius')).toBe('promote');
+    withGates({ DISCOVERY_INTRODUCERS: 'solana-rpc-sol,ankr-eth,ankr-base,ankr-bsc' }, () => {
+      expect(sourceParticipation('solana-rpc')).toBe('promote');
       expect(sourceParticipation('ankr')).toBe('promote');
       expect(sourceParticipation('fomo')).toBe('recall-only');
       expect(sourceParticipation('gecko')).toBe('recall-only');
@@ -63,17 +63,17 @@ describe('provider-banner', () => {
   it('emits an introducer line and a scoping line in the banner', () => {
     withGates(
       {
-        DISCOVERY_INTRODUCERS: 'helius-sol,ankr-eth,ankr-base,ankr-bsc',
-        HELIUS_FEED_ENABLED: 'true',
-        HELIUS_API_KEY: 'k',
+        DISCOVERY_INTRODUCERS: 'solana-rpc-sol,ankr-eth,ankr-base,ankr-bsc',
+        SOLANA_RPC_FEED_ENABLED: 'true',
+        SOLANA_RPC_URL: 'https://rpc.shyft.to?api_key=k',
         ANKR_FEED_ENABLED: 'true',
         DEFILLAMA_FEED_ENABLED: 'true',
       },
       () => {
         const lines = providerBannerLines();
         expect(lines.some((l) => l.startsWith('[PROVIDERS] introducer '))).toBe(true);
-        expect(lines.some((l) => l.includes('helius·sol') && l.includes('ankr·eth/base/bsc'))).toBe(true);
-        expect(lines.some((l) => l.includes('DISCOVERY_INTRODUCERS=helius-sol'))).toBe(true);
+        expect(lines.some((l) => l.includes('solana-rpc·sol') && l.includes('ankr·eth/base/bsc'))).toBe(true);
+        expect(lines.some((l) => l.includes('DISCOVERY_INTRODUCERS=solana-rpc-sol'))).toBe(true);
         // defillama is a regime/context feed — should appear under regime role.
         expect(lines.some((l) => l.startsWith('[PROVIDERS] regime ') && l.includes('defillama'))).toBe(true);
       },
@@ -82,13 +82,13 @@ describe('provider-banner', () => {
 
   it('marks a keyed feed inert when the key is missing', () => {
     withGates(
-      { HELIUS_FEED_ENABLED: 'true' }, // enabled flag but NO HELIUS_API_KEY
+      { SOLANA_RPC_FEED_ENABLED: 'true' }, // enabled flag but NO SOLANA_RPC_URL
       () => {
         const lines = providerBannerLines();
         const introLine = lines.find((l) => l.startsWith('[PROVIDERS] introducer '));
         expect(introLine).toBeTruthy();
-        // helius requires a key → not active; the line shows inert/off.
-        expect(introLine!).not.toMatch(/→ helius·sol/);
+        // solana-rpc requires a mainnet URL → not active; the line shows inert/off.
+        expect(introLine!).not.toMatch(/→ solana-rpc·sol/);
       },
     );
   });

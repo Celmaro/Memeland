@@ -20,8 +20,9 @@ import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
 import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
 import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
 import { RoutescanFeed } from './adapters/routescan-feed.js';
+import { BlockscoutFeed } from './adapters/blockscout-feed.js';
 import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
-import { HeliusDiscoveryFeed } from './adapters/helius-discovery-feed.js';
+import { SolanaRpcDiscoveryFeed } from './adapters/solana-rpc-discovery-feed.js';
 import { FomoApiClient } from './adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from './adapters/fomo-emitter.js';
 import { SolanaTrackerFeed } from './adapters/solanatracker-feed.js';
@@ -199,16 +200,28 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     ankr: process.env.ANKR_FEED_ENABLED === 'true' ? new AnkrDiscoveryFeed() : null,
     // Routescan: free keyless multi-chain explorer new-token discovery + holders
     // (30+ EVM chains incl. robinhood). Inert unless ROUTESCAN_FEED_ENABLED=true.
-    routescan: process.env.ROUTESCAN_FEED_ENABLED === 'true' ? new RoutescanFeed() : null,
+    routescan: process.env.ROUTESCAN_FEED_ENABLED === 'true'
+      ? new RoutescanFeed({ ...(process.env.ROUTESCAN_API_KEY ? { apiKey: process.env.ROUTESCAN_API_KEY } : {}) })
+      : null,
+    // Blockscout verify/convergence layer: token-transfer → BuyEvent[] for the
+    // Q05 convergence voter (I0-1). Env-gated + fail-open; NEVER a discovery
+    // source. When BLOCKSCOUT_API_KEY is set it rides the per-chain /api/v2 pro
+    // tier (100K credits/day @ 5 RPS free) instead of the keyless cap.
+    ...(process.env.BLOCKSCOUT_FEED_ENABLED === 'true'
+      ? { blockscout: new BlockscoutFeed({ ...(process.env.BLOCKSCOUT_API_KEY ? { apiKey: process.env.BLOCKSCOUT_API_KEY } : {}) }) }
+      : {}),
     // CMC keyless DEX stack: new-pair walking + holders + security detail.
     // Inert unless CMC_DEX_FEED_ENABLED=true.
-    ...(process.env.CMC_DEX_FEED_ENABLED === 'true' ? { cmcDex: new CmcDexFeed() } : {}),
-    // P4.3 Helius SOL introducer (bounded, cursor-persisted SPL mint walk).
-    // Inert unless HELIUS_FEED_ENABLED=true AND HELIUS_API_KEY is set. Live-key
-    // validation of the launch-program walk remains outstanding; the feed is
-    // fail-soft and consumes the caller's DISCOVERY_INTRODUCERS allowlist.
-    ...(process.env.HELIUS_FEED_ENABLED === 'true' && process.env.HELIUS_API_KEY
-      ? { helius: new HeliusDiscoveryFeed({ apiKey: process.env.HELIUS_API_KEY }) }
+    ...(process.env.CMC_DEX_FEED_ENABLED === 'true'
+      ? { cmcDex: new CmcDexFeed({ ...(process.env.CMC_API_KEY ? { apiKey: process.env.CMC_API_KEY } : {}) }) }
+      : {}),
+    // Solana RPC INTRODUCER (generic SPL-create walker over the failover pool's
+    // active Sol RPC — Shyft/Chainstack/PublicNode sol). Inert unless
+    // SOLANA_RPC_FEED_ENABLED=true AND a mainnet SOLANA_RPC_URL is set. The
+    // raw Sol RPCs are transport; this bounded, cursor-persisted SPL mint walk
+    // is the canonical Sol introducer. Fail-soft + consumes DISCOVERY_INTRODUCERS.
+    ...(process.env.SOLANA_RPC_FEED_ENABLED === 'true' && process.env.SOLANA_RPC_URL
+      ? { solanaRpc: new SolanaRpcDiscoveryFeed() }
       : {}),
     // SolanaTracker Sol enricher (free Data API: price/overview/stats/risk).
     // Inert unless SOLANATRACKER_FEED_ENABLED=true AND SOLANATRACKER_API_KEY.

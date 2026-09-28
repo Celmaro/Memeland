@@ -12,7 +12,7 @@
  *                     return only the hints whose chain verifies them as real.
  *
  * The verify callback is injected so EVM (eth_getCode/eth_call via RPC) and
- * Solana (Helius getAsset/getTokenLargestAccounts) can each provide their own
+ * Solana (getTokenLargestAccounts over the Sol RPC) can each provide their own
  * existence oracle, and tests can stub it. Hints that fail verification are
  * recorded as false (so a serial-deployer/phantom address is never promoted).
  */
@@ -136,7 +136,7 @@ export class HintRegistry {
  * here (existence must come from the real transport). Use this to compose one
  * from the two canonical existence checks the system already owns:
  *  - EVM: eth_getCode / eth_call via the RPC pool (address has a token contract)
- *  - Sol: Helius getAsset / getTokenLargestAccounts (10 cr) or SPL-create check
+ *  - Sol: getTokenLargestAccounts over the Sol RPC pool or SPL-create check
  * Pass in per-chain delegate fns; unknown chains resolve to a fail-closed false.
  */
 export function chainAwareVerifier(

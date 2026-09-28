@@ -62,4 +62,15 @@ describe('RoutescanFeed (free keyless new-token + holder enrichment)', () => {
     const tokens = await feed.discover({ chainIds: [101] });
     expect(tokens).toEqual([]);
   });
+
+  it('sends the apikey header when a registered key is set (keyless otherwise)', async () => {
+    const headers: Record<string, string>[] = [];
+    const fn = async (_url: string, init?: { headers?: Record<string, string> }) => {
+      headers.push(init?.headers ?? {});
+      return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    };
+    const feed = new RoutescanFeed({ fetch: fn, apiKey: 'token_abc' });
+    await feed.discover({ chainIds: [1] });
+    expect(headers[0]!.apikey).toBe('token_abc');
+  });
 });

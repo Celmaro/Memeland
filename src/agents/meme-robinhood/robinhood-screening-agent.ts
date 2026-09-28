@@ -131,8 +131,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private solTimeOnCurveLoader: TimeOnCurveAssessOptions['loader'] | null;
   /** P4.1 CMC keyless DEX feed (new-pair walking + holders). Empty until injected. */
   private cmcDex: MarketDataProvider | null;
-  /** P4.3 Helius Solana INTRODUCER feed (bounded, cursor-persisted SPL mint walk). Empty until injected. */
-  private helius: MarketDataProvider | null;
+  /** Solana RPC INTRODUCER feed (generic SPL-create walk over the Sol RPC failover). Empty until injected. */
+  private solanaRpc: MarketDataProvider | null;
   /** SolanaTracker Sol ENRICHER feed (price/overview/stats/risk via free Data API). Empty until injected. */
   private solanatracker: MarketDataProvider | null;
   /** P0.1 FOMO API candidate-emitter feed (token boards, trader intel). Empty until injected. */
@@ -173,7 +173,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       routescan?: MarketDataProvider | null;
       solTimeOnCurveLoader?: TimeOnCurveAssessOptions['loader'] | null;
       cmcDex?: MarketDataProvider | null;
-      helius?: MarketDataProvider | null;
+      solanaRpc?: MarketDataProvider | null;
       solanatracker?: MarketDataProvider | null;
       fomo?: FomoTokenBoardProvider | null;
       defillama?: DeFiLlamaRegimeFeed | null;
@@ -202,7 +202,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.routescan = opts.routescan ?? null;
     this.solTimeOnCurveLoader = opts.solTimeOnCurveLoader ?? null;
     this.cmcDex = opts.cmcDex ?? null;
-    this.helius = opts.helius ?? null;
+    this.solanaRpc = opts.solanaRpc ?? null;
     this.solanatracker = opts.solanatracker ?? null;
     this.fomo = opts.fomo ?? null;
     this.fomoClient = this.fomo
@@ -353,10 +353,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.cmcDex, 'cmc', 'CMC_DEX_FEED_ENABLED', chain);
   }
 
-  /** P4.3 Helius Solana INTRODUCER (bounded, cursor-persisted SPL mint walk).
-   *  Guarded by HELIUS_FEED_ENABLED=true and the DISCOVERY_INTRODUCERS list. */
-  public async collectHeliusCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
-    return this.collectProviderCandidates(this.helius, 'helius', 'HELIUS_FEED_ENABLED', chain);
+  /** Solana RPC INTRODUCER (generic SPL-create walk over the Sol RPC failover).
+   *  Guarded by SOLANA_RPC_FEED_ENABLED=true + SOLANA_RPC_URL and the
+   *  DISCOVERY_INTRODUCERS list. */
+  public async collectSolanaRpcCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.solanaRpc, 'solana-rpc', 'SOLANA_RPC_FEED_ENABLED', chain);
   }
 
   /** SolanaTracker Sol ENRICHER (price/overview/stats via free Data API).
@@ -473,7 +474,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'helius' | 'fomo' | 'solanatracker',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'solana-rpc' | 'fomo' | 'solanatracker',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
@@ -794,7 +795,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const ankrCandidates = await this.collectAnkrCandidates(chain);
                   const routescanCandidates = await this.collectRoutescanCandidates(chain);
                   const cmcDexCandidates = await this.collectCmcDexCandidates(chain);
-                  const heliusCandidates = await this.collectHeliusCandidates(chain);
+                  const solanaRpcCandidates = await this.collectSolanaRpcCandidates(chain);
                   const solanaTrackerCandidates = await this.collectSolanaTrackerCandidates(chain);
                   const fomoCandidates = await this.collectFomoCandidates(chain);
                   await this.collectFomoTraderIntel(chain);
@@ -810,7 +811,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // addresses a keyless feed already found (smartDegen/CTO/KOL
                   // fields that detectMemeSignal needs), and GMGN-only
                   // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...heliusCandidates, ...solanaTrackerCandidates, ...fomoCandidates]) {
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...solanaRpcCandidates, ...solanaTrackerCandidates, ...fomoCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN
@@ -843,7 +844,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           globalCandidateRegistry.observe({
             chain,
             tokenAddress: t.address,
-            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'helius' | 'pons' | 'solanatracker' | 'pumpdev',
+            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'solana-rpc' | 'pons' | 'solanatracker' | 'pumpdev',
             at: Date.now(),
           });
         }

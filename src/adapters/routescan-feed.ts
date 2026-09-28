@@ -27,7 +27,7 @@ import { TtlCache } from '../cache/ttl-cache.js';
 
 export const ROUTESCAN_DEFAULT_BASE = 'https://api.routescan.io';
 
-export type FetchLike = (url: string) => Promise<Pick<Response, 'ok' | 'json' | 'status'>>;
+export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<Pick<Response, 'ok' | 'json' | 'status'>>;
 
 /** ERC-20 list row (routescan /v2/.../erc20). */
 interface RawErc20Row {
@@ -54,13 +54,20 @@ export interface RoutescanFeedOptions {
   baseUrl?: string;
   /** TTL for the in-memory discovery cache in ms. Default 60s. */
   ttlMs?: number;
+  /** Registered Routescan API key (raises free 2RPS/10k-day → 5RPS/100k-day). */
+  apiKey?: string;
 }
+
+/** Registered-tier key from env; keyless tier applies when absent. */
+const apiKeyFromEnv = (): string | undefined =>
+  process.env.ROUTESCAN_API_KEY?.trim() || undefined;
 
 export class RoutescanFeed implements MarketDataProvider {
   readonly id = 'routescan';
   private readonly fetch: FetchLike;
   private readonly baseUrl: string;
   private readonly ttlMs: number;
+  private readonly apiKey?: string;
   private readonly cache: TtlCache<MarketToken[]>;
 
   constructor(opts: RoutescanFeedOptions = {}) {
@@ -68,7 +75,13 @@ export class RoutescanFeed implements MarketDataProvider {
     this.fetch = f;
     this.baseUrl = opts.baseUrl ?? ROUTESCAN_DEFAULT_BASE;
     this.ttlMs = opts.ttlMs ?? 60_000;
+    this.apiKey = opts.apiKey ?? apiKeyFromEnv();
     this.cache = new TtlCache<MarketToken[]>({ ttlMs: this.ttlMs });
+  }
+
+  /** `apikey` header when a registered key is set (keyless tier otherwise). */
+  private auth(): { headers?: Record<string, string> } {
+    return this.apiKey ? { headers: { apikey: this.apiKey } } : {};
   }
 
   async discover(options: MarketDiscoveryOptions = {}): Promise<MarketToken[]> {
@@ -94,7 +107,7 @@ export class RoutescanFeed implements MarketDataProvider {
     for (const chainId of chains.length > 0 ? chains : [0]) {
       const path = chainId > 0 ? String(chainId) : 'all';
       const url = `${this.baseUrl}/v2/network/mainnet/evm/${path}/erc20?sort=createdAt,desc&limit=100`;
-      const res = await this.fetch(url);
+      const res = await this.fetch(url, this.auth());
       if (!res.ok) throw new Error(`routescan erc20 fetch failed (HTTP ${res.status})`);
       const body = (await res.json()) as { items?: RawErc20Row[] };
       const rows = Array.isArray(body?.items) ? body.items : [];
@@ -110,7 +123,7 @@ export class RoutescanFeed implements MarketDataProvider {
   /** Ranked holders for a token on an EVM chain — whale/concentration checks. */
   public async fetchHolders(chainId: number, address: string, limit = 100): Promise<TokenHolder[]> {
     const url = `${this.baseUrl}/v2/network/mainnet/evm/${chainId}/erc20/${encodeURIComponent(address)}/holders?limit=${limit}`;
-    const res = await this.fetch(url);
+    const res = await this.fetch(url, this.auth());
     if (!res.ok) return [];
     const body = (await res.json()) as { items?: Array<{ holderAddress?: string; balance?: string; percentage?: number | string }> };
     const rows = Array.isArray(body?.items) ? body.items : [];

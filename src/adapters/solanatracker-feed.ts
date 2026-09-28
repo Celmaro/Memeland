@@ -4,7 +4,8 @@
  * Solana-only indexer data behind the shared ProviderGovernor. Per the research
  * doc (docs/research/solanatracker-pumpdev-providers.md) this is an ENRICHER:
  * indexer-derived REST data hydrates ALREADY-KNOWN token addresses — it does NOT
- * introduce raw addresses at the canonical real-time level (that is Helius /
+ * introduce raw addresses at the canonical real-time level (that is the Solana
+ * RPC SPL-create walker /
  * Ankr / PumpDev-launch). So under DISCOVERY_INTRODUCERS scoping it recall/
  * hydrates only and never promotes.
  *

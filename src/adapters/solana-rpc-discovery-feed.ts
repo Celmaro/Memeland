@@ -1,56 +1,44 @@
 /**
- * Helius Solana INTRODUCER feed (provider-architecture v2: helius-sol).
+ * Solana RPC introducer (provider-architecture v2: `solana-rpc`).
  *
- * Pull-based, credit-bounded, fail-soft discovery of NEWLY CREATED SPL mints on
- * the Solana launch programs. Verified against current Helius billing
- * (2026-09-29 web check): getSignaturesForAddress and getTransaction are BOTH
- * 10 credits each (NOT 1 — the old helius-feed docstring understated them), and
- * getProgramAccounts is 10 cr. So this feed:
+ * The canonical SOL introducer, repointed off Helius onto a generic Solana
+ * JSON-RPC host. It runs over the RPC-failover manager's active Sol RPC
+ * (Shyft → Chainstack → PublicNode sol — see docs/research/solana-evm-rpc-providers.md),
+ * so the raw mainnet Sol RPCs the operator supplied are the TRANSPORT housing it.
  *
- *   - never polls getProgramAccounts (the ~288K cr/day trap the report warns of)
- *   - walks getSignaturesForAddress (10 cr) with a PERSISTED per-program cursor,
- *     so each cycle only pays for signatures the previous cycle has NOT seen
- *   - decodes a mint only when a transaction actually contains an SPL Token
- *     `create` instruction (parsed.type === 'create', info.mint present). This
- *     is the program-agnostic "a new SPL mint was created" signal (works for
- *     pump.fun / Meteora / Raydium alike) and FAILS SOFT — an ambiguous or
- *     malformed transaction introduces nothing, never garbage.
+ * The logic is the proven, credit-free SPL-create walk (identical to the old
+ * Helius discovery feed, minus any provider billing):
+ *   - never polls getProgramAccounts (the huge-cost trap)
+ *   - walks getSignaturesForAddress on the pump.fun launch program with a
+ *     PERSISTED per-program cursor, so each cycle only re-reads new signatures
+ *   - decodes a mint only when a tx actually contains an SPL Token `create`
+ *     instruction (parsed.type === 'create', info.mint present) — program-agnostic
+ *     and FAIL-SOFT: ambiguous/malformed txs introduce nothing, never garbage.
  *
- * Hard per-cycle credit budget (default 50) caps worst-case spend; the result
- * is purely additive ([] on any transport/parse failure).
- *
- * The preferred ~0-credit production path is a Helius webhook (1 cr/event), but
- * that needs a publicly reachable endpoint this repo does not host; this feed is
- * the bounded pull fallback. Live-key validation remains outstanding.
+ * Per-cycle signature budget caps worst-case spend; the result is purely
+ * additive ([]) on any transport/parse failure. Rate limits are enforced by
+ * `globalRateLimiter` (429 circuit breaker) inside the failover manager.
  */
 
 import type { MarketDataProvider, MarketToken, MarketDiscoveryOptions } from './market-data-provider.js';
-import type { FetchLike, HeliusFeedOptions } from './helius-feed.js';
-
-/** Confirmed 2026-09-29: getSignaturesForAddress costs 10 credits. */
-export const HELIUS_CR_GET_SIGNATURES = 10;
-/** Confirmed 2026-09-29: getTransaction costs 10 credits. */
-export const HELIUS_CR_GET_TRANSACTION = 10;
-/** Never polled (report rule): getProgramAccounts is the ~288K cr/day trap. */
-export const HELIUS_CR_GET_PROGRAM_ACCOUNTS = 10;
+import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 
 /** Solana chain id used by the market-data layer. */
 export const SOLANA_CHAIN_ID = 101;
 
-export interface HeliusDiscoveryOptions extends MarketDiscoveryOptions {
-  chainIds?: number[];
-}
+export type SolFetchLike = (url: string, init?: { body?: string }) => Promise<Pick<Response, 'ok' | 'json' | 'status'>>;
 
-export interface HeliusDiscoveryFeedOptions extends HeliusFeedOptions {
+export interface SolanaRpcDiscoveryOptions extends MarketDiscoveryOptions {
   /** Launch programs to walk for new-mint signatures (default: pump.fun). */
   launchPrograms?: string[];
-  /** Max credits spent per discover() cycle (default 50). */
-  perCycleCredits?: number;
   /** Max signatures enumerated per program per cycle (default 10). */
   maxSignaturesPerProgram?: number;
+  /** Explicit Sol RPC URL. Default: the failover manager's active Sol RPC. */
+  rpcUrl?: string;
+  fetch?: SolFetchLike;
 }
 
-/** Default Solana launch programs to watch (pump.fun canonical). */
+/** Default Solana launch program to watch (pump.fun canonical). */
 export const DEFAULT_LAUNCH_PROGRAMS = ['6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'];
 
 /** A Solana base58 public-key (32–44 chars, no I/O/l/0 ambiguity). */
@@ -79,50 +67,50 @@ export function extractCreateMint(tx: unknown): string | null {
   return null;
 }
 
-export class HeliusDiscoveryFeed implements MarketDataProvider {
-  readonly id = 'helius';
+export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
+  readonly id = 'solana-rpc';
 
-  private readonly fetch: FetchLike;
-  private readonly apiKey: string;
-  private readonly baseUrl: string;
+  private readonly fetch: SolFetchLike;
   private readonly launchPrograms: string[];
-  private readonly perCycleCredits: number;
   private readonly maxSignaturesPerProgram: number;
+  private readonly rpcUrl?: string;
   /** Persisted per-program cursor: last enumerated signature (de-dupes cycles). */
   private readonly cursor = new Map<string, string>();
 
-  constructor(opts: HeliusDiscoveryFeedOptions) {
-    const f = opts.fetch ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
+  constructor(opts: SolanaRpcDiscoveryOptions = {}) {
+    const f = opts.fetch ?? ((globalThis as { fetch?: SolFetchLike }).fetch as SolFetchLike);
     this.fetch = f;
-    this.apiKey = opts.apiKey;
-    this.baseUrl = opts.baseUrl ?? 'https://mainnet.helius-rpc.com';
     this.launchPrograms = (opts.launchPrograms ?? DEFAULT_LAUNCH_PROGRAMS).filter(isBase58PublicKey);
-    this.perCycleCredits = opts.perCycleCredits ?? 50;
     this.maxSignaturesPerProgram = opts.maxSignaturesPerProgram ?? 10;
+    this.rpcUrl = opts.rpcUrl;
+  }
+
+  /** Resolve the Sol RPC to talk to: explicit URL or the failover manager's active Sol RPC. */
+  private url(): string {
+    if (this.rpcUrl) return this.rpcUrl;
+    const active = globalRPCFailoverManager.getActiveRPC('sol');
+    return active || '';
   }
 
   /**
    * Discover newly created SPL mints. Solana-only: returns [] unless the chain
    * filter is empty or includes solana (101). Additive & fail-soft.
    */
-  async discover(options: HeliusDiscoveryOptions = {}): Promise<MarketToken[]> {
+  async discover(options: SolanaRpcDiscoveryOptions = {}): Promise<MarketToken[]> {
     const chainIds = options.chainIds ?? [];
     if (chainIds.length > 0 && !chainIds.includes(SOLANA_CHAIN_ID)) return [];
 
     const tokens: MarketToken[] = [];
-    let credits = 0;
+    let budget = options.maxSignaturesPerProgram ? this.maxSignaturesPerProgram * this.launchPrograms.length : Infinity;
     for (const program of this.launchPrograms) {
-      if (credits >= this.perCycleCredits) break;
+      if (budget <= 0) break;
       const before = this.cursor.get(program);
-      // getSignaturesForAddress = 10 cr, capped at per-program page size.
       const sigs = await this.signatures(program, before, this.maxSignaturesPerProgram);
       if (sigs === null || sigs.length === 0) continue;
-      credits += HELIUS_CR_GET_SIGNATURES;
+      budget -= sigs.length;
       for (const sig of sigs) {
-        if (credits >= this.perCycleCredits) break;
         const mint = await this.mintFromSignature(sig.signature);
         if (!mint) continue; // not a confident new SPL mint — skip, fail-soft
-        credits += HELIUS_CR_GET_TRANSACTION;
         tokens.push({
           address: mint,
           chainId: SOLANA_CHAIN_ID,
@@ -134,17 +122,17 @@ export class HeliusDiscoveryFeed implements MarketDataProvider {
           // fresh floor; market depth arrives via enrichment in later cycles.
           freshLane: true,
           pairAddress: program,
-          dex: 'helius-sol',
+          dex: 'solana-rpc',
         });
       }
-      // Advance the cursor to the OLDEST signature we enumerated so the next
-      // cycle only pays for signatures this cycle introduced.
+      // Advance the cursor to the OLDEST signature enumerated so the next cycle
+      // only pays for signatures this cycle introduced.
       this.cursor.set(program, sigs[sigs.length - 1]!.signature);
     }
     return tokens;
   }
 
-  /** getSignaturesForAddress (10 cr), bounded page. Fail-soft → null. */
+  /** getSignaturesForAddress, bounded page. Fail-soft → null. */
   private async signatures(program: string, before?: string, limit = 10): Promise<Array<{ signature: string }> | null> {
     try {
       const result = (await this.rpc('getSignaturesForAddress', [program, { limit, ...(before ? { before } : {}) }])) as
@@ -156,10 +144,7 @@ export class HeliusDiscoveryFeed implements MarketDataProvider {
     }
   }
 
-  /**
-   * Decode a mint from a signature via getTransaction (10 cr). Only a confident
-   * SPL `create` yields a mint; anything else returns null (introduces nothing).
-   */
+  /** Decode a mint from a signature via getTransaction. Only a confident SPL `create` yields a mint. */
   private async mintFromSignature(signature: string): Promise<string | null> {
     try {
       const result = (await this.rpc('getTransaction', [
@@ -173,13 +158,13 @@ export class HeliusDiscoveryFeed implements MarketDataProvider {
   }
 
   private rpc(method: string, params: unknown[]): Promise<unknown> {
-    const url = `${this.baseUrl}/?api-key=${encodeURIComponent(this.apiKey)}`;
+    const url = this.url();
     return this.fetch(url, {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     }).then(async (res) => {
-      if (!res.ok) throw new Error(`helius ${method} HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`solana-rpc ${method} HTTP ${res.status}`);
       const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
-      if (data.error) throw new Error(`helius ${method}: ${data.error.message}`);
+      if (data.error) throw new Error(`solana-rpc ${method}: ${data.error.message}`);
       return data.result;
     });
   }

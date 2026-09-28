@@ -15,12 +15,19 @@
  *
  * Env-gate: BLOCKSCOUT_FEED_ENABLED=true. Fail-open: any error → [] (the voter
  * already neutralizes on empty). Keyless on Blockscout's public/chain instances.
+ * When BLOCKSCOUT_API_KEY (a pro-api_… key) is set it is appended as `apikey`,
+ * raising the per-chain /api/v2 cap (free: 100K credits/day @ 5 RPS across all
+ * chains; verify-layer only — never a discovery source). Credentials never in code.
  */
 
 import type { MarketDataProvider, MarketDiscoveryOptions, MarketToken } from './market-data-provider.js';
 import type { BuyEvent } from '../services/flow-convergence.js';
 
 type FetchLike = (url: string) => Promise<Pick<Response, 'ok' | 'json'>>;
+
+/** Optional Blockscout PRO API key (proapi_…). Sent as `apikey` query param. */
+const apiKeyFromEnv = (): string | undefined =>
+  process.env.BLOCKSCOUT_API_KEY?.trim() || undefined;
 
 export interface BlockscoutTransfer {
   hash?: string;
@@ -39,6 +46,8 @@ export interface BlockscoutFeedOptions {
   chainBases?: Record<number, string>;
   /** Max transfers fetched per token (default 50). */
   limit?: number;
+  /** Blockscout PRO API key (proapi_…). Defaults to BLOCKSCOUT_API_KEY. */
+  apiKey?: string;
 }
 
 /** Default per-chain Blockscout bases (official explorer instances). */
@@ -56,6 +65,7 @@ export class BlockscoutFeed implements MarketDataProvider {
   private readonly baseUrl: string;
   private readonly chainBases: Record<number, string>;
   private readonly limit: number;
+  private readonly apiKey?: string;
 
   constructor(opts: BlockscoutFeedOptions = {}) {
     const f = opts.fetch ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
@@ -63,6 +73,7 @@ export class BlockscoutFeed implements MarketDataProvider {
     this.baseUrl = opts.baseUrl ?? DEFAULT_CHAIN_BASES[4663]!;
     this.chainBases = opts.chainBases ?? DEFAULT_CHAIN_BASES;
     this.limit = opts.limit ?? 50;
+    this.apiKey = opts.apiKey ?? apiKeyFromEnv();
   }
 
   /** Implements MarketDataProvider minimally (discovery not the role here). */
@@ -80,7 +91,8 @@ export class BlockscoutFeed implements MarketDataProvider {
   async getBuyEvents(chainId: number, tokenAddress: string): Promise<BuyEvent[]> {
     const base = this.chainBases[chainId] ?? this.baseUrl;
     try {
-      const url = `${base}/api/v2/tokens/${tokenAddress}/transfers?limit=${this.limit}`;
+      const auth = this.apiKey ? `&apikey=${encodeURIComponent(this.apiKey)}` : '';
+      const url = `${base}/api/v2/tokens/${tokenAddress}/transfers?limit=${this.limit}${auth}`;
       const res = await this.fetch(url);
       if (!res.ok) return [];
       const body = (await res.json()) as { items?: BlockscoutTransfer[] };
