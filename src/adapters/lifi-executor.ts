@@ -18,7 +18,7 @@
  *     a `timed_out` fill is reconciled via /v1/status before any retry.
  *   - Unknown chains / tokens fail closed — no silent chain-id default.
  */
-import { createWalletClient, http, type Account, type Chain } from 'viem';
+import { createWalletClient, http, isAddress, type Account, type Chain } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import base58 from 'bs58';
 import fs from 'fs';
@@ -434,6 +434,9 @@ export class LifiExecutor {
     }
     const cfg = resolveExecutionChain(chainKey);
     try {
+      if (!Number.isFinite(req.amountUsd) || req.amountUsd <= 0) {
+        return this.failed(`invalid amountUsd '${req.amountUsd}' — must be a positive finite number`);
+      }
       const funding = resolveFundingToken(chainKey, process.env[`EXECUTION_FUNDING_TOKEN_${chainKey.toUpperCase()}`]);
       const fromAmount = BigInt(Math.round(req.amountUsd * 10 ** funding.decimals)).toString();
       const addr = this.addressOf(chainKey);
@@ -504,6 +507,9 @@ export class LifiExecutor {
     }
     const cfg = resolveExecutionChain(chainKey);
     try {
+      if (!Number.isFinite(req.amount) || req.amount <= 0) {
+        return this.swapErr(req, 0, `invalid amount '${req.amount}' — must be a positive finite number`);
+      }
       const fromAddress = this.resolveAnyToken(chainKey, req.fromToken);
       const toAddress = this.resolveAnyToken(chainKey, req.toToken);
       const fromMeta = this.resolveAnyTokenMeta(chainKey, req.fromToken);
@@ -559,6 +565,12 @@ export class LifiExecutor {
     const symbol = req.token.toUpperCase();
     const webUrl = this.sendWebUrl(cfg.lifiChainId, req.recipientAddress, req.amount);
     try {
+      if (!Number.isFinite(req.amount) || req.amount <= 0) {
+        return { success: false, chainName: cfg.key, chainId: cfg.lifiChainId, tokenSymbol: symbol, amountIn: req.amount, expectedAmountOut: req.amount, feeUsd: 0, estimatedDurationSeconds: 0, recipientAddress: req.recipientAddress, webUrl, simulated: true, error: `invalid amount '${req.amount}' — must be a positive finite number` };
+      }
+      if (chainKey !== 'sol' && !isAddress(req.recipientAddress)) {
+        return { success: false, chainName: cfg.key, chainId: cfg.lifiChainId, tokenSymbol: symbol, amountIn: req.amount, expectedAmountOut: req.amount, feeUsd: 0, estimatedDurationSeconds: 0, recipientAddress: req.recipientAddress, webUrl, simulated: true, error: `invalid recipient address '${req.recipientAddress}'` };
+      }
       if (this.isDryRun) {
         return { success: true, chainName: cfg.key, chainId: cfg.lifiChainId, tokenSymbol: symbol, amountIn: req.amount, expectedAmountOut: req.amount, feeUsd: 0, estimatedDurationSeconds: 0, recipientAddress: req.recipientAddress, webUrl, simulated: true };
       }
@@ -621,7 +633,15 @@ export class LifiExecutor {
     const s = symbolOrAddress.trim();
     const native = NATIVE_TOKEN_META[s.toUpperCase()];
     if (native) return native;
-    if (/^0x/i.test(s) && s.length >= 40) return { address: s, decimals: 18 };
+    if (/^0x/i.test(s)) {
+      // Strict fail-closed validation: a 0x-prefixed token must be a valid EVM
+      // address. Previously any >= 40-char string was accepted verbatim, so a
+      // malformed 0x value could reach the quote/broadcast path unchecked.
+      if (!isAddress(s)) {
+        throw new Error(`invalid EVM token address '${s}'`);
+      }
+      return { address: s, decimals: 18 };
+    }
     if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)) return { address: s, decimals: 9 }; // solana base58 mint
     const funding = resolveFundingToken(chainKey, s);
     return { address: funding.address, decimals: funding.decimals };

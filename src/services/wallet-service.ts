@@ -1,10 +1,15 @@
-import { createWalletClient, createPublicClient, http, parseEther, formatEther, type WalletClient, type PublicClient, type Chain, type Account } from 'viem';
+import { createWalletClient, createPublicClient, http, parseEther, formatEther, isAddress, type WalletClient, type PublicClient, type Chain, type Account } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { robinhood } from 'viem/chains';
 
 import { StateStore } from './state-store.js';
 import { isDryRun as isDryRunMode } from '../config/config.js';
 import { globalRPCFailoverManager } from './rpc-failover.js';
+
+/** Optional cap on a single native-EVM withdrawal (USD-equivalent), configurable via env. */
+const MAX_WITHDRAWAL_ETH = Number(process.env.MAX_WITHDRAWAL_ETH) > 0 ? Number(process.env.MAX_WITHDRAWAL_ETH) : 1000;
+/** Accepted EVM private key shapes: optional 0x prefix + exactly 64 hex chars. */
+const PRIVATE_KEY_RE = /^(0x)?[0-9a-fA-F]{64}$/;
 
 export interface BalanceResult {
   balance: number;
@@ -52,6 +57,12 @@ export class WalletService {
   /** Store a private key at runtime (from /wallet setup modal or TUI) and persist to StateStore */
   public setKey(chain: 'evm', privateKey: string): void {
     const trimmed = privateKey.trim();
+    // Reject obviously-invalid keys at set time instead of accepting any string
+    // and only failing later from privateKeyToAccount. A bad key here could
+    // otherwise destroy/persist the operator's configured wallet.
+    if (!PRIVATE_KEY_RE.test(trimmed)) {
+      throw new Error('Invalid EVM private key: expected a 0x-prefixed (or unprefixed) 64-character hex string.');
+    }
     this.evmPrivateKey = trimmed;
     console.log('[WALLET SERVICE] EVM private key set at runtime.');
 
@@ -154,6 +165,18 @@ export class WalletService {
     const isDryRun = isDryRunMode();
     const chainConfig = EVM_CHAINS[chainId];
     if (!chainConfig) throw new Error(`Unsupported EVM chain ID: ${chainId}`);
+
+    // Validate recipient addresses and amounts BEFORE any broadcast (also
+    // during DRY_RUN) so a malformed/oversized order can never slip through.
+    if (!isAddress(recipientAddress)) {
+      throw new Error(`Invalid recipient address: ${recipientAddress}`);
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error(`Invalid amount: must be a positive finite number (got ${amount}).`);
+    }
+    if (amount > MAX_WITHDRAWAL_ETH) {
+      throw new Error(`Amount ${amount} ETH exceeds configured MAX_WITHDRAWAL_ETH cap (${MAX_WITHDRAWAL_ETH}).`);
+    }
 
     console.log(`[WALLET SERVICE] Sending ${amount} native token to ${recipientAddress} on chain ${chainId} (DRY_RUN=${isDryRun})`);
 
