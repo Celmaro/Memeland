@@ -2,6 +2,7 @@ import { assertStartupConfig } from '../config/startup-validation.js';
 import { getExecutionMode, isDryRun as isDryRunMode, isAutoExecute, isSignalOnly } from '../config/config.js';
 import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { validateChainConfig, validateExecutionMode } from '../config/chain-config.js';
+import { printProviderBanner } from './provider-banner.js';
 
 /** Central startup guard: same env checks as before, packaged as a boot module. */
 export function bootstrapStartupConfig(): void {
@@ -50,6 +51,10 @@ export function printStartupBanner(): string {
   console.log('[KERNELS] A=reputation C=ledger D=sellability E=Result<T,E> F=decisionCache G=discovery | L=ttl-cache M=paced-http N=try-fetch-json O=staleness-clock P=chat-notifier Q=screening-runner R=wallet-balance');
   console.log('[SWARM] voters=9 (quant/ml/security/sentiment/whale/critic/wallet/convergence/rubric) | gate=swarm-consensus≥80% | floor=NEVER-LOWERED');
   console.log('[EXECUTION] lifi-executor (LI.FI/Jumper — only execution layer on this fork)');
+  // Provider-role map: four-role model (introducer/emitter/enricher/regime/…)
+  // derived from the SAME env gates the runtime reads — the Zeabur log reflects
+  // the current provider fabric, not a stale snapshot.
+  printProviderBanner();
   // Memeland fork multichain audit-key warning: every chain in MULTICHAIN_CHAINS that
   // doesn't have a GMGN_API_KEY_<CHAIN> (or a base GMGN_API_KEY) will cascade-fail
   // at the audit gate (Fix #5's "audit unavailable (likely 429/401)"). Surface this

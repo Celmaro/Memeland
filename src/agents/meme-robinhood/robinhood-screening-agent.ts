@@ -14,6 +14,7 @@ import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
+import { sourceParticipation } from '../../startup/provider-banner.js';
 import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from '../../adapters/fomo-emitter.js';
 import { globalTraderPersistence } from '../../services/onchain/trader-persistence.js';
@@ -832,7 +833,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         const primary = globalCandidateRegistry.primaryDiscoverySource();
         const dstats = globalCandidateRegistry.stats();
         if (primary.primary && primary.bySource[primary.primary]! % 25 === 0) {
-          console.log(`[DISCOVERY STATS] primary=${primary.primary} bySource=${JSON.stringify(primary.bySource)} cov=${JSON.stringify(dstats.coverage)} dup=${JSON.stringify(dstats.dupRate)} fp=${JSON.stringify(dstats.falsePositive)} spend=${JSON.stringify(dstats.spend)} candidates=${globalCandidateRegistry.size()}`);
+          const srcKeys = Object.keys(primary.bySource);
+          const promote = srcKeys.filter((s) => sourceParticipation(s) === 'promote');
+          const recall = srcKeys.filter((s) => sourceParticipation(s) === 'recall-only');
+          console.log(`[DISCOVERY STATS] primary=${primary.primary} bySource=${JSON.stringify(primary.bySource)} promote=[${promote.join(',')}] recall=[${recall.join(',')}] cov=${JSON.stringify(dstats.coverage)} dup=${JSON.stringify(dstats.dupRate)} fp=${JSON.stringify(dstats.falsePositive)} spend=${JSON.stringify(dstats.spend)} candidates=${globalCandidateRegistry.size()}`);
         }
         // Fresh-pair enrichment (batched, gap fix): collect every freshLane
         // candidate that carries zero market data, batch-fetch real
@@ -1328,7 +1332,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
       console.log(`[MEME AGENT] Pass complete. ${reports.length} signals passed.`);
       this.lastFunnel = { scanned, prefiltered, emitted: reports.length };
-      console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length} byChain=${Object.entries(scannedByChain).map(([c, n]) => `${c}:${n}`).join(',')} bySource=${Object.entries(scannedBySource).map(([c, n]) => `${c}:${n}`).join(',')}`);
+      const funnelRoles = {
+        promote: Object.keys(scannedBySource).filter((s) => sourceParticipation(s) === 'promote').join(','),
+        recall: Object.keys(scannedBySource).filter((s) => sourceParticipation(s) === 'recall-only').join(','),
+      };
+      console.log(`[FUNNEL] meme chains=${chains.join('+')} scanned=${scanned} prefiltered=${prefiltered} emitted=${reports.length} byChain=${Object.entries(scannedByChain).map(([c, n]) => `${c}:${n}`).join(',')} bySource=${Object.entries(scannedBySource).map(([c, n]) => `${c}:${n}`).join(',')} promote=[${funnelRoles.promote}] recall=[${funnelRoles.recall}]`);
       return reports;
       }
 
