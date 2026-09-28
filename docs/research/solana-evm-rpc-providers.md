@@ -98,3 +98,54 @@ budget caps worst-case spend — so the generous free tiers above are never burn
 - Role: **enricher / discovery** (createdAt-ordered fresh lane + ranked holders).
   Base already correct; optional `ROUTESCAN_API_KEY` unlocks the registered tier.
 
+---
+
+## 7. Infura — managed RPC (eth/base/bsc/sol) — transport
+- Endpoints (`https://{chain}-mainnet.infura.io/v3/<KEY>` or `mainnet.infura.io`):
+  - eth `https://mainnet.infura.io/v3/<KEY>`
+  - base `https://base-mainnet.infura.io/v3/<KEY>`
+  - bsc `https://bsc-mainnet.infura.io/v3/<KEY>`
+  - sol `https://solana-mainnet.infura.io/v3/<KEY>`
+- **Rate limits**: Core (free) ~**3M credits/day @ 2,000 credits/sec** (≈37K
+  standard requests/day @ 80 cr/eth_call; some docs list a 100K req/day free cap).
+  Developer 15M cr/day; credit-based, so RPS depends on method cost.
+- Role: **EVM + Sol transport** (failover pool). Keyed via `EVM_*_RPC_URL` /
+  `SOLANA_RPC_URL` or `RPC_FAILOVER_URLS`.
+
+## 8. ZAN — managed RPC + WS (eth/sol/bsc/base/rh) — transport
+- Endpoints (`https://api.zan.top/node/v1/{chain}/mainnet/<KEY>` + WS):
+  - eth/sol/bsc/base/robinhood HTTP + `wss://api.zan.top/node/ws/v1/{chain}/mainnet/<KEY>`
+- **Rate limits**: free **150M credits / 30 days** across 28+ chains; credit-based
+  RPS. Notably covers **Robinhood** (only RH-capable managed provider besides the
+  official chain RPC), and has Sol WS.
+- Role: **EVM/Sol/RH transport** (failover pool) + **WS tape housing** (eth/sol WS).
+
+## 9. Pocket Network — free public RPC (eth/sol/base/bsc) — transport
+- Endpoints (no key): `eth.api.pocket.network`, `solana.api.pocket.network`,
+  `base.api.pocket.network`, `bsc.api.pocket.network` (60+ chains).
+- **Rate limits**: no key, **lightly rate-limited** (no published hard RPS; fair-use).
+- Role: **free keyless transport** — added to the per-chain **code defaults** in
+  `rpc-failover.ts` (no key → safe in source; already a Sol default).
+
+## 10. OnFinality — managed RPC + WS (eth/sol/bsc/base) — transport
+- Endpoints (`https://{chain}.api.onfinality.io/rpc?apikey=<KEY>` + WS):
+  - base `https://base.api.onfinality.io/rpc?apikey=<KEY>`
+  - bsc `https://bnb.api.onfinality.io/rpc?apikey=<KEY>`
+  - eth `https://eth.api.onfinality.io/rpc?apikey=<KEY>`
+  - sol `https://solana.api.onfinality.io/rpc?apikey=<KEY>`
+- **Rate limits**: free ~**500K responses/day**; public rate limit ~**3,000 response
+  units/min/IP** (HTTP); free plan unlocks ~40 req/s per endpoint.
+- Role: **EVM/Sol transport** (failover pool) + **WS tape housing**.
+
+---
+
+## Failover delivery (dRPC / Chainstack + the new keyed hosts)
+The keyed endpoints (Infura, ZAN, Onfinality, Chainstack) are **not** hardcoded —
+they ride `RPC_FAILOVER_URLS` (env JSON). The CLI `-k` flag pitfall is actually the
+**`&`** character (Windows arg parsing), not commas — the existing
+`RPC_FAILOVER_URLS` JSON already stores commas fine. All URLs above are `&`-free,
+so the JSON is delivered via `variable update -k "RPC_FAILOVER_URLS=…"` verbatim
+and verified after. Chainstack Sol is added (key on hand); dRPC needs its `<key>`
+value (not yet supplied) and stays a documented pool candidate until then.
+
+
