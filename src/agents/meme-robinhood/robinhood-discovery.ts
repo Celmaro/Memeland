@@ -65,12 +65,11 @@ export function normalizeDexToken(
     // prefilter can distinguish "feed down" from "token trades nothing".
     sourceUnavailable: t.sourceUnavailable ?? undefined,
     freshLane: t.freshLane ?? undefined,
-    // Keyless feeds (dexscreener/dexpaprika) only report 24h volume —
-    // no volume_1h field. Without this fallback the prefilter floor
-    // (minVolume1hUsd) would reject every candidate as volume 1h $0.0k,
-    // making the boosters dead code (observed live on Zeabur, 2026-09-23).
-    // Same semantics as gmgn-adapter Fix #2: 1h ≈ 24h/24 when only 24h exists.
-    volume1hUsd: t.volume24hUsd > 0 ? t.volume24hUsd / 24 : 0,
+    // Keyless feeds (dexpaprika) only report 24h volume; dexscreener now carries
+    // a real 1h value when the pair exposes `volume.h1`. Prefer the real 1h over
+    // the /24 estimate, or the prefilter floor (minVolume1hUsd) would reject a
+    // legitimately-hot token at $0.0k. Same semantics as gmgn-adapter Fix #2.
+    volume1hUsd: t.volume1hUsd && t.volume1hUsd > 0 ? t.volume1hUsd : t.volume24hUsd > 0 ? t.volume24hUsd / 24 : 0,
     liquidityUsd: t.liquidityUsd || 0,
     buys: 0, sells: 0, swaps: 0, holderCount: 0,
     top10HolderRate: null, devTeamHoldRate: null, creatorClose: false, creatorTokenStatus: null,

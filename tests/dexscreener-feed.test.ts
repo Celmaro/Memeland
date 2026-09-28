@@ -59,4 +59,19 @@ describe('DexScreenerFeed (Q06)', () => {
     expect(await consume(stub)).toBe(1);
     expect(await consume(dexscreener)).toBeGreaterThan(0);
   });
+
+  it('maps the pair volume.h1 into volume1hUsd (real 1h, not the /24 estimate)', async () => {
+    const feed = new DexScreenerFeed({
+      fetch: urlAwareFetch([
+        { chainId: 'robinhood', pairAddress: '0xPAIR', dexId: 'uniswap',
+          baseToken: { address: '0xRH', symbol: 'RH' }, priceUsd: '1.2',
+          liquidity: { usd: 5000 }, volume: { h24: 24000, h1: 1500 }, fdv: 9000 },
+      ]),
+    });
+    const tokens = await feed.discover();
+    const rh = tokens.find((t) => t.symbol === 'RH');
+    expect(rh).toBeDefined();
+    expect(rh!.volume24hUsd).toBe(24000);
+    expect(rh!.volume1hUsd).toBe(1500); // real 1h, distinct from 24000/24=1000
+  });
 });

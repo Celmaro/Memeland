@@ -40,7 +40,7 @@ interface RawPair {
   baseToken?: { address?: string; symbol?: string; name?: string };
   priceUsd?: string;
   liquidity?: { usd?: number };
-  volume?: { h24?: number };
+  volume?: { h24?: number; h1?: number };
   fdv?: number;
 }
 
@@ -139,6 +139,9 @@ export class DexScreenerFeed implements MarketDataProvider {
             priceUsd: Number(p.priceUsd) || 0,
             liquidityUsd: p.liquidity?.usd || 0,
             volume24hUsd: p.volume?.h24 || 0,
+            // Real 1h volume when the pair exposes it (the prefilter floor uses
+            // volume1hUsd; without it the normalizer falls back to a /24 guess).
+            volume1hUsd: p.volume?.h1 ?? 0,
             fdvUsd: p.fdv || 0,
             pairAddress: p.pairAddress,
             dex: p.dexId,
@@ -196,6 +199,7 @@ export class DexScreenerFeed implements MarketDataProvider {
       priceUsd: 0,
       liquidityUsd: 0,
       volume24hUsd: 0,
+      volume1hUsd: 0,
     };
   }
 

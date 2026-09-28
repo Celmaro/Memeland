@@ -13,6 +13,11 @@ export interface MarketToken {
   priceUsd: number;
   liquidityUsd: number;
   volume24hUsd: number;
+  /**
+   * Real 1-hour volume when the provider exposes it (DexScreener `volume.h1`).
+   * Optional: absent/0 falls back to the 24h/24 estimate in the normalizer.
+   */
+  volume1hUsd?: number;
   fdvUsd?: number;
   mcapUsd?: number;
   change24hPct?: number;
