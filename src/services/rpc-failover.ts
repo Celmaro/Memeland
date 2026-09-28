@@ -107,8 +107,14 @@ export class RPCFailoverManager {
     const configured = (() => {
       const raw = getEnvString('RPC_FAILOVER_URLS');
       if (!raw) return {} as Record<string, string[]>;
+      // base64: prefix → decode first. Lets operators ship the JSON through the
+      // CLI `-k` flag (which cannot carry embedded quotes/commas) without a
+      // comma/quote pitfall; plain JSON still works (used by .env / local runs).
+      const jsonText = raw.startsWith('base64:')
+        ? Buffer.from(raw.slice('base64:'.length), 'base64').toString('utf-8')
+        : raw;
       try {
-        const parsed = JSON.parse(raw) as unknown;
+        const parsed = JSON.parse(jsonText) as unknown;
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
         const out: Record<string, string[]> = {};
         for (const [key, value] of Object.entries(parsed)) {

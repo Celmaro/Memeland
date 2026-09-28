@@ -51,6 +51,16 @@ describe('RPCFailoverManager', () => {
     expect(mgr.getRpcUrls('evm')).toEqual(mgr.getRpcUrls('rh'));
   });
 
+  it('decodes a base64: prefixed RPC_FAILOVER_URLS (CLI comma/quote-safe delivery)', () => {
+    const json = { rh: ['https://rpc.example.com/a', 'https://rpc.example.com/b'], sol: ['https://sol.example.com'] };
+    const b64 = Buffer.from(JSON.stringify(json)).toString('base64');
+    process.env.RPC_FAILOVER_URLS = `base64:${b64}`;
+    const mgr = new RPCFailoverManager();
+    expect(mgr.getRpcUrls('rh')).toContain('https://rpc.example.com/a');
+    expect(mgr.getRpcUrls('rh')).toContain('https://rpc.example.com/b');
+    expect(mgr.getRpcUrls('sol')).toContain('https://sol.example.com');
+  });
+
   it('does not use demo endpoints by default', () => {
     const mgr = new RPCFailoverManager();
     for (const chain of RPC_CHAINS) {
