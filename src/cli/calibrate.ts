@@ -9,10 +9,27 @@
 
 import { globalStateStore } from '../services/state-store.js';
 import { fetchKlinesWithGeckoFallback, geckoNetworkIdFor } from '../agents/shared/ml-predictor.js';
-import { sweepThresholds, klinesFollowThroughLabeler } from '../orchestrator/calibration-harness.js';
+import { sweepThresholds, klinesFollowThroughLabeler, buildOutcomeRowsFromJournal, walkForwardReportFromJournal } from '../orchestrator/calibration-harness.js';
 
 async function main(): Promise<void> {
   const store = globalStateStore;
+  const walkForward = process.argv.includes('--walk-forward');
+  const strategies = (process.argv.indexOf('--strategies') >= 0
+    ? process.argv[process.argv.indexOf('--strategies') + 1]?.split(',').map((s) => s.trim()).filter(Boolean)
+    : ['BASELINE_V1', 'swarm'])
+    ?? ['BASELINE_V1', 'swarm'];
+
+  // P6.1 — walk-forward OOS report (fail-closed: no ROBUST edge → hold activation).
+  if (walkForward) {
+    const journal = store.getAllJournalEntries();
+    const rows = buildOutcomeRowsFromJournal(journal);
+    if (rows.length === 0) {
+      console.log('[WALK-FORWARD] No realized trades in the journal — cannot earn an OOS edge. Hold live activation (fail-closed).');
+      return;
+    }
+    console.log(walkForwardReportFromJournal(journal, strategies));
+    return;
+  }
   // Gecko klines need the chain's network id; the ledger stores domain only, so
   // map the meme domain to bsc (primary venue) for the follow-through read.
   const labeler = klinesFollowThroughLabeler({

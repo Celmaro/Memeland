@@ -24,7 +24,9 @@
  */
 
 import type { StateStore } from '../services/state-store.js';
+import type { TradeJournalEntry } from '../services/trade-journal-service.js';
 import { SwarmConsensusEngine, type SignalCandidate } from './swarm-consensus.js';
+import { type OutcomeRow, renderWalkForwardReport } from './walk-forward.js';
 
 export interface CalibrationLabelerInput {
   symbol: string;
@@ -187,4 +189,45 @@ export function replayThroughSwarm(candidate: SignalCandidate, engine: SwarmCons
     passed: res.passed,
     refusal,
   };
+}
+
+/**
+ * P6.1 — Build the walk-forward training dataset from the trade journal.
+ * Maps REALIZED trades (status != OPEN with a signed PnL) to OutcomeRow, so the
+ * harness measures the same realized outcomes the swarm-learning loop consumes.
+ * The journal's `strategyUsed` becomes the strategy tag (BASELINE_V1 | swarm |
+ * jev-shadow) so cross-strategy comparison is apples-to-apples. Trades with no
+ * terminal PnL yet are excluded — a live position is never counted.
+ */
+export function buildOutcomeRowsFromJournal(entries: TradeJournalEntry[]): OutcomeRow[] {
+  const rows: OutcomeRow[] = [];
+  for (const e of Array.isArray(entries) ? entries : []) {
+    if (e.status === 'OPEN' || typeof e.realizedPnlPct !== 'number') continue;
+    const ts = Date.parse(e.exitTimestamp ?? e.entryTimestamp);
+    if (!Number.isFinite(ts)) continue;
+    rows.push({
+      id: e.id,
+      timestamp: ts,
+      confidence: e.swarmScore,
+      realizedPnlPct: e.realizedPnlPct,
+      strategy: e.strategyUsed || 'BASELINE_V1',
+    });
+  }
+  // Chronological by terminal time — the walk-forward split preserves this order.
+  return rows.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+/**
+ * P6.1 — Render the OOS walk-forward report for the given strategies from the
+ * trade journal. This is the artifact that must precede ANY live activation
+ * (fail-closed: no ROBUST edge → hold activation).
+ */
+export function walkForwardReportFromJournal(
+  entries: TradeJournalEntry[],
+  strategies: string[],
+  trainFrac?: number,
+  valFrac?: number,
+): string {
+  const rows = buildOutcomeRowsFromJournal(entries);
+  return renderWalkForwardReport(rows, strategies, trainFrac, valFrac);
 }
