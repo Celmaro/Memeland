@@ -163,3 +163,30 @@ ring buffer, injectable socket). Reads `JSONRPC_WS_TAPES` (env base64/JSON map o
 - Gated by `JSONRPC_WS_TAPE_ENABLED` + `JSONRPC_WS_TAPES`; banner id `jsonrpc-ws-tape`.
 
 
+
+## 12. Strategic move — own-RPC/own-tape first (P0 slice)
+
+Implementing the "discovery/corroboration/verify on the bot's own RPC/tape;
+downgrade third-party indexers to best-effort" directive.
+
+- **WS-tape → discovery**: `robinhood-screening-agent.collectJsonRpcWsTapeCandidates`
+  drains the injected Sol `JsonRpcWsTape.recentEvents()` (pump.fun `programSubscribe`
+  mints) as a pre-graduation introducer — same signal PumpDev streams, key-free over
+  raw Sol WS. Guarded by `JSONRPC_WS_TAPE_ENABLED` + `DISCOVERY_INTRODUCERS`.
+  Injected via `injectJsonRpcWsTapes(...)` after startup (tapes are wired after the
+  agent construct). Merged into the candidate funnel under source `solana-rpc`.
+
+- **RPC verify cross-check**: `src/services/onchain/rpc-verify.ts` — a second,
+  independent on-chain confirmation via `eth_getTransactionReceipt` on the active
+  failover RPC (complements Blockscout`s `verify` role). Pure transport, fail-soft
+  (transport/parse error -> null -> "unconfirmed", never a false confirmation).
+  This is the primitive the VerifyCoordinator consumes.
+
+## 13. P0 — time-current trader persistence
+
+`trader-persistence.ts` observations now carry `fetchedAt` (stamped by the FOMO
+leaderboard collector with `provider: 'fomo'` + `rank`). `persistentTraders()`
+applies a per-window freshness budget (24h~6h, 7d~1d, 30d~3d) so a stale window
+decays out of "current" presence: a trader historically in 24h but not on the
+current board no longer counts as persistent — fixing the accumulate-forever bug.
+`lastSeenAt` exposed on PersistentTrader.

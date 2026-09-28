@@ -28,6 +28,7 @@ import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/age
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
+import { JsonRpcWsTape } from '../../adapters/jsonrpc-ws-tape.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
@@ -138,6 +139,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   /** P0.1 FOMO API candidate-emitter feed (token boards, trader intel). Empty until injected. */
   private fomo: FomoTokenBoardProvider | null;
   private fomoClient: FomoApiClient | null;
+  /**
+   * Strategic move — own-tape discovery: Sol JsonRpcWsTape(s) whose pump.fun
+   * `programSubscribe` mint events are drained as a pre-graduation introducer
+   * (footprint over raw Sol WS, same signal PumpDev streams, no key/credits).
+   * Injected after startup (tapes are wired after the agent is constructed).
+   */
+  private jsonRpcWsTapes: JsonRpcWsTape[];
   /** P1.5 DeFiLlama regime feed (regime CONTEXT, not a token-score voter). Empty until injected. */
   private defillama: DeFiLlamaRegimeFeed | null;
   /** P1.4 Arkham entity enricher (entity/deployer/label resolution on finalists). Empty until injected. */
@@ -181,6 +189,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
+      jsonRpcWsTapes?: JsonRpcWsTape[];
     } = {}
   ) {
     this.gmgn = new GMGNAdapter();
@@ -208,6 +217,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.fomoClient = this.fomo
       ? new FomoApiClient({ apiKey: process.env.FOMO_API_KEY ?? '' })
       : null;
+    this.jsonRpcWsTapes = opts.jsonRpcWsTapes ?? [];
     this.defillama = opts.defillama ?? null;
     this.arkham = opts.arkham ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
@@ -360,6 +370,53 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.solanaRpc, 'solana-rpc', 'SOLANA_RPC_FEED_ENABLED', chain);
   }
 
+  /**
+   * Strategic move — own-tape discovery injection. The JsonRpcWsTape(s) are
+   * wired AFTER the agent is constructed (index.ts), so this is how those Sol
+   * WS tape housings reach the screening pass.
+   */
+  public injectJsonRpcWsTapes(tapes: JsonRpcWsTape[]): void {
+    this.jsonRpcWsTapes = tapes;
+  }
+
+  /**
+   * Drain the injected Sol WS tapes' `recentEvents()` as a pre-graduation
+   * pump.fun introducer (mint pubkeys from `programSubscribe`). Guarded by
+   * JSONRPC_WS_TAPE_ENABLED=true + DISCOVERY_INTRODUCERS allowlist. Fail-open:
+   * empty. Duplicate mints within a drain are collapsed (same keyless feed
+   * surface as pumpdev/solana-rpc, so the by-address merge dedupes too).
+   */
+  public async collectJsonRpcWsTapeCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    if (chain !== 'sol') return [];
+    if (process.env.JSONRPC_WS_TAPE_ENABLED !== 'true') return [];
+    if (!isIntroducerEnabled('solana-rpc', process.env.DISCOVERY_INTRODUCERS)) return [];
+    if (this.jsonRpcWsTapes.length === 0) return [];
+    try {
+      const seen = new Set<string>();
+      const out: GMGNRawToken[] = [];
+      for (const tape of this.jsonRpcWsTapes) {
+        for (const evt of tape.recentEvents(100)) {
+          if (evt.chain !== 'sol') continue;
+          const mint = evt.id;
+          if (!mint || seen.has(mint)) continue;
+          seen.add(mint);
+          out.push(
+            normalizeDexToken(
+              chain,
+              { address: mint, chainId: 0, symbol: '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0 },
+              'solana-rpc',
+            ),
+          );
+        }
+      }
+      if (out.length > 0) console.log(`[MEME AGENT] WS-tape discovery: ${out.length} pump.fun mints from own Sol WS tapes.`);
+      return out;
+    } catch (err: any) {
+      console.warn(`[MEME AGENT] WS-tape candidates failed (skipped): ${err.message}`);
+      return [];
+    }
+  }
+
   /** SolanaTracker Sol ENRICHER (price/overview/stats via free Data API).
    *  Guarded by SOLANATRACKER_FEED_ENABLED=true + SOLANATRACKER_API_KEY; Sol-only,
    *  so it yields nothing on non-Sol chains (filtered inside the feed). */
@@ -400,7 +457,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       await Promise.all(
         windows.map(async (w) => {
           const rows = await this.fomoClient!.leaderboard(w, fomoChain, 50);
-          for (const r of rows) {
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i]!;
             globalTraderPersistence.ingest({
               handle: r.handle,
               window: w,
@@ -409,6 +467,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               solWallet: r.solWallet,
               evmWallet: r.evmWallet,
               chain: r.chain,
+              provider: 'fomo',
+              rank: i + 1,
+              // P0 time-current: stamp the board fetch so stale windows decay.
+              fetchedAt: Date.now(),
             });
             globalWalletGraph.linkHandleWallets(r.solWallet, r.evmWallet);
           }
@@ -796,6 +858,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const routescanCandidates = await this.collectRoutescanCandidates(chain);
                   const cmcDexCandidates = await this.collectCmcDexCandidates(chain);
                   const solanaRpcCandidates = await this.collectSolanaRpcCandidates(chain);
+                  const wsTapeCandidates = await this.collectJsonRpcWsTapeCandidates(chain);
                   const solanaTrackerCandidates = await this.collectSolanaTrackerCandidates(chain);
                   const fomoCandidates = await this.collectFomoCandidates(chain);
                   await this.collectFomoTraderIntel(chain);
@@ -811,7 +874,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // addresses a keyless feed already found (smartDegen/CTO/KOL
                   // fields that detectMemeSignal needs), and GMGN-only
                   // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...solanaRpcCandidates, ...solanaTrackerCandidates, ...fomoCandidates]) {
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...solanaRpcCandidates, ...wsTapeCandidates, ...solanaTrackerCandidates, ...fomoCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN

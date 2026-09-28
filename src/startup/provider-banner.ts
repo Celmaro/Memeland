@@ -65,6 +65,8 @@ export const PROVIDER_FEEDS: FeedSpec[] = [
   { id: 'arkham', role: 'entity', gate: keyed('ARKHAM_API_KEY')(flag('ARKHAM_ENABLED')) },
   // On-chain verification + tape + decision layers.
   { id: 'blockscout', role: 'verify', gate: flag('BLOCKSCOUT_FEED_ENABLED') },
+  // Strategic move — independent on-chain verify over the RPC failover pool.
+  { id: 'rpc-verify', role: 'verify', gate: () => true },
   { id: 'rh-tape', role: 'tape', gate: flag('RH_TAPE_ENABLED') },
   { id: 'pumpdev', role: 'tape', chains: 'sol', gate: keyed('PUMPDEV_WS_URL')(flag('PUMPDEV_FEED_ENABLED')) },
   { id: 'jsonrpc-ws-tape', role: 'tape', gate: keyed('JSONRPC_WS_TAPES')(flag('JSONRPC_WS_TAPE_ENABLED')) },

@@ -460,6 +460,9 @@ if (process.env.JSONRPC_WS_TAPE_ENABLED === 'true' && wsTapeRaw) {
   } catch {
     console.log('[JSONRPC-WS-TAPE] invalid JSONRPC_WS_TAPES — tape disabled (fail-soft).');
   }
+  // Strategic move — own-tape discovery: hand the Sol WS tapes to the screening
+  // agent so `programSubscribe` pump.fun mints feed the candidate funnel.
+  robinhoodScreeningAgent.injectJsonRpcWsTapes(jsonRpcWsTapes);
 }
 
 // Graceful Shutdown: stop the runtime schedulers, flush pending state writes to

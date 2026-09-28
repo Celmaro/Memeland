@@ -44,3 +44,39 @@ describe('TraderPersistence', () => {
     expect(s.persistent).toBe(0);
   });
 });
+
+describe('TraderPersistence — P0 time-current (fetchedAt + freshness budget)', () => {
+  const now = 1_000_000_000_000;
+
+  it('drops a trader whose 24h observation is stale (not current board)', () => {
+    const p = new TraderPersistence({ now: () => now });
+    p.ingest({ handle: 'dave', window: '24h', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 10 * 3600_000 }); // 10h old > 6h fresh
+    p.ingest({ handle: 'dave', window: '7d', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 3600_000 });
+    p.ingest({ handle: 'dave', window: '30d', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 3600_000 });
+    expect(p.persistentTraders()).toHaveLength(0); // 24h stale → not strict
+    const [d] = p.persistentTraders(false);
+    expect(d.windowsPresent).not.toContain('24h');
+    expect(d.strictPersistent).toBe(false);
+  });
+
+  it('keeps a trader whose all-window observations are current', () => {
+    const p = new TraderPersistence({ now: () => now });
+    p.ingest({ handle: 'eve', window: '24h', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 60_000 });
+    p.ingest({ handle: 'eve', window: '7d', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 60_000 });
+    p.ingest({ handle: 'eve', window: '30d', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 60_000 });
+    const [e] = p.persistentTraders();
+    expect(e.handle).toBe('eve');
+    expect(e.strictPersistent).toBe(true);
+    expect(e.lastSeenAt).toBe(now - 60_000);
+  });
+
+  it('lets a fresh lower-volume row refresh presence (not locked to all-time-best)', () => {
+    const p = new TraderPersistence({ now: () => now });
+    p.ingest({ handle: 'frank', window: '24h', pnlPct: 1, volumeUsd: 1000, fetchedAt: now - 20 * 3600_000 }); // rich but stale
+    p.ingest({ handle: 'frank', window: '24h', pnlPct: 1, volumeUsd: 50, fetchedAt: now - 60_000 }); // fresh, lower volume
+    p.ingest({ handle: 'frank', window: '7d', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 60_000 });
+    p.ingest({ handle: 'frank', window: '30d', pnlPct: 1, volumeUsd: 100, fetchedAt: now - 60_000 });
+    const [f] = p.persistentTraders();
+    expect(f.totalVolumeUsd).toBe(250); // 50 + 100 + 100 — fresh row wins on time
+  });
+});

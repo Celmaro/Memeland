@@ -24,21 +24,29 @@ export interface TraderWindowRow {
   solWallet?: string;
   evmWallet?: string;
   chain?: string;
+  /** Leaderboard provider (gmgn/fomo/pumpdev). */
+  provider?: string;
+  /** Rank within the leaderboard. */
+  rank?: number;
+  /** Epoch ms when this board observation was fetched (P0 time-correctness). */
+  fetchedAt?: number;
 }
 
 export interface PersistentTrader {
   handle: string;
   chain: string;
-  /** The windows the trader appeared in (for true persistence this is all 3). */
+  /** The FRESH windows the trader currently appears in (for true persistence, all 3). */
   windowsPresent: PnlWindow[];
   /** Latest on-chain wallet ids resolved for the trader. */
   wallets: { sol?: string; evm?: string };
-  /** Mean PnL % across the present windows. */
+  /** Mean PnL % across the present (fresh) windows. */
   avgPnlPct: number;
-  /** Total volume USD across present windows. */
+  /** Total volume USD across present (fresh) windows. */
   totalVolumeUsd: number;
-  /** STRICT persistence = present in 24h AND 7d AND 30d. */
+  /** STRICT persistence = fresh in 24h AND 7d AND 30d (current board epoch). */
   strictPersistent: boolean;
+  /** Latest board-fetch timestamp across the trader's observations. */
+  lastSeenAt?: number;
   /** Lineage for ML/audit (Observation/Feature/Inference). */
   lineage: { observations: number; feature: string; inference: string };
 }
@@ -46,19 +54,48 @@ export interface PersistentTrader {
 const STRICT: PnlWindow[] = ['24h', '7d', '30d'];
 const WINDOW_RANK: Record<PnlWindow, number> = { '24h': 0, '7d': 1, '30d': 2, all: 3 };
 
+/**
+ * P0 freshness budget: how old a board observation may be for that window to
+ * count as "currently present". A 24h row fetched last week must NOT count as
+ * current 24h presence — that is exactly the stale-accumulation bug the review
+ * flagged. Tuned so a board re-fetched on the normal cadence stays current.
+ */
+const DEFAULT_FRESHNESS_MS: Record<PnlWindow, number> = {
+  '24h': 6 * 3600_000, // 6h
+  '7d': 24 * 3600_000, // 1d
+  '30d': 3 * 24 * 3600_000, // 3d
+  all: 6 * 3600_000,
+};
+
+export interface TraderPersistenceOptions {
+  /** Per-window freshness overrides (ms). */
+  freshnessMs?: Partial<Record<PnlWindow, number>>;
+  now?: () => number;
+}
+
 export class TraderPersistence {
   /** handle → window → weighted row (keeps the newest/richest per window). */
   private rows = new Map<string, Map<string, TraderWindowRow>>();
   private observations = 0;
+  private readonly freshnessMs: Record<PnlWindow, number>;
+  private readonly now: () => number;
+
+  constructor(opts: TraderPersistenceOptions = {}) {
+    this.freshnessMs = { ...DEFAULT_FRESHNESS_MS, ...(opts.freshnessMs ?? {}) };
+    this.now = opts.now ?? (() => Date.now());
+  }
 
   /** Ingest one leaderboard observation for a window. */
   public ingest(row: TraderWindowRow): void {
+    const fetchedAt = row.fetchedAt ?? this.now();
     const byWindow = this.rows.get(row.handle) ?? new Map<string, TraderWindowRow>();
     const key = row.window;
     const prev = byWindow.get(key);
     // Keep the observation with the larger volume (richer) or the newer one.
-    if (!prev || row.volumeUsd > prev.volumeUsd) {
-      byWindow.set(key, row);
+    // Staleness is driven by fetchedAt + the freshness budget, so a rich but
+    // old row decays out of "current" presence automatically.
+    if (!prev || row.volumeUsd > prev.volumeUsd || fetchedAt > (prev.fetchedAt ?? 0)) {
+      byWindow.set(key, { ...row, fetchedAt: row.fetchedAt ?? fetchedAt });
       this.observations += 1;
     }
     this.rows.set(row.handle, byWindow);
@@ -69,16 +106,36 @@ export class TraderPersistence {
     return [...this.rows.keys()];
   }
 
+  /** True when a window observation is recent enough to count as current. */
+  private isFresh(window: PnlWindow, fetchedAt: number | undefined, nowMs: number): boolean {
+    if (fetchedAt === undefined) return true; // no timestamp → assume current (back-compat)
+    return nowMs - fetchedAt <= this.freshnessMs[window];
+  }
+
   /**
-   * Persistent traders. With `strictOnly` (default true) only traders present
-   * in ALL of 24h/7d/30d are returned — the durable leaderboard signal.
+   * Persistent traders. With `strictOnly` (default true) only traders FRESHLY
+   * present in ALL of 24h/7d/30d at `nowMs` are returned — the durable,
+   * time-current leaderboard signal. `nowMs` defaults to the current clock.
    */
-  public persistentTraders(strictOnly = true): PersistentTrader[] {
+  public persistentTraders(strictOnly = true, nowMs?: number): PersistentTrader[] {
+    const now = nowMs ?? this.now();
     const out: PersistentTrader[] = [];
     for (const [handle, byWindow] of this.rows) {
-      const present = [...byWindow.values()];
-      const windowsPresent = [...present.map((r) => r.window)].sort((a, b) => WINDOW_RANK[a] - WINDOW_RANK[b]);
-      const strict = STRICT.every((w) => byWindow.has(w));
+      const present: TraderWindowRow[] = [];
+      const windowsPresent: PnlWindow[] = [];
+      let lastSeenAt = 0;
+      for (const w of STRICT) {
+        const r = byWindow.get(w);
+        if (!r) continue;
+        if ((r.fetchedAt ?? 0) > lastSeenAt) lastSeenAt = r.fetchedAt ?? 0;
+        if (!this.isFresh(w, r.fetchedAt, now)) continue; // stale → not current
+        present.push(r);
+        windowsPresent.push(w);
+      }
+      const strict = STRICT.every((w) => {
+        const r = byWindow.get(w);
+        return !!r && this.isFresh(w, r.fetchedAt, now);
+      });
       if (strictOnly && !strict) continue;
       const chain = present[0]?.chain ?? 'solana';
       const totalVolume = present.reduce((s, r) => s + r.volumeUsd, 0);
@@ -93,6 +150,7 @@ export class TraderPersistence {
         avgPnlPct: avgPnl,
         totalVolumeUsd: totalVolume,
         strictPersistent: strict,
+        lastSeenAt: lastSeenAt > 0 ? lastSeenAt : undefined,
         lineage: {
           observations: present.length,
           feature: `persistent_window_intersection_${[...windowsPresent].sort().join('+')}`,
