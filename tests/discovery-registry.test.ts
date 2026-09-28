@@ -49,4 +49,34 @@ describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
     reg.markDead('base:0xabc');
     expect(reg.get('base:0xabc')!.lifecycle).toBe('dead');
   });
+
+  it('tracks coverage, dup-rate, spend and false-positive attribution per source', () => {
+    const reg = new CandidateRegistry();
+    // helius first-sees three tokens; dexpaprika adds one new token and
+    // re-observes the same address (that repeat is the dup-rate signal).
+    for (const addr of ['0xa', '0xb', '0xc']) {
+      reg.observe({ chain: 'sol', tokenAddress: addr, source: 'helius', at: 100, costCredits: 10 });
+    }
+    reg.observe({ chain: 'sol', tokenAddress: '0xa', source: 'dexpaprika', at: 500, costCredits: 1 });
+    reg.observe({ chain: 'sol', tokenAddress: '0xa', source: 'dexpaprika', at: 600, costCredits: 1 }); // repeat
+    reg.observe({ chain: 'sol', tokenAddress: '0xd', source: 'dexpaprika', at: 700, costCredits: 1 }); // new
+
+    const s = reg.stats();
+    expect(s.totalCandidates).toBe(4);
+    // helius coverage 3; dexpaprika coverage 2 (0xa,0xd) across 3 sightings → dup 1/3.
+    expect(s.coverage.helius).toBe(3);
+    expect(s.coverage.dexpaprika).toBe(2);
+    expect(s.dupRate.dexpaprika).toBeCloseTo(1 / 3);
+    expect(s.dupRate.helius).toBe(0);
+    expect(s.spend.helius).toBe(30);
+    expect(s.spend.dexpaprika).toBe(3);
+    // first-seen shares: helius first for 0xa/b/c; dexpaprika first only for 0xd.
+    expect(s.firstSeenBySource.helius).toBe(3);
+    expect(s.firstSeenBySource.dexpaprika).toBe(1);
+
+    // False positives attribute to the source that first listed the token.
+    reg.markDead('sol:0xa');
+    reg.markDead('sol:0xb');
+    expect(reg.stats().falsePositive.helius).toBe(2);
+  });
 });

@@ -8,7 +8,7 @@
  * by measured latency + coverage, never by docs.
  */
 
-export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'cmc' | 'birdeye';
+export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'cmc' | 'birdeye' | 'helius' | 'pons';
 
 export type CandidateLifecycle = 'fresh' | 'enriching' | 'revalidated' | 'eligible' | 'dead';
 
@@ -31,10 +31,35 @@ export interface DiscoveryObservation {
   tokenAddress: string;
   source: DiscoverySource;
   at: number;
+  /** Optional discovery credit/call cost for this sighting (for spend metrics). */
+  costCredits?: number;
+}
+
+/** Registry-level aggregate metrics (coverage / dup-rate / spend / first-seen). */
+export interface DiscoveryStats {
+  totalCandidates: number;
+  /** Candidates where each source was the FIRST sighting (empirical primary). */
+  firstSeenBySource: Partial<Record<DiscoverySource, number>>;
+  /** Distinct candidates each source surfaced at least once (coverage). */
+  coverage: Partial<Record<DiscoverySource, number>>;
+  /** Per-source duplicate rate 0..1 : share of sightings that were repeats. */
+  dupRate: Partial<Record<DiscoverySource, number>>;
+  /** Cumulative discovery credits/calls spent per source (costCredits). */
+  spend: Partial<Record<DiscoverySource, number>>;
+  /** Candidates later marked dead whose firstSource was this source. */
+  falsePositive: Partial<Record<DiscoverySource, number>>;
 }
 
 export class CandidateRegistry {
   private candidates = new Map<string, CandidateRecord>();
+  /** Distinct candidates each source surfaced at least once (coverage). */
+  private coverage = new Map<DiscoverySource, number>();
+  /** Total sightings per source (repeats + firsts, for dup-rate). */
+  private sightings = new Map<DiscoverySource, number>();
+  /** Cumulative discovery credits/calls spent per source. */
+  private spendBySource = new Map<DiscoverySource, number>();
+  /** Candidates marked dead whose firstSource was this source. */
+  private fpBySource = new Map<DiscoverySource, number>();
 
   private id(chain: string, tokenAddress: string): string {
     return `${chain}:${tokenAddress.toLowerCase()}`;
@@ -53,6 +78,14 @@ export class CandidateRegistry {
     const prev = c.firstSeen[key];
     if (prev === undefined || obs.at < prev) {
       c.firstSeen[key] = obs.at;
+    }
+    if (prev === undefined) {
+      // First this source has seen this candidate → counts toward coverage.
+      this.coverage.set(key, (this.coverage.get(key) ?? 0) + 1);
+    }
+    this.sightings.set(key, (this.sightings.get(key) ?? 0) + 1);
+    if (obs.costCredits && obs.costCredits > 0) {
+      this.spendBySource.set(key, (this.spendBySource.get(key) ?? 0) + obs.costCredits);
     }
     // Earliest sighting across all sources → firstSource + latency baseline.
     let earliest = Infinity;
@@ -78,7 +111,39 @@ export class CandidateRegistry {
 
   public markDead(id: string): void {
     const c = this.candidates.get(id);
-    if (c) c.lifecycle = 'dead';
+    if (!c || c.lifecycle === 'dead') return;
+    c.lifecycle = 'dead';
+    // False positive is attributed to whatever listed it first — the empirical
+    // signal for demoting an introducer whose fresh candidates die on arrival.
+    if (c.firstSource) {
+      this.fpBySource.set(c.firstSource, (this.fpBySource.get(c.firstSource) ?? 0) + 1);
+    }
+  }
+
+  /** Registry-level metrics for the [DISCOVERY STATS] line & introducer tuning. */
+  public stats(): DiscoveryStats {
+    const firstSeenBySource: Partial<Record<DiscoverySource, number>> = {};
+    const totalCandidates = this.candidates.size;
+    for (const c of this.candidates.values()) {
+      if (c.firstSource) firstSeenBySource[c.firstSource] = (firstSeenBySource[c.firstSource] ?? 0) + 1;
+    }
+    const sources = new Set<DiscoverySource>([
+      ...this.coverage.keys(), ...this.sightings.keys(), ...this.spendBySource.keys(),
+      ...this.fpBySource.keys(), ...Object.keys(firstSeenBySource) as DiscoverySource[],
+    ]);
+    const coverage: Partial<Record<DiscoverySource, number>> = {};
+    const dupRate: Partial<Record<DiscoverySource, number>> = {};
+    const spend: Partial<Record<DiscoverySource, number>> = {};
+    const falsePositive: Partial<Record<DiscoverySource, number>> = {};
+    for (const src of sources) {
+      const cov = this.coverage.get(src) ?? 0;
+      const sig = this.sightings.get(src) ?? 0;
+      coverage[src] = cov;
+      dupRate[src] = sig > 0 ? (sig - cov) / sig : 0;
+      spend[src] = this.spendBySource.get(src) ?? 0;
+      falsePositive[src] = this.fpBySource.get(src) ?? 0;
+    }
+    return { totalCandidates, firstSeenBySource, coverage, dupRate, spend, falsePositive };
   }
 
   /** Empirical primary discovery source across all candidates (first-seen counts). */

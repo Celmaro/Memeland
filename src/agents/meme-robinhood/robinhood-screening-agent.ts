@@ -682,15 +682,16 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           globalCandidateRegistry.observe({
             chain,
             tokenAddress: t.address,
-            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr',
+            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'helius' | 'pons',
             at: Date.now(),
           });
         }
         // P3.1 empirical primary discovery source — the "measure, don't guess"
         // decision input (after weeks of data, this selects the discovery lead).
         const primary = globalCandidateRegistry.primaryDiscoverySource();
+        const dstats = globalCandidateRegistry.stats();
         if (primary.primary && primary.bySource[primary.primary]! % 25 === 0) {
-          console.log(`[DISCOVERY STATS] primary=${primary.primary} bySource=${JSON.stringify(primary.bySource)} candidates=${globalCandidateRegistry.size()}`);
+          console.log(`[DISCOVERY STATS] primary=${primary.primary} bySource=${JSON.stringify(primary.bySource)} cov=${JSON.stringify(dstats.coverage)} dup=${JSON.stringify(dstats.dupRate)} fp=${JSON.stringify(dstats.falsePositive)} spend=${JSON.stringify(dstats.spend)} candidates=${globalCandidateRegistry.size()}`);
         }
         // Fresh-pair enrichment (batched, gap fix): collect every freshLane
         // candidate that carries zero market data, batch-fetch real
