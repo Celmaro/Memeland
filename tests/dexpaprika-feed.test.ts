@@ -89,6 +89,17 @@ describe('DexpaprikaFeed (PR 7 — keyless multi-chain discovery, 2026-06-30 sea
     const feed = new DexpaprikaFeed({ fetch: f });
     await expect(feed.discover()).rejects.toThrow(/HTTP/);
   });
+
+  it('sends the api key as the entire Authorization header (402 paywall fix)', async () => {
+    const headers: Record<string, string>[] = [];
+    const f = vi.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+      headers.push(init?.headers ?? {});
+      return { ok: true, json: async () => searchBody() };
+    }) as unknown as (url: string, init?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+    const feed = new DexpaprikaFeed({ fetch: f, apiKey: 'api_KrpUt1Ct2QFtQFE_Zqbhbyx4346yN5TQ9a' });
+    await feed.discover();
+    expect(headers[0]!['Authorization']).toBe('api_KrpUt1Ct2QFtQFE_Zqbhbyx4346yN5TQ9a');
+  });
 });
 
 describe('DexpaprikaFeed drain detection (SSE reserve-streaming Adapt)', () => {

@@ -28,8 +28,12 @@ import {
 import { TtlCache } from '../cache/ttl-cache.js';
 
 export const DEXPAPRIKA_DEFAULT_BASE = 'https://api.dexpaprika.com';
+export const DEXPAPRIKA_STREAM_BASE = 'https://streaming.dexpaprika.com';
 
-type FetchLike = (url: string) => Promise<Pick<Response, 'ok' | 'json' | 'status'>>;
+type FetchLike = (
+  url: string,
+  init?: { headers?: Record<string, string> }
+) => Promise<Pick<Response, 'ok' | 'json' | 'status'>>;
 
 /** New unified-search pool row (2026-06-30 API). */
 interface RawPoolRow {
@@ -75,6 +79,10 @@ export interface DexpaprikaFeedOptions {
   /** TTL for the in-memory discovery cache in ms. Default 60s. */
   ttlMs?: number;
   supportedChains?: string[];
+  /** DexPaprika API key — sent as the entire `Authorization` header value
+   *  (`Authorization: api_...`). A key lifts the per-minute/monthly limits and
+   *  unlocks the streaming feeds. Without it the free tier is paywalled (402). */
+  apiKey?: string;
 }
 
 export interface DrainInput {
@@ -101,6 +109,7 @@ export class DexpaprikaFeed implements MarketDataProvider {
   private readonly ttlMs: number;
   private readonly supportedChains: Set<string>;
   private readonly cache: TtlCache<MarketToken[]>;
+  private readonly apiKey?: string;
 
   constructor(opts: DexpaprikaFeedOptions = {}) {
     const f = opts.fetch ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
@@ -108,9 +117,15 @@ export class DexpaprikaFeed implements MarketDataProvider {
     this.baseUrl = opts.baseUrl ?? DEXPAPRIKA_DEFAULT_BASE;
     this.ttlMs = opts.ttlMs ?? 60_000;
     this.cache = new TtlCache<MarketToken[]>({ ttlMs: this.ttlMs });
+    this.apiKey = opts.apiKey ?? (process.env.DEXPAPRIKA_API_KEY?.trim() || undefined);
     this.supportedChains = new Set(
       (opts.supportedChains ?? ['robinhood', 'bsc', 'base', 'solana', 'ethereum']).map((c) => c.toLowerCase())
     );
+  }
+
+  /** DexPaprika auth: the key is the entire `Authorization` header value. */
+  private auth(): { headers?: Record<string, string> } {
+    return this.apiKey ? { headers: { Authorization: this.apiKey } } : {};
   }
 
   async discover(options: MarketDiscoveryOptions = {}): Promise<MarketToken[]> {
@@ -158,7 +173,7 @@ export class DexpaprikaFeed implements MarketDataProvider {
       `${this.baseUrl}/pools/search` +
       `?order_by=created_at&sort=desc&limit=100` +
       (chains ? `&networks=${encodeURIComponent(chains)}` : '');
-    const res = await this.fetch(url);
+    const res = await this.fetch(url, this.auth());
     if (!res.ok) throw new Error(`dexpaprika search failed (HTTP ${res.status})`);
     const body = (await res.json()) as { results?: RawPoolRow[] };
     const rows = Array.isArray(body?.results) ? body.results : [];
@@ -217,7 +232,7 @@ export class DexpaprikaFeed implements MarketDataProvider {
       const network = this.chainToNetwork(chain);
       if (!network) return null;
       const url = `${this.baseUrl}/networks/${encodeURIComponent(network)}/tokens/${encodeURIComponent(address)}`;
-      const res = await this.fetch(url);
+      const res = await this.fetch(url, this.auth());
       if (!res.ok) return null;
       const body = (await res.json()) as RawTokenDetail;
       const s = body?.summary;

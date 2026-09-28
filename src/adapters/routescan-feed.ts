@@ -31,6 +31,7 @@ export type FetchLike = (url: string, init?: { headers?: Record<string, string> 
 
 /** ERC-20 list row (routescan /v2/.../erc20). */
 interface RawErc20Row {
+  chainId?: string;
   address?: string;
   name?: string;
   symbol?: string;
@@ -90,11 +91,15 @@ export class RoutescanFeed implements MarketDataProvider {
   }
 
   /**
-   * Fetch newest ERC-20 tokens, sorted by creation time descending. When the
-   * caller restricts to concrete chainIds, query each chain's endpoint so rows
-   * carry a real chainId; otherwise use the cross-chain `/all` aggregate
-   * (chainId=0 sentinel, attributed downstream by enrichment). One keyless call
-   * per chain; covers eth/bsc/base/robinhood.
+   * Fetch the newest ERC-20 tokens via the cross-chain `/all` aggregate, sorted
+   * by creation time descending. Each row carries a real `chainId`, so we
+   * attribute per-chain downstream and filter by the caller's requested chains.
+   *
+   * 400-fix (live probe 2026-09-29): querying per-chain endpoints 400s on any
+   * chain Routescan does NOT index (e.g. Robinhood 4663) — which killed the whole
+   * feed whenever a concrete chainId set included one. The `/all` aggregate
+   * works and returns per-row chainIds, so we ALWAYS use it and fail-soft on
+   * unsupported chains (they're simply absent). One keyless call, no 400s.
    */
   private async baseTokens(options: MarketDiscoveryOptions): Promise<MarketToken[]> {
     const wanted = (options.chainIds ?? []).filter((id) => id > 0);
@@ -102,19 +107,17 @@ export class RoutescanFeed implements MarketDataProvider {
     const cached = this.cache.get(key);
     if (cached) return cached;
 
-    const chains = wanted.length > 0 ? wanted : [];
+    const url = `${this.baseUrl}/v2/network/mainnet/evm/all/erc20?sort=createdAt,desc&limit=100`;
+    const res = await this.fetch(url, this.auth());
+    if (!res.ok) throw new Error(`routescan erc20 fetch failed (HTTP ${res.status})`);
+    const body = (await res.json()) as { items?: RawErc20Row[] };
+    const rows = Array.isArray(body?.items) ? body.items : [];
     const tokens: MarketToken[] = [];
-    for (const chainId of chains.length > 0 ? chains : [0]) {
-      const path = chainId > 0 ? String(chainId) : 'all';
-      const url = `${this.baseUrl}/v2/network/mainnet/evm/${path}/erc20?sort=createdAt,desc&limit=100`;
-      const res = await this.fetch(url, this.auth());
-      if (!res.ok) throw new Error(`routescan erc20 fetch failed (HTTP ${res.status})`);
-      const body = (await res.json()) as { items?: RawErc20Row[] };
-      const rows = Array.isArray(body?.items) ? body.items : [];
-      for (const row of rows) {
-        const t = this.normalizeRow(row, chainId > 0 ? chainId : undefined);
-        if (t) tokens.push(t);
-      }
+    for (const row of rows) {
+      const chainId = row.chainId ? Number(row.chainId) : undefined;
+      if (wanted.length > 0 && (chainId === undefined || !wanted.includes(chainId))) continue;
+      const t = this.normalizeRow(row, chainId);
+      if (t) tokens.push(t);
     }
     this.cache.set(key, tokens);
     return tokens;

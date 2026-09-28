@@ -54,7 +54,7 @@ export const PROVIDER_FEEDS: FeedSpec[] = [
   // Recall-only emitter.
   { id: 'fomo', role: 'emitter', chains: 'multi', gate: keyed('FOMO_API_KEY')(flag('FOMO_FEED_ENABLED')) },
   // Enrichers (recall/hydrate, never promote when scoped).
-  { id: 'dexpaprika', role: 'enricher', gate: flag('DEXPAPRIKA_FEED_ENABLED') },
+  { id: 'dexpaprika', role: 'enricher', gate: keyed('DEXPAPRIKA_API_KEY')(flag('DEXPAPRIKA_FEED_ENABLED')) },
   { id: 'gecko', role: 'enricher', gate: flag('GECKO_FEED_ENABLED') },
   { id: 'dexscreener', role: 'enricher', gate: flag('DEXSCREENER_FEED_ENABLED') },
   { id: 'routescan', role: 'enricher', gate: flag('ROUTESCAN_FEED_ENABLED') },
