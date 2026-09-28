@@ -24,6 +24,8 @@ import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
 import { HeliusDiscoveryFeed } from './adapters/helius-discovery-feed.js';
 import { FomoApiClient } from './adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from './adapters/fomo-emitter.js';
+import { DeFiLlamaRegimeFeed } from './adapters/defillama-feed.js';
+import { ArkhamEnrich } from './adapters/arkham-enrich.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
@@ -211,6 +213,16 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     // ProviderGovernor so the 250K cr/mo and 20 rpm free tiers are respected.
     ...(process.env.FOMO_FEED_ENABLED === 'true' && process.env.FOMO_API_KEY
       ? { fomo: new FomoTokenBoardProvider(new FomoApiClient({ apiKey: process.env.FOMO_API_KEY })) }
+      : {}),
+    // P1.5 DeFiLlama regime feed (free, no key, hourly-cached). Inert unless
+    // DEFILLAMA_FEED_ENABLED=true — regime CONTEXT, never a token-score voter.
+    ...(process.env.DEFILLAMA_FEED_ENABLED === 'true'
+      ? { defillama: new DeFiLlamaRegimeFeed() }
+      : {}),
+    // P1.4 Arkham entity enricher (free trial 100K cr, ~100 cr/day cap via the
+    // shared governor). Inert unless ARKHAM_ENABLED=true AND ARKHAM_API_KEY.
+    ...(process.env.ARKHAM_ENABLED === 'true' && process.env.ARKHAM_API_KEY
+      ? { arkham: new ArkhamEnrich({ apiKey: process.env.ARKHAM_API_KEY }) }
       : {}),
   },
 );

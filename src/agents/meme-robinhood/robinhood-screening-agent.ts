@@ -18,6 +18,8 @@ import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from '../../adapters/fomo-emitter.js';
 import { globalTraderPersistence } from '../../services/onchain/trader-persistence.js';
 import { globalWalletGraph } from '../../services/onchain/wallet-graph.js';
+import { DeFiLlamaRegimeFeed, type RegimeSnapshot } from '../../adapters/defillama-feed.js';
+import { ArkhamEnrich, type ArkhamEntity } from '../../adapters/arkham-enrich.js';
 import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
 import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
@@ -133,6 +135,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   /** P0.1 FOMO API candidate-emitter feed (token boards, trader intel). Empty until injected. */
   private fomo: FomoTokenBoardProvider | null;
   private fomoClient: FomoApiClient | null;
+  /** P1.5 DeFiLlama regime feed (regime CONTEXT, not a token-score voter). Empty until injected. */
+  private defillama: DeFiLlamaRegimeFeed | null;
+  /** P1.4 Arkham entity enricher (entity/deployer/label resolution on finalists). Empty until injected. */
+  private arkham: ArkhamEnrich | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -166,6 +172,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       cmcDex?: MarketDataProvider | null;
       helius?: MarketDataProvider | null;
       fomo?: FomoTokenBoardProvider | null;
+      defillama?: DeFiLlamaRegimeFeed | null;
+      arkham?: ArkhamEnrich | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
@@ -195,6 +203,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.fomoClient = this.fomo
       ? new FomoApiClient({ apiKey: process.env.FOMO_API_KEY ?? '' })
       : null;
+    this.defillama = opts.defillama ?? null;
+    this.arkham = opts.arkham ?? null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
@@ -397,6 +407,45 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       }
     } catch (err: any) {
       console.warn(`[MEME AGENT] FOMO trader intel failed (skipped): ${err.message}`);
+    }
+  }
+
+  /**
+   * P1.5 DeFiLlama REGIME CONTEXT (explicitly NOT a token-score voter). Read
+   * once per chain per pass (hourly-cached upstream). Fail-open: neutral regime.
+   * Used only as context on the [REGIME] line — it never gates or re-scores.
+   */
+  public async collectRegimeContext(chain: Chain = 'robinhood'): Promise<RegimeSnapshot | null> {
+    if (process.env.DEFILLAMA_FEED_ENABLED !== 'true') return null;
+    if (!this.defillama) return null;
+    try {
+      const chainName = chain === 'sol' ? 'solana' : chain === 'eth' ? 'ethereum' : chain === 'bsc' ? 'bsc' : chain === 'base' ? 'base' : 'robinhood';
+      const regime = await this.defillama.regime({ chainName });
+      if (regime.healthy) {
+        console.log(
+          `[REGIME] ${chain} TVL=$${(regime.tvlUsd / 1e6).toFixed(1)}M 24hΔ=${regime.change24hPct.toFixed(2)}% top=${regime.topChains.slice(0, 3).map((c) => c.name).join(',')}`,
+        );
+      }
+      return regime;
+    } catch (err: any) {
+      console.warn(`[MEME AGENT] DeFiLlama regime failed (skipped): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * P1.4 Arkham ENTITY enrichment for a finalist (entity/deployer/label). Gated
+   * by ARKHAM_ENABLED + injected client. Fail-open: returns null on any error;
+   * NEVER gates — the entity is informational/overlay (second-opinion #10).
+   */
+  public async enrichFinalistEntity(t: GMGNRawToken): Promise<ArkhamEntity | null> {
+    if (process.env.ARKHAM_ENABLED !== 'true') return null;
+    if (!this.arkham) return null;
+    try {
+      return await this.arkham.entity(t.address);
+    } catch (err: any) {
+      console.warn(`[MEME AGENT] Arkham entity failed (skipped): ${err.message}`);
+      return null;
     }
   }
 
@@ -695,6 +744,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         } catch (err: any) {
           console.warn(`[MEME AGENT] Failed to fetch ${nativeSymbol} price: ${err.message}`);
         }
+
+        // 0b. Regime CONTEXT (DeFiLlama, hourly-cached, fail-open). Not a voter —
+        // just context on the [REGIME] line for the operator/ML layer.
+        await this.collectRegimeContext(chain);
 
         // 1. Priority flip (keyless-first): DEXPaprika/Gecko/DexScreener feed the
         // prefilter FIRST — they are keyless, budget-free, and cover all 5 chains.
@@ -1079,11 +1132,18 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             console.warn(`[SNAPSHOT] build failed (signal still fires): ${snapErr.message}`);
           }
 
+          // P1.4 Arkham ENTITY enrichment for this FINALIST (overlay, fail-open,
+          // never a gate). Resolves the token address to a labeled entity and logs
+          // it for the operator — entity/deployer/label is the valuable signal.
+          const entity = await this.enrichFinalistEntity(t);
+          if (entity) {
+            console.log(`[ARKHAM] ${t.symbol} → ${entity.displayName ?? entity.ownerType}${entity.tags && entity.tags.length ? ` [${entity.tags.slice(0, 3).join(',')}]` : ''}`);
+          }
+
           // Arch-3 voter swarm: assemble opinions for this FINALIST and attach them to the
           // payload — the consensus gate in index.ts re-derives confidence from the weighted
           // average, so the swarm (not the agent) has the final word.
-          if (this.voterSwarm) {
-            // Kernel A reputation read-path: active only when a deployer address is
+          if (this.voterSwarm) {            // Kernel A reputation read-path: active only when a deployer address is
             // available; otherwise the plain fail-closed voters run unchanged.
             const repCtx = reputationContextFromToken(globalReputationMemory, t);
             // Security vote: carry elevated-but-passing indicators so the 0.25-weight
