@@ -133,6 +133,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private cmcDex: MarketDataProvider | null;
   /** P4.3 Helius Solana INTRODUCER feed (bounded, cursor-persisted SPL mint walk). Empty until injected. */
   private helius: MarketDataProvider | null;
+  /** SolanaTracker Sol ENRICHER feed (price/overview/stats/risk via free Data API). Empty until injected. */
+  private solanatracker: MarketDataProvider | null;
   /** P0.1 FOMO API candidate-emitter feed (token boards, trader intel). Empty until injected. */
   private fomo: FomoTokenBoardProvider | null;
   private fomoClient: FomoApiClient | null;
@@ -172,6 +174,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       solTimeOnCurveLoader?: TimeOnCurveAssessOptions['loader'] | null;
       cmcDex?: MarketDataProvider | null;
       helius?: MarketDataProvider | null;
+      solanatracker?: MarketDataProvider | null;
       fomo?: FomoTokenBoardProvider | null;
       defillama?: DeFiLlamaRegimeFeed | null;
       arkham?: ArkhamEnrich | null;
@@ -200,6 +203,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.solTimeOnCurveLoader = opts.solTimeOnCurveLoader ?? null;
     this.cmcDex = opts.cmcDex ?? null;
     this.helius = opts.helius ?? null;
+    this.solanatracker = opts.solanatracker ?? null;
     this.fomo = opts.fomo ?? null;
     this.fomoClient = this.fomo
       ? new FomoApiClient({ apiKey: process.env.FOMO_API_KEY ?? '' })
@@ -355,6 +359,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     return this.collectProviderCandidates(this.helius, 'helius', 'HELIUS_FEED_ENABLED', chain);
   }
 
+  /** SolanaTracker Sol ENRICHER (price/overview/stats via free Data API).
+   *  Guarded by SOLANATRACKER_FEED_ENABLED=true + SOLANATRACKER_API_KEY; Sol-only,
+   *  so it yields nothing on non-Sol chains (filtered inside the feed). */
+  public async collectSolanaTrackerCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    return this.collectProviderCandidates(this.solanatracker, 'solanatracker', 'SOLANATRACKER_FEED_ENABLED', chain);
+  }
+
   /**
    * P0.1 FOMO API candidate-emitter feed (token boards). Guarded by
    * FOMO_FEED_ENABLED=true && the injected fomo provider.
@@ -462,7 +473,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'helius' | 'fomo',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'helius' | 'fomo' | 'solanatracker',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
@@ -784,6 +795,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const routescanCandidates = await this.collectRoutescanCandidates(chain);
                   const cmcDexCandidates = await this.collectCmcDexCandidates(chain);
                   const heliusCandidates = await this.collectHeliusCandidates(chain);
+                  const solanaTrackerCandidates = await this.collectSolanaTrackerCandidates(chain);
                   const fomoCandidates = await this.collectFomoCandidates(chain);
                   await this.collectFomoTraderIntel(chain);
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
@@ -798,7 +810,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // addresses a keyless feed already found (smartDegen/CTO/KOL
                   // fields that detectMemeSignal needs), and GMGN-only
                   // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...heliusCandidates, ...fomoCandidates]) {
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...heliusCandidates, ...solanaTrackerCandidates, ...fomoCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN
@@ -831,7 +843,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           globalCandidateRegistry.observe({
             chain,
             tokenAddress: t.address,
-            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'helius' | 'pons',
+            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'helius' | 'pons' | 'solanatracker' | 'pumpdev',
             at: Date.now(),
           });
         }

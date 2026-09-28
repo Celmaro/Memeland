@@ -24,6 +24,8 @@ import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
 import { HeliusDiscoveryFeed } from './adapters/helius-discovery-feed.js';
 import { FomoApiClient } from './adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from './adapters/fomo-emitter.js';
+import { SolanaTrackerFeed } from './adapters/solanatracker-feed.js';
+import { PumpDevTape } from './adapters/pumpdev-tape.js';
 import { DeFiLlamaRegimeFeed } from './adapters/defillama-feed.js';
 import { ArkhamEnrich } from './adapters/arkham-enrich.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
@@ -208,6 +210,14 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     ...(process.env.HELIUS_FEED_ENABLED === 'true' && process.env.HELIUS_API_KEY
       ? { helius: new HeliusDiscoveryFeed({ apiKey: process.env.HELIUS_API_KEY }) }
       : {}),
+    // SolanaTracker Sol enricher (free Data API: price/overview/stats/risk).
+    // Inert unless SOLANATRACKER_FEED_ENABLED=true AND SOLANATRACKER_API_KEY.
+    // Self-paced behind the shared ProviderGovernor (10k/mo @ 3 rpm free tier);
+    // Sol-only, so it yields nothing on non-Sol chains. Recall/hydrate only
+    // unless DISCOVERY_INTRODUCERS promotes it.
+    ...(process.env.SOLANATRACKER_FEED_ENABLED === 'true' && process.env.SOLANATRACKER_API_KEY
+      ? { solanatracker: new SolanaTrackerFeed({ apiKey: process.env.SOLANATRACKER_API_KEY }) }
+      : {}),
     // P0.1 FOMO API candidate emitter (token boards + trader intel). Inert
     // unless FOMO_FEED_ENABLED=true AND FOMO_API_KEY is set. Rides the shared
     // ProviderGovernor so the 250K cr/mo and 20 rpm free tiers are respected.
@@ -386,12 +396,31 @@ import { OpenCatzRESTServer } from './api/server.js';
 const apiServer = new OpenCatzRESTServer();
 apiServer.start(hub);
 
+// PumpDev real-time WebSocket tape (Sol pre-graduation introducer + whale-trade
+// recall). Long-lived push transport; fail-soft (reconnect + re-auth) and only
+// started when both the gate and the WS URL are set. Launches are free on every
+// tier; the 50k/mo trade quota is guarded by the connector's ring buffers.
+const pumpDevTape =
+  process.env.PUMPDEV_FEED_ENABLED === 'true' && process.env.PUMPDEV_WS_URL
+    ? new PumpDevTape({
+        url: process.env.PUMPDEV_WS_URL,
+        onEvent: (e) => {
+          // Verbose-only sink; the launch/trade ring buffers drain on demand.
+          if (process.env.LOG_VERBOSE === 'true') {
+            console.log(`[PUMPDEV] ${e.txType ?? 'event'}${e.mint ? ` mint=${e.mint}` : ''}`);
+          }
+        },
+      })
+    : null;
+pumpDevTape?.start();
+
 // Graceful Shutdown: stop the runtime schedulers, flush pending state writes to
 // disk, then close the REST API before exiting.
 registerGracefulShutdown('SIGINT', {
   flush: () => stateStore.flushToDisk(),
   stop: async () => {
     runtimeStop?.();
+    pumpDevTape?.stop();
     await apiServer.stop();
   },
 });
@@ -399,6 +428,7 @@ registerGracefulShutdown('SIGTERM', {
   flush: () => stateStore.flushToDisk(),
   stop: async () => {
     runtimeStop?.();
+    pumpDevTape?.stop();
     await apiServer.stop();
   },
 });

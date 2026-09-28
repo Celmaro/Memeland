@@ -59,12 +59,14 @@ export const PROVIDER_FEEDS: FeedSpec[] = [
   { id: 'dexscreener', role: 'enricher', gate: flag('DEXSCREENER_FEED_ENABLED') },
   { id: 'routescan', role: 'enricher', gate: flag('ROUTESCAN_FEED_ENABLED') },
   { id: 'cmc', role: 'enricher', gate: flag('CMC_DEX_FEED_ENABLED') },
+  { id: 'solanatracker', role: 'enricher', chains: 'sol', gate: keyed('SOLANATRACKER_API_KEY')(flag('SOLANATRACKER_FEED_ENABLED')) },
   // Regime context + entity overlay.
   { id: 'defillama', role: 'regime', gate: flag('DEFILLAMA_FEED_ENABLED') },
   { id: 'arkham', role: 'entity', gate: keyed('ARKHAM_API_KEY')(flag('ARKHAM_ENABLED')) },
   // On-chain verification + tape + decision layers.
   { id: 'blockscout', role: 'verify', gate: flag('BLOCKSCOUT_FEED_ENABLED') },
   { id: 'rh-tape', role: 'tape', gate: flag('RH_TAPE_ENABLED') },
+  { id: 'pumpdev', role: 'tape', chains: 'sol', gate: keyed('PUMPDEV_WS_URL')(flag('PUMPDEV_FEED_ENABLED')) },
   { id: 'JEV', role: 'decision', gate: flag('JEV_ENABLED') },
 ];
 
