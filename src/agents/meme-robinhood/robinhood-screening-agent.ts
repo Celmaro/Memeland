@@ -437,12 +437,17 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    * P1.4 Arkham ENTITY enrichment for a finalist (entity/deployer/label). Gated
    * by ARKHAM_ENABLED + injected client. Fail-open: returns null on any error;
    * NEVER gates — the entity is informational/overlay (second-opinion #10).
+   *
+   * Resolves the DEPLOYER/CREATOR wallet when the token carries one (that is the
+   * meaningful entity — deployer reputation, known-scam clusters, exchange
+   * labels); falls back to the token address only when no deployer is present.
    */
   public async enrichFinalistEntity(t: GMGNRawToken): Promise<ArkhamEntity | null> {
     if (process.env.ARKHAM_ENABLED !== 'true') return null;
     if (!this.arkham) return null;
     try {
-      return await this.arkham.entity(t.address);
+      const subject = typeof t.deployer === 'string' && t.deployer.trim() ? t.deployer.trim() : t.address;
+      return await this.arkham.entity(subject);
     } catch (err: any) {
       console.warn(`[MEME AGENT] Arkham entity failed (skipped): ${err.message}`);
       return null;
@@ -1133,11 +1138,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           }
 
           // P1.4 Arkham ENTITY enrichment for this FINALIST (overlay, fail-open,
-          // never a gate). Resolves the token address to a labeled entity and logs
-          // it for the operator — entity/deployer/label is the valuable signal.
+          // never a gate). Resolves the DEPLOYER/creator wallet (falling back to
+          // the token address) to a labeled entity and logs it for the operator —
+          // entity/deployer/label is the valuable signal.
           const entity = await this.enrichFinalistEntity(t);
           if (entity) {
-            console.log(`[ARKHAM] ${t.symbol} → ${entity.displayName ?? entity.ownerType}${entity.tags && entity.tags.length ? ` [${entity.tags.slice(0, 3).join(',')}]` : ''}`);
+            console.log(`[ARKHAM] ${t.symbol} deployer→ ${entity.displayName ?? entity.ownerType}${entity.tags && entity.tags.length ? ` [${entity.tags.slice(0, 3).join(',')}]` : ''}`);
           }
 
           // Arch-3 voter swarm: assemble opinions for this FINALIST and attach them to the
