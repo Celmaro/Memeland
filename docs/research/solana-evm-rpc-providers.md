@@ -140,12 +140,26 @@ budget caps worst-case spend — so the generous free tiers above are never burn
 ---
 
 ## Failover delivery (dRPC / Chainstack + the new keyed hosts)
-The keyed endpoints (Infura, ZAN, Onfinality, Chainstack) are **not** hardcoded —
-they ride `RPC_FAILOVER_URLS` (env JSON). The CLI `-k` flag pitfall is actually the
-**`&`** character (Windows arg parsing), not commas — the existing
-`RPC_FAILOVER_URLS` JSON already stores commas fine. All URLs above are `&`-free,
-so the JSON is delivered via `variable update -k "RPC_FAILOVER_URLS=…"` verbatim
-and verified after. Chainstack Sol is added (key on hand); dRPC needs its `<key>`
-value (not yet supplied) and stays a documented pool candidate until then.
+The keyed endpoints (Infura, ZAN, Onfinality, Chainstack, **dRPC**) are **not**
+hardcoded — they ride `RPC_FAILOVER_URLS` (env JSON). The CLI `-k` flag genuinely
+cannot carry embedded quotes/commas (confirmed by a parse error), so multi-URL JSON
+is delivered **base64** (`base64:` prefix, decoded by `rpc-failover.ts` — base64 has
+no quotes/commas/`&`). `RPC_FAILOVER_URLS` now holds:
+- **sol**: Infura · ZAN · OnFinality · Chainstack (Shyft stays the `SOLANA_RPC_URL`
+  primary; dRPC sol is paid/lambda-only so it stays out of the full-node pool)
+- **eth/bsc/base**: Infura · ZAN · OnFinality · **dRPC**
+- **rh**: ZAN · **dRPC** (dRPC key `AiQT-EarAERphtg2mtapAFrzQtDVu3oR8YVhjmVXwXgc`)
+
+## 11. JSON-RPC WS tape housing (ZAN + OnFinality WS)
+`src/adapters/jsonrpc-ws-tape.ts` — a generic, fail-soft JSON-RPC-over-WS realtime
+tape (mirrors `PumpDevTape`'s socket model: exponential-backoff reconnect, bounded
+ring buffer, injectable socket). Reads `JSONRPC_WS_TAPES` (env base64/JSON map of
+`chain -> [wsUrl]`), one tape per host. Subscription model:
+- **EVM** (eth/bsc/base/rh): `eth_subscribe` `newHeads` → fresh-block tape.
+- **Sol**: `programSubscribe` (pump.fun `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`)
+  → surfaces the written account pubkey = new token mint (pre-graduation introducer
+  tape over raw Sol WS, key-free).
+- Wired hosts: ZAN WS (eth/bsc/base/rh/sol) + OnFinality WS (eth/bsc/base/sol).
+- Gated by `JSONRPC_WS_TAPE_ENABLED` + `JSONRPC_WS_TAPES`; banner id `jsonrpc-ws-tape`.
 
 

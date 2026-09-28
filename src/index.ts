@@ -27,6 +27,7 @@ import { FomoApiClient } from './adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from './adapters/fomo-emitter.js';
 import { SolanaTrackerFeed } from './adapters/solanatracker-feed.js';
 import { PumpDevTape } from './adapters/pumpdev-tape.js';
+import { JsonRpcWsTape } from './adapters/jsonrpc-ws-tape.js';
 import { DeFiLlamaRegimeFeed } from './adapters/defillama-feed.js';
 import { ArkhamEnrich } from './adapters/arkham-enrich.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
@@ -427,6 +428,40 @@ const pumpDevTape =
     : null;
 pumpDevTape?.start();
 
+// Generic JSON-RPC WS realtime tape housing (ZAN / OnFinality / PublicNode / dRPC
+// WS). Reads `JSONRPC_WS_TAPES` = base64 of `{ chain: [wsUrl, ...] }` (base64 keeps
+// the CLI `-k` flag safe — no embedded quotes/commas). Each host gets its own
+// fail-soft JsonRpcWsTape: EVM → eth_subscribe newHeads (fresh-block tape); Sol →
+// programSubscribe pump.fun (pre-graduation introducer tape over raw Sol WS).
+const jsonRpcWsTapes: JsonRpcWsTape[] = [];
+const wsTapeCfgRaw = process.env.JSONRPC_WS_TAPES;
+const wsTapeRaw = wsTapeCfgRaw?.startsWith('base64:')
+  ? Buffer.from(wsTapeCfgRaw.slice('base64:'.length), 'base64').toString('utf-8')
+  : wsTapeCfgRaw;
+if (process.env.JSONRPC_WS_TAPE_ENABLED === 'true' && wsTapeRaw) {
+  try {
+    const wsTapeCfg = JSON.parse(wsTapeRaw) as Record<string, string | string[]>;
+    for (const [chain, hosts] of Object.entries(wsTapeCfg)) {
+      const list = Array.isArray(hosts) ? hosts : [hosts];
+      for (const url of list) {
+        const tape = new JsonRpcWsTape({
+          url,
+          chain: chain as 'eth' | 'bsc' | 'base' | 'rh' | 'sol',
+          onEvent: (e) => {
+            if (process.env.LOG_VERBOSE === 'true') {
+              console.log(`[JSONRPC-TAPE:${chain}] id=${e.id}${e.hash ? ` hash=${e.hash}` : ''}`);
+            }
+          },
+        });
+        tape.start();
+        jsonRpcWsTapes.push(tape);
+      }
+    }
+  } catch {
+    console.log('[JSONRPC-WS-TAPE] invalid JSONRPC_WS_TAPES — tape disabled (fail-soft).');
+  }
+}
+
 // Graceful Shutdown: stop the runtime schedulers, flush pending state writes to
 // disk, then close the REST API before exiting.
 registerGracefulShutdown('SIGINT', {
@@ -434,6 +469,7 @@ registerGracefulShutdown('SIGINT', {
   stop: async () => {
     runtimeStop?.();
     pumpDevTape?.stop();
+    for (const t of jsonRpcWsTapes) t.stop();
     await apiServer.stop();
   },
 });
@@ -442,6 +478,7 @@ registerGracefulShutdown('SIGTERM', {
   stop: async () => {
     runtimeStop?.();
     pumpDevTape?.stop();
+    for (const t of jsonRpcWsTapes) t.stop();
     await apiServer.stop();
   },
 });

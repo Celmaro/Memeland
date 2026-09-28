@@ -67,6 +67,7 @@ export const PROVIDER_FEEDS: FeedSpec[] = [
   { id: 'blockscout', role: 'verify', gate: flag('BLOCKSCOUT_FEED_ENABLED') },
   { id: 'rh-tape', role: 'tape', gate: flag('RH_TAPE_ENABLED') },
   { id: 'pumpdev', role: 'tape', chains: 'sol', gate: keyed('PUMPDEV_WS_URL')(flag('PUMPDEV_FEED_ENABLED')) },
+  { id: 'jsonrpc-ws-tape', role: 'tape', gate: keyed('JSONRPC_WS_TAPES')(flag('JSONRPC_WS_TAPE_ENABLED')) },
   { id: 'JEV', role: 'decision', gate: flag('JEV_ENABLED') },
 ];
 
