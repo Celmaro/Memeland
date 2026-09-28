@@ -257,8 +257,3 @@ export class PaperTradingLedger {
     };
   }
 }
-
-/** Convenience predicate — gate is open (and explicitly not failed open). */
-export function paperUnlockGate(ledger: PaperTradingLedger, opts?: PaperUnlockGateOptions): PaperUnlockStatus {
-  return ledger.unlockStatus(opts);
-}
