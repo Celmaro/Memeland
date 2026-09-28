@@ -13,13 +13,13 @@ free endpoints each exposes.
 | --- | --- | --- |
 | **1. TRANSPORT** | raw chain access; no units of "token" | Helius RPC/WS/DAS, RH RPC, Ethereum/Base/BSC RPC pool, Geyser/Yellowstone (optional) |
 | **2. CANONICAL INTRODUCER** | detects a real chain/protocol event (fact, not opinion) | **Helius (sol, impl)**, **Ankr/PairCreated (eth, base, bsc)** |
-| **3. CANDIDATE EMITTER** | can surface an interesting address/unit for investigation — NOT truth | **GMGN**, gated leaderboards |
+| **3. CANDIDATE EMITTER** | can surface an interesting address/unit for investigation — NOT truth | **FOMO API (fomoapi.io)**, **GMGN** — trader/attention intelligence + leaderboards |
 | **4. ENRICHER** | adds facts to an existing candidate | DEXPaprika, GeckoTerminal, DexScreener, CMC, CoinStats, Birdeye, GoPlus, Arkham, Moralis, Blockscout, Routescan, DeFiLlama (regime) |
 
 The single most important correction to BOTH prior documents: **many listed sources
-have no public free API and are trading-terminal UIs, not data feeds** — they belong in
-role 3 (candidate emitter) only where a real API exists, or are better sourced
-**directly on-chain**.
+are trading-terminal UIs, not data feeds.** The ones with a real free-tier developer
+API are **FOMO API (fomoapi.io)**, **GMGN**, plus the classic market/security/RPC feeds.
+BullX, Photon, and Axiom expose **no public free API** — they belong either on-chain or skipped.
 
 ---
 
@@ -55,22 +55,51 @@ surface:
   introducer**, not a universal "ETH introducer". V3/Aerodrome/Pancake-V3 need their own logs.
 - RH: **no verified factory** (confirmed `eth_getCode` = `0x`); Pons introducer blocked.
 
-### 1.3 Candidate emitters — REAL APIs only
+### 1.3 Candidate emitters / trader intelligence — REAL APIs only
 
-| Source | Free API? | Endpoints (free) | Verdict |
+| Source | Free tier? | Endpoints (free) | Verdict |
 | --- | --- | --- | --- |
-| **GMGN** | ✅ (key; `GMGN_API_KEY`, gmgn-cli/OpenAPI) | trending/rank, `token_security`, `token info/pool/holders/traders`, smart-money, PnL; leaky-bucket ~10 req/s weight-based | **only real candidate-emitter API** |
+| **GMGN** | ✅ (key; gmgn-cli/OpenAPI/Agent API) | trending/rank, `token_security`, token `info/pool/holders/traders`, smart-money, PnL; leaky-bucket ~10 req/s weight-based | solid candidate-emitter API |
+| **FOMO API (fomoapi.io)** | ✅ **250K cr/mo (~1K calls)**, every endpoint; `/ws/alerts` realtime 7d then 15s; **unmetered WS messages** | leaderboards, trader PnL, wallet resolution, theses, dev attribution, smart-money holders, app-feed WS — see §1.3a | **best free trader-intelligence API**; covers **Robinhood Chain + Solana + base/bsc/eth/monad/arc** |
 | **pump.fun** | ❌ official; ✅ PumpPortal WS / on-chain | — | go on-chain or WS |
 | **BullX** | ❌ no public free API | — | on-chain or skip |
 | **Photon** | ❌ no public free API (trades via Bitquery = paid) | — | on-chain or skip |
 | **Axiom (axiom.trade)** | ❌ "does not provide a public API" | unofficial reverse-engineered lib | on-chain or skip |
-| **fomo (fomo.family)** | ❌ no public free API | UI + social platform | on-chain or skip |
 
-**Finding:** of the six "candidate emitter" sources named in the second opinion, **only
-GMGN has a developer API**. BullX/Photon/Axiom/fomo are trading-terminal UIs. Treating them
-as first-class feeds is not implementable today without scraping or paid middlemen; the
-trader-intelligence layer is best built **on-chain** (wallet graph from transport data) — the
-report's "custom-onchain P0" already says this.
+**Finding (corrected):** of the six "candidate emitter" sources named in the second
+opinion, **exactly two have a real developer API: GMGN and FOMO API.** BullX / Photon /
+Axiom are trading-terminal UIs with no public free API; pump.fun has no official data API.
+FOMO API is the strongest fit for the leaderboard/trader-intelligence subsystem — see below.
+
+#### 1.3a FOMO API (fomoapi.io) — the trader/attention-intelligence feed
+
+Independent, **unofficial** developer product mirroring fomo.family's public data (not
+affiliated/endorsed). Provenance caveat applies: it is a proxied view of a social-trading
+app, so it is **candidate-emitting/intelligence, never canonical discovery truth.**
+
+- **Free:** 250,000 credits/mo ≈ 1,000 normal calls (≈100 wallet resolutions, ≈200 theses);
+  **every endpoint**; App feed WS `/ws/alerts` realtime for 7 days then 15s delayed;
+  messages **unmetered**; 1 key; free cap 20 req/min; +500K cr for adding a card (no charge).
+- **Credits:** normal/leaderboard/trades/balances/holders = **250**; `/v2/alerts` = 125;
+  thesis = **1,250**; wallet resolution `/v2/users/{handle}` + `/v2/users/id/{userId}` = **2,500**.
+- **Chains:** Robinhood Chain (4663) **— FOMO's most active chain —**, Solana, Ethereum,
+  Base, BSC, Monad, Arc (5042), Hyperliquid perps. Note RH/Sol coverage is free-tier.
+- **Endpoints:**
+  - `/v2/leaderboard/{24h|7d|30d|all}` — ranked traders, **PnL + volume + both on-chain
+    wallets + userId per row** → feeds the **24h ∩ 7d ∩ 30d persistent-trader intersection**.
+  - `/v2/leaderboard/tokens/trending|most-held|graduated` — token boards.
+  - `/v2/users/{handle}` — **Trader Identity Resolver**: handle → Solana + EVM wallets,
+    PnL (`24h/7d/30d/all`), account age, hold time, clan; `/id/{userId}` reverse.
+  - `/v2/users/{handle}/positions|balances|following|followers|spotlight` —
+    positions w/ entry/exit & realized/unrealized PnL, multi-chain portfolio, follow graph.
+  - `/v2/token/{address}/devs` — **deployer + insiders + thesis** (rug / serial-deployer signal);
+    `/holders` — smart-money holders; `/stats` — buy/sell flow, top10-holder%.
+  - `/v2/trades/{tradeId}` + `/comments`; `/v2/thesis[/token/{mint}|/user/{id}]` — the written "why".
+  - `/v2/search`, `/v2/tokens/search`; `WSS /ws/alerts` (per-trader / per-chain, unmetered),
+    `GET /v2/alerts`, `/v2/notifications`. On-chain `/ws/trades` is Growth+.
+- **Role:** **CANDIDATE EMITTER + trader/attention intelligence.** Maps ~1:1 onto the second
+  opinion's leaderboard pipeline: leaderboard → identity resolve → wallet graph → PnL persistence
+  → 24h∩7d∩30d intersection. It does NOT vouch for what a token *is* — on-chain verification still gates promotion.
 
 ### 1.4 Enrichers
 
@@ -99,11 +128,16 @@ report's "custom-onchain P0" already says this.
 - These are the ONLY sources that should promote a raw address into the **candidate universe**.
   They have **no market data at birth** (price/liquidity/volume = 0, `freshLane: true`).
 
-### Candidate emitters (recall without authority)
-- **GMGN** trending/trenches/signals → emit `CandidateHint`; the registry verifies on-chain
-  (does the mint exist? does the pair exist?) before the mint becomes a candidate.
-- Pump.fun/BullX/Photon/Axiom/fomo → **no free API**; route to on-chain producer parsers or
-  PumpPortal WS. GMGN is the only immediate API in this tier.
+### Candidate emitters / trader intelligence (recall without authority)
+- **FOMO API** leaderboards (`24h|7d|30d`) + trader PnL + theses + dev/insider attribution + app-feed WS.
+  Its `/v2/leaderboard/*` and `/v2/users/{handle}` rows are emitted as `CandidateHint`; the
+  registry verifies on-chain (does the mint exist? does the pair exist?) before promotion.
+  This is the primary feed for the **24h ∩ 7d ∩ 30d persistent-trader intersection**.
+- **GMGN** trending/trenches/signals → emit `CandidateHint` (same verify-gate).
+- Pump.fun/BullX/Photon/Axiom → **no official free API**; route to on-chain producer parsers
+  or PumpPortal WS (pump.fun only). GMGN + FOMO API are the immediate APIs in this tier.
+- **Provenance rule:** fomoapi.io and GMGN reflect a social-trading app's view — they say
+  "this looks interesting", never "this exists". Canonical existence is decided on-chain.
 
 ### Enrichment (hydrate known candidates)
 - Market: DEXPaprika, GeckoTerminal, DexScreener, CMC, CoinStats, Birdeye (1h volume).
@@ -130,7 +164,7 @@ are factual, not conceptual.
 | 3. “ETH→PairCreated is too broad; name it Uniswap-V2-factory introducer” | ✅ **Agree** — genuinely narrower; V3/Aerodrome/Pancake-V3 need own log parsers. |
 | 4. “Helius = provider, not the Solana discovery engine” | ✅ **Agree.** Make the engine program-aware (pump/meteora/raydium/orca parsers) with Helius as transport. Matches impl direction. |
 | 5. “Expand the metric past first_seen_latency” | ✅ **Agree + already done** in `CandidateRegistry.stats()` (coverage/latency/dup/fp/spend). |
-| 6–7. “Add trader/attention intelligence layer; leaderboard = own pipeline” | ✅ **Agree in principle** — but see critical caveat below. |
+| 6–7. “Add trader/attention intelligence layer; leaderboard = own pipeline” | ✅ **Agree, and now directly feasible** — **FOMO API (fomoapi.io)** is purpose-built for it (leaderboards 24h/7d/30d, trader PnL, wallet resolution, theses, app-feed WS) and free-tier. The remaining hand-built part is the **cross-platform intersection + wallet graph** (custom-onchain). |
 | 8. “custom-onchain should be P0” | ✅ **Agree strongly.** This is the durable moat; third parties are not. |
 | 9. Demote CMC/CoinStats/Moralis/Birdeye, keep optional | ✅ **Agree** (CMC enrichment-optional; Birdeye non-architectural; Moralis gated). |
 | 10. “Arkham for entity resolution, not another score” | ✅ **Agree.** entity/deployer/label/counterparty is the valuable use. |
@@ -138,14 +172,16 @@ are factual, not conceptual.
 | 12. Revised architecture diagram | ✅ **Adopt** — clean and implementable. |
 | 13. Observation/Feature/Inference + 14. Lineage in FeatureSnapshot | ✅ **Agree, high value.** Makes the system auditable and ML-ready. |
 
-### Critical caveat the second opinion misses
-- **The "candidate emitter" list is not implementable as stated.** Of
-  GMGN/FOMO/Pump.fun/Axiom/BullX/Photon, **only GMGN has a public developer API.**
-  BullX, Photon, Axiom, and fomo are UI terminals with **no public free API**; pump.fun has
-  **no official data API** (use PumpPortal WS or on-chain instruction parsing). So the
-  "leaderboard/trader intelligence" subsystem cannot be fed by those terminals' official
-  APIs today — it must be built on **on-chain data** (wallet graph from transport),
-  which the report's "custom-onchain P0" already owns.
+### Critical caveat the second opinion misses — corrected
+- **Of the six "candidate emitter" sources, only TWO have a real developer API: GMGN and
+  FOMO API.** FOMO API (fomoapi.io) is free-tier and, unlike GMGN, is purpose-built for the
+  leaderboard/trader-intelligence layer — `/v2/leaderboard/{24h|7d|30d}`, trader PnL persistence,
+  wallet resolution, theses, dev attribution, and an unmetered app-feed WS. It even covers
+  **Robinhood Chain** (FOMO's most active chain).
+- **BullX, Photon, and Axiom are UI terminals with no public free API**; pump.fun has **no
+  official data API** (use PumpPortal WS or on-chain instruction parsing).
+- So the leaderboard/trader-intelligence subsystem CAN be fed free today via FOMO API (+ GMGN),
+  and the durable moat still sits in **custom on-chain** (wallet graph) — the report's P0.
 
 ### A source-count nit (the second opinion flags this — it's correct)
 - The prior report is inconsistent: "17 sources" in one place, "18 numbered" elsewhere.
@@ -156,7 +192,9 @@ are factual, not conceptual.
 ## 4. Decision summary
 
 - **Implement as directive:** the four-role model; Ankr (EVM) and Helius (Sol) as the only
-  canonical introducers; GMGN as the only immediate candidate-emitter API; everything else
-  enrichment. custom-onchain = P0. Keep the empirical promot/demote via registry stats.
-- **Do NOT implement verbatim:** treating BullX/Photon/Axiom/fomo as sourceable own feed;
-  the universal "ETH introducer" framing; DeFiLlama as a token-score voter.
+  canonical introducers; **FOMO API + GMGN** as the candidate-emitter / trader-intelligence
+  tier (FOMO for the 24h∩7d∩30d leaderboard intersection — incl. Robinhood Chain); everything
+  else enrichment. custom-onchain = P0. Keep the empirical promote/demote via registry stats.
+- **Do NOT implement verbatim:** treating BullX/Photon/Axiom as sourceable feeds; the universal
+  "ETH introducer" framing; DeFiLlama as a token-score voter; fomo *without* the on-chain
+  verify gate (it is a proxied social-app view, not discovery truth).

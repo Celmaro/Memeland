@@ -8,7 +8,7 @@
  * by measured latency + coverage, never by docs.
  */
 
-export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'cmc' | 'birdeye' | 'helius' | 'pons';
+export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'cmc' | 'birdeye' | 'helius' | 'fomo' | 'pons';
 
 /**
  * DISCOVERY_INTRODUCERS allowlist gate. When the env var is set it is a

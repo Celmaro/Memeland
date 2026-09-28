@@ -22,6 +22,8 @@ import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
 import { RoutescanFeed } from './adapters/routescan-feed.js';
 import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
 import { HeliusDiscoveryFeed } from './adapters/helius-discovery-feed.js';
+import { FomoApiClient } from './adapters/fomo-api.js';
+import { FomoTokenBoardProvider } from './adapters/fomo-emitter.js';
 import { CriticVoter } from './agents/shared/critic-voter.js';
 import { priceAlertService, tradeJournalService, walletService, priceFeedService, approvalQueueService } from './discord/handlers/interaction-handler.js';
 import { TelegramService } from './telegram/telegram-service.js';
@@ -203,6 +205,12 @@ const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
     // fail-soft and consumes the caller's DISCOVERY_INTRODUCERS allowlist.
     ...(process.env.HELIUS_FEED_ENABLED === 'true' && process.env.HELIUS_API_KEY
       ? { helius: new HeliusDiscoveryFeed({ apiKey: process.env.HELIUS_API_KEY }) }
+      : {}),
+    // P0.1 FOMO API candidate emitter (token boards + trader intel). Inert
+    // unless FOMO_FEED_ENABLED=true AND FOMO_API_KEY is set. Rides the shared
+    // ProviderGovernor so the 250K cr/mo and 20 rpm free tiers are respected.
+    ...(process.env.FOMO_FEED_ENABLED === 'true' && process.env.FOMO_API_KEY
+      ? { fomo: new FomoTokenBoardProvider(new FomoApiClient({ apiKey: process.env.FOMO_API_KEY })) }
       : {}),
   },
 );

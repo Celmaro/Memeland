@@ -14,6 +14,10 @@ import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
+import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
+import { FomoTokenBoardProvider } from '../../adapters/fomo-emitter.js';
+import { globalTraderPersistence } from '../../services/onchain/trader-persistence.js';
+import { globalWalletGraph } from '../../services/onchain/wallet-graph.js';
 import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
 import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
@@ -126,6 +130,9 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private cmcDex: MarketDataProvider | null;
   /** P4.3 Helius Solana INTRODUCER feed (bounded, cursor-persisted SPL mint walk). Empty until injected. */
   private helius: MarketDataProvider | null;
+  /** P0.1 FOMO API candidate-emitter feed (token boards, trader intel). Empty until injected. */
+  private fomo: FomoTokenBoardProvider | null;
+  private fomoClient: FomoApiClient | null;
   /** Kernel D deterministic bytecode scan for EVM tokens that carry hex. */
   private bytecodeScanner: BytecodeScanner;
   /** Kernel D round-trip sell proof, fail-closed until a pass is proven. */
@@ -158,6 +165,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       solTimeOnCurveLoader?: TimeOnCurveAssessOptions['loader'] | null;
       cmcDex?: MarketDataProvider | null;
       helius?: MarketDataProvider | null;
+      fomo?: FomoTokenBoardProvider | null;
       bytecodeScanner?: BytecodeScanner;
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
@@ -183,6 +191,10 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.solTimeOnCurveLoader = opts.solTimeOnCurveLoader ?? null;
     this.cmcDex = opts.cmcDex ?? null;
     this.helius = opts.helius ?? null;
+    this.fomo = opts.fomo ?? null;
+    this.fomoClient = this.fomo
+      ? new FomoApiClient({ apiKey: process.env.FOMO_API_KEY ?? '' })
+      : null;
     this.bytecodeScanner = opts.bytecodeScanner ?? new BytecodeScanner();
     this.sellability = opts.sellability ?? new SellabilitySimulator(() => ({ simulated: false, sellable: false }));
     this.goplusService = new GoPlusSecurityService();
@@ -333,13 +345,69 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   }
 
   /**
+   * P0.1 FOMO API candidate-emitter feed (token boards). Guarded by
+   * FOMO_FEED_ENABLED=true && the injected fomo provider.
+   */
+  public async collectFomoCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    if (process.env.FOMO_FEED_ENABLED !== 'true') return [];
+    if (!this.fomo) return [];
+    if (!isIntroducerEnabled('fomo', process.env.DISCOVERY_INTRODUCERS)) return [];
+    try {
+      const chainId = chainIdFor(chain);
+      const tokens = await this.fomo.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
+      return tokens.map((t) => normalizeDexToken(chain, t, 'fomo'));
+    } catch (err: any) {
+      console.warn(`[MEME AGENT] fomo candidates failed (skipped): ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * P0.4 FOMO trader intelligence: ingest the 24h/7d/30d leaderboards into the
+   * TraderPersistence intersection and seed the WalletGraph from resolved
+   * identities. This is the durable moat — the persistent-trader cohort that
+   * front-runs again. Guarded by FOMO_FEED_ENABLED=true. Fail-open: no-op.
+   */
+  public async collectFomoTraderIntel(chain: Chain = 'robinhood'): Promise<void> {
+    if (process.env.FOMO_FEED_ENABLED !== 'true') return;
+    if (!this.fomoClient) return;
+    try {
+      const fomoChain = chain === 'sol' ? 'solana' : chain === 'eth' ? 'ethereum' : (chain as FomoChain);
+      const windows = ['24h', '7d', '30d'] as const;
+      await Promise.all(
+        windows.map(async (w) => {
+          const rows = await this.fomoClient!.leaderboard(w, fomoChain, 50);
+          for (const r of rows) {
+            globalTraderPersistence.ingest({
+              handle: r.handle,
+              window: w,
+              pnlPct: r.pnlPct,
+              volumeUsd: r.volumeUsd,
+              solWallet: r.solWallet,
+              evmWallet: r.evmWallet,
+              chain: r.chain,
+            });
+            globalWalletGraph.linkHandleWallets(r.solWallet, r.evmWallet);
+          }
+        }),
+      );
+      const s = globalTraderPersistence.stats();
+      if (s.persistent > 0) {
+        console.log(`[MEME AGENT] FOMO trader intel: ${s.handles} handles, ${s.persistent} persistent (24h∩7d∩30d).`);
+      }
+    } catch (err: any) {
+      console.warn(`[MEME AGENT] FOMO trader intel failed (skipped): ${err.message}`);
+    }
+  }
+
+  /**
    * Shared keyless-feed collector. Fails open (empty) unless the env gate is on
    * and a provider is injected. Normalizes discovered MarketTokens (filtered to
    * the current chain) into GMGNRawToken tagged with the source name.
    */
   private async collectProviderCandidates(
     provider: MarketDataProvider | null,
-    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'helius',
+    source: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'helius' | 'fomo',
     envVar: string,
     chain: Chain = 'robinhood',
   ): Promise<GMGNRawToken[]> {
@@ -650,6 +718,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   const routescanCandidates = await this.collectRoutescanCandidates(chain);
                   const cmcDexCandidates = await this.collectCmcDexCandidates(chain);
                   const heliusCandidates = await this.collectHeliusCandidates(chain);
+                  const fomoCandidates = await this.collectFomoCandidates(chain);
+                  await this.collectFomoTraderIntel(chain);
                   // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
                   // enrichment last. By-address dedupe (no 60s cooldown).
                   const merged = new Map<string, GMGNRawToken>();
@@ -662,7 +732,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // addresses a keyless feed already found (smartDegen/CTO/KOL
                   // fields that detectMemeSignal needs), and GMGN-only
                   // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...heliusCandidates]) {
+                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...heliusCandidates, ...fomoCandidates]) {
                     const key = t.address.toLowerCase();
                     const prev = merged.get(key);
                     // Fresh-pair lane survival: a later, richer source (e.g. GMGN
