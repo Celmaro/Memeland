@@ -26,4 +26,49 @@ describe('WalletGraph', () => {
     g.linkHandleWallets('solX', '0xEVMy');
     expect(g.neighbours('solX')).toEqual(['0xevmy']);
   });
+
+  it('registers handle→wallet identity and links all wallets of a handle (multi-chain)', () => {
+    const g = new WalletGraph();
+    g.registerHandle('Alpha', { chain: 'solana', provider: 'fomo', wallets: ['solAlpha', '0xEVMA'] });
+    g.registerHandle('Alpha', { chain: 'bsc', provider: 'fomo', wallets: ['0xEVMA', '0xBNBA'] });
+    expect(g.walletsOfHandle('Alpha').sort()).toEqual(['0xbnba', '0xevma', 'solalpha']);
+    expect(g.handlesOfWallet('0xEVMA')).toContain('alpha');
+    // All three wallets of Alpha are one connected entity.
+    expect(g.connectedCluster('solAlpha').sort()).toEqual(['0xbnba', '0xevma', 'solalpha']);
+    expect(g.metaOf('solAlpha')?.chain).toBe('solana');
+    expect(g.metaOf('0xbnba')?.provider).toBe('fomo');
+  });
+
+  it('resolves a canonical trader from a handle or any wallet (collapses providers)', () => {
+    const g = new WalletGraph();
+    // Two provider handles that share a wallet → same physical trader.
+    g.registerHandle('alice', { chain: 'solana', provider: 'fomo', wallets: ['solA', '0xEVMA'] });
+    g.registerHandle('alice_fomo2', { chain: 'bsc', provider: 'gmgn', wallets: ['0xEVMA', '0xBNBA'] });
+    const byWallet = g.resolveTrader('0xEVMA');
+    expect(byWallet?.canonicalId).toBe('alice');
+    expect(byWallet?.handles.sort()).toEqual(['alice', 'alice_fomo2']);
+    expect(byWallet?.wallets.sort()).toEqual(['0xbnba', '0xevma', 'sola']);
+    expect(byWallet?.chains.sort()).toEqual(['bsc', 'solana']);
+    expect(byWallet?.providers.sort()).toEqual(['fomo', 'gmgn']);
+    // Resolving by the OTHER handle yields the same canonical id.
+    const byHandle = g.resolveTrader('alice_fomo2');
+    expect(byHandle?.canonicalId).toBe('alice');
+  });
+
+  it('returns wallet-native cohorts: provider handles sharing a cluster collapse into one', () => {
+    const g = new WalletGraph();
+    g.registerHandle('alice', { chain: 'solana', provider: 'fomo', wallets: ['solA', '0xEVMA'] });
+    g.registerHandle('alice_gmgn', { chain: 'bsc', provider: 'gmgn', wallets: ['0xEVMA', '0xBNBA'] });
+    g.registerHandle('bob', { chain: 'solana', provider: 'fomo', wallets: ['solB'] });
+    const cohorts = g.walletCohorts();
+    expect(cohorts).toHaveLength(2); // alice cluster + bob singleton
+    const aliceCohort = cohorts.find((c) => c.handles.includes('alice'));
+    expect(aliceCohort?.handles.sort()).toEqual(['alice', 'alice_gmgn']); // collapsed
+    expect(aliceCohort?.providers.sort()).toEqual(['fomo', 'gmgn']);
+  });
+
+  it('resolveTrader returns undefined for an unknown identity', () => {
+    const g = new WalletGraph();
+    expect(g.resolveTrader('nobody')).toBeUndefined();
+  });
 });

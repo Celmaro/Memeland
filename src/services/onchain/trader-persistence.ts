@@ -14,6 +14,8 @@
  *   Inference (persistent trader, with the evidence behind it).
  */
 
+import { WalletGraph } from './wallet-graph.js';
+
 export type PnlWindow = '24h' | '7d' | '30d' | 'all';
 
 export interface TraderWindowRow {
@@ -184,3 +186,87 @@ function pickFresh(rows: TraderWindowRow[], field: 'solWallet' | 'evmWallet'): s
 
 /** Process-wide persistence ledger for the screening cycle. */
 export const globalTraderPersistence = new TraderPersistence();
+
+/**
+ * Phase 4 — a wallet-native cohort: one connected wallet cluster (one economic
+ * actor) with PnL/volume folded up from every handle attached to it.
+ */
+export interface WalletNativeCohort {
+  /** Deterministic id — first handle, else lowest wallet in the cluster. */
+  cohortId: string;
+  wallets: string[];
+  handles: string[];
+  chains: string[];
+  providers: string[];
+  /** How many persistent traders collapsed into this one cohort. */
+  collapsedTraders: number;
+  /** Sum of totalVolumeUsd across present persistent handles in the cohort. */
+  totalVolumeUsd: number;
+  /** Mean avgPnlPct across present persistent handles in the cohort. */
+  avgPnlPct: number;
+  /** Handles freshly present on all of 24h/7d/30d (strict persistence). */
+  strictCount: number;
+}
+
+/**
+ * Phase 4 — wallet-native cohorts over a WalletGraph. This is the anti
+ * double-count: N provider handles sharing a wallet cluster are ONE trader.
+ * Handles with no resolution (no wallet, not in the graph) are reported as
+ * singletons so we never silently drop a persistent trader.
+ */
+export function walletNativeCohorts(persistence: TraderPersistence, graph: WalletGraph): WalletNativeCohort[] {
+  const present = persistence.persistentTraders(false); // all present (incl non-strict)
+  // Map each resolvable handle to its (batch) cohort via the graph.
+  const byHandle = new Map(present.map((p) => [p.handle.toLowerCase(), p]));
+
+  // Build raw cohorts keyed by canonical cluster id.
+  const raw = new Map<string, {
+    wallets: Set<string>;
+    handles: string[];
+    chains: Set<string>;
+    providers: Set<string>;
+    members: PersistentTrader[];
+  }>();
+
+  const ensure = (id: string) => {
+    if (!raw.has(id)) raw.set(id, { wallets: new Set(), handles: [], chains: new Set(), providers: new Set(), members: [] });
+    return raw.get(id)!;
+  };
+
+  for (const trader of present) {
+    const resolved = graph.resolveTrader(trader.handle);
+    if (!resolved || resolved.wallets.length === 0) {
+      // Unresolved handle → singleton cohort keyed by its own handle.
+      const c = ensure(trader.handle.toLowerCase());
+      c.handles.push(trader.handle);
+      c.members.push(trader);
+      continue;
+    }
+    const c = ensure(resolved.canonicalId);
+    c.handles.push(trader.handle);
+    for (const w of resolved.wallets) c.wallets.add(w);
+    for (const ch of resolved.chains) c.chains.add(ch);
+    for (const p of resolved.providers) c.providers.add(p);
+    c.members.push(trader);
+  }
+
+  const out: WalletNativeCohort[] = [];
+  for (const [, c] of raw) {
+    const totalVolume = c.members.reduce((s, m) => s + m.totalVolumeUsd, 0);
+    const strictCount = c.members.filter((m) => m.strictPersistent).length;
+    const avgPnl = c.members.length > 0 ? c.members.reduce((s, m) => s + m.avgPnlPct, 0) / c.members.length : 0;
+    out.push({
+      cohortId: c.handles[0] ?? [...c.wallets].sort()[0] ?? 'unknown',
+      wallets: [...c.wallets],
+      handles: c.handles,
+      chains: [...c.chains],
+      providers: [...c.providers],
+      collapsedTraders: c.handles.length,
+      totalVolumeUsd: totalVolume,
+      avgPnlPct: avgPnl,
+      strictCount,
+    });
+  }
+  // Rank cohorts by volume (the whales that survive all windows), singletons last.
+  return out.sort((a, b) => b.totalVolumeUsd - a.totalVolumeUsd);
+}

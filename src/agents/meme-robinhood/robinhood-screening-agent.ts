@@ -18,7 +18,7 @@ import { DiscoveryCoordinator, type CandidateEmitter } from '../../discovery/can
 import { sourceParticipation } from '../../startup/provider-banner.js';
 import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from '../../adapters/fomo-emitter.js';
-import { globalTraderPersistence } from '../../services/onchain/trader-persistence.js';
+import { globalTraderPersistence, walletNativeCohorts } from '../../services/onchain/trader-persistence.js';
 import { globalWalletGraph } from '../../services/onchain/wallet-graph.js';
 import { DeFiLlamaRegimeFeed, type RegimeSnapshot } from '../../adapters/defillama-feed.js';
 import { ArkhamEnrich, type ArkhamEntity } from '../../adapters/arkham-enrich.js';
@@ -535,13 +535,25 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               // P0 time-current: stamp the board fetch so stale windows decay.
               fetchedAt: Date.now(),
             });
-            globalWalletGraph.linkHandleWallets(r.solWallet, r.evmWallet);
+            // Phase 4 — trader identity graph: register handle→wallet identity
+            // (provider + chain attributed). Same handle across chains/wallets
+            // collapses into one canonical actor; handled likewise.
+            globalWalletGraph.registerHandle(r.handle, {
+              chain: r.chain,
+              provider: 'fomo',
+              wallets: [r.solWallet, r.evmWallet].filter((x): x is string => !!x),
+            });
           }
         }),
       );
       const s = globalTraderPersistence.stats();
       if (s.persistent > 0) {
-        console.log(`[MEME AGENT] FOMO trader intel: ${s.handles} handles, ${s.persistent} persistent (24h∩7d∩30d).`);
+        const cohorts = walletNativeCohorts(globalTraderPersistence, globalWalletGraph);
+        let collapsed = 0;
+        for (const c of cohorts) if (c.collapsedTraders > 1) collapsed += 1;
+        console.log(
+          `[MEME AGENT] FOMO trader intel: ${s.handles} handles, ${s.persistent} persistent (24h∩7d∩30d), ${cohorts.length} wallet-native cohorts (${collapsed} collapsed clusters).`,
+        );
       }
     } catch (err: any) {
       console.warn(`[MEME AGENT] FOMO trader intel failed (skipped): ${err.message}`);
