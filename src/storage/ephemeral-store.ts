@@ -88,6 +88,8 @@ export interface EphemeralStore {
   releaseLock(key: string): void;
   enqueue(key: string, value: string): number;
   dequeue(key: string): string | undefined;
+  /** Best-effort startup connectivity probe (in-memory impl reports armed=false). */
+  probe?(): Promise<{ armed: boolean; ok: boolean; detail: string }>;
 }
 
 /**
@@ -102,14 +104,40 @@ export class RedisEphemeralStore implements EphemeralStore {
   private client: any = null;
 
   constructor(url?: string) {
-    this.url = url ?? process.env.REDIS_URL ?? null;
+    // Resolution order: explicit URL arg > REDIS_URL > Zeabur-injected
+    // REDIS_URI / REDIS_CONNECTION_STRING (internal service hostname reachable
+    // only from inside the deployment). Zeabur does NOT set REDIS_URL.
+    this.url =
+      url ??
+      process.env.REDIS_URL ??
+      process.env.REDIS_URI ??
+      process.env.REDIS_CONNECTION_STRING ??
+      null;
     if (!this.url) {
-      console.warn('[EPHEMERAL] RedisEphemeralStore without REDIS_URL — mirror-only (fail-open).');
+      console.warn('[EPHEMERAL] RedisEphemeralStore without a Redis URL — mirror-only (fail-open).');
     }
   }
 
   public redisArmed(): boolean {
     return Boolean(this.url);
+  }
+
+  /**
+   * Best-effort startup connectivity probe. Logs whether the Redis path armed
+   * and whether the client actually connected — used to confirm the backend in
+   * cloud (Zeabur injects REDIS_URI). Never throws.
+   */
+  public async probe(): Promise<{ armed: boolean; ok: boolean; detail: string }> {
+    if (!this.url) return { armed: false, ok: false, detail: 'no Redis URL configured — in-memory mirror only' };
+    try {
+      const c = await this.ensureClient();
+      const pong = await c.ping();
+      return { armed: true, ok: pong === 'PONG', detail: `ping=${String(pong)}` };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[EPHEMERAL] Redis probe failed (fail-open to mirror): ${msg}`);
+      return { armed: true, ok: false, detail: msg };
+    }
   }
 
   get<T>(key: string): T | undefined {
@@ -188,12 +216,13 @@ export class RedisEphemeralStore implements EphemeralStore {
 }
 
 /**
- * Select the ephemeral store. REDIS_URL present → Redis (mirror + fire-and-forget,
+ * Select the ephemeral store. A Redis URL (REDIS_URL or Zeabur's
+ * REDIS_URI/REDIS_CONNECTION_STRING) present → Redis (mirror + fire-and-forget,
  * fail-open). Absent → pure in-memory (tests, local, and deployments without Redis).
  */
 export function createEphemeralStore(): EphemeralStore {
-  if (process.env.REDIS_URL) {
-    return new RedisEphemeralStore(process.env.REDIS_URL);
+  if (process.env.REDIS_URL || process.env.REDIS_URI || process.env.REDIS_CONNECTION_STRING) {
+    return new RedisEphemeralStore();
   }
   return new InMemoryEphemeralStore();
 }

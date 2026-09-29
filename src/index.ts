@@ -42,6 +42,8 @@ import { OpportunityStrategist } from './services/opportunity-strategist.js';
 import { OpportunityPostMortem } from './services/opportunity-post-mortem.js';
 import { globalDecisionLedger } from './services/decision-ledger.js';
 import { globalDecisionCache } from './services/decision-cache.js';
+import { globalEphemeralStore } from './storage/ephemeral-store.js';
+import { globalObservationStore } from './storage/durable-observation-store.js';
 import { globalReputationMemory } from './services/reputation-memory.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { WalletTracker } from './services/wallet-tracker.js';
@@ -62,6 +64,19 @@ dotenv.config();
 bootstrapStartupConfig();
 validateRuntimeConfig();
 printStartupBanner();
+
+// P2/P5 — probe the durable + ephemeral backends at boot and log the result so
+// the cloud deployment's Postgres/Redis arming state is visibly confirmed.
+// Both probes are best-effort and fail-open (never block startup).
+void Promise.allSettled([
+  globalObservationStore.probe ? globalObservationStore.probe() : Promise.resolve({ armed: false, ok: false, detail: 'probe N/A' }),
+  globalEphemeralStore.probe ? globalEphemeralStore.probe() : Promise.resolve({ armed: false, ok: false, detail: 'probe N/A' }),
+]).then(([pg, redis]) => {
+  const pgRes = pg.status === 'fulfilled' ? pg.value : { armed: false, ok: false, detail: 'probe rejected' };
+  const rdRes = redis.status === 'fulfilled' ? redis.value : { armed: false, ok: false, detail: 'probe rejected' };
+  console.log(`[DURABLE] pg armed=${pgRes.armed} ok=${pgRes.ok} :: ${pgRes.detail}`);
+  console.log(`[EPHEMERAL] redis armed=${rdRes.armed} ok=${rdRes.ok} :: ${rdRes.detail}`);
+});
 
 const telegramService = new TelegramService();
 const apiKeyGuard = new ApiKeyGuardService();

@@ -42,6 +42,8 @@ export interface ObservationStore {
   recent(limit?: number): StoredObservation[];
   /** Approximate durable row count (for a [DURABLE] telemetry line). */
   size(): number;
+  /** Best-effort startup connectivity probe (in-memory impls report armed=false). */
+  probe?(): Promise<{ armed: boolean; ok: boolean; detail: string }>;
 }
 
 export class InMemoryObservationStore implements ObservationStore {
@@ -91,9 +93,19 @@ export class PostgresObservationStore implements ObservationStore {
   private ready = false;
 
   constructor(url?: string) {
-    this.url = url ?? process.env.DATABASE_URL ?? null;
+    // Resolution order: explicit URL arg > DATABASE_URL > Zeabur-injected
+    // POSTGRES_URI / POSTGRES_CONNECTION_STRING. Zeabur does NOT set
+    // DATABASE_URL; it provides POSTGRES_URI/POSTGRES_CONNECTION_STRING
+    // pointing at the internal service hostname, which is reachable only from
+    // inside the deployment.
+    this.url =
+      url ??
+      process.env.DATABASE_URL ??
+      process.env.POSTGRES_URI ??
+      process.env.POSTGRES_CONNECTION_STRING ??
+      null;
     if (!this.url) {
-      console.warn('[DURABLE] PostgresObservationStore constructed without DATABASE_URL — falling back to in-memory only.');
+      console.warn('[DURABLE] PostgresObservationStore constructed without a Postgres URL — falling back to in-memory only.');
     }
   }
 
@@ -140,6 +152,24 @@ export class PostgresObservationStore implements ObservationStore {
     return Boolean(this.url);
   }
 
+  /**
+   * Best-effort startup connectivity probe. Logs whether the Postgres path
+   * armed and whether the pool/schema actually came up — used to confirm the
+   * durable backend in cloud (Zeabur injects POSTGRES_URI). Never throws.
+   */
+  public async probe(): Promise<{ armed: boolean; ok: boolean; detail: string }> {
+    if (!this.url) return { armed: false, ok: false, detail: 'no Postgres URL configured — in-memory fallback' };
+    try {
+      const pool = await this.ensurePool();
+      await pool.query('SELECT 1');
+      return { armed: true, ok: true, detail: 'connected; schema ensured' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[DURABLE] Postgres probe failed (fail-open to mirror): ${msg}`);
+      return { armed: true, ok: false, detail: msg };
+    }
+  }
+
   private async ensurePool(): Promise<any> {
     if (this.pool) return this.pool;
     if (!this.url) throw new Error('DATABASE_URL not configured');
@@ -169,13 +199,14 @@ CREATE INDEX IF NOT EXISTS idx_discovery_observations_at ON discovery_observatio
 `;
 
 /**
- * Select the durable store for the process. No DATABASE_URL → in-memory (tests,
- * local dev, and any deployment without Postgres). DATABASE_URL present →
- * Postgres, tiered fail-open on the in-memory mirror.
+ * Select the durable store for the process. No Postgres URL (DATABASE_URL or
+ * Zeabur's POSTGRES_URI/POSTGRES_CONNECTION_STRING) → in-memory (tests, local
+ * dev, and any deployment without Postgres). A URL present → Postgres, tiered
+ * fail-open on the in-memory mirror.
  */
 export function createObservationStore(): ObservationStore {
-  if (process.env.DATABASE_URL) {
-    return new PostgresObservationStore(process.env.DATABASE_URL);
+  if (process.env.DATABASE_URL || process.env.POSTGRES_URI || process.env.POSTGRES_CONNECTION_STRING) {
+    return new PostgresObservationStore();
   }
   return new InMemoryObservationStore();
 }
