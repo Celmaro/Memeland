@@ -7,17 +7,32 @@ export class PriceFeedService {
   private readonly freshness: StalenessClock;
   private readonly cacheDurationMs: number;
 
-  private symbolToGeckoId: Record<string, string> = {
-    BTC: 'bitcoin',
-    ETH: 'ethereum',
-    USDC: 'usd-coin',
-    BONK: 'bonk',
-    PEPE: 'pepe',
-    WIF: 'dogwifcoin',
-    DOGE: 'dogecoin',
-    AVAX: 'avalanche-2',
-    SUI: 'sui',
-    LINK: 'chainlink',
+  /**
+   * Symbol -> GeckoTerminal simple-price reference.
+   *
+   * GeckoTerminal's simple-price endpoint is ADDRESS-keyed per NETWORK (unlike
+   * CoinGecko's coin-ID-keyed /simple/price): you call
+   *   /simple/networks/{network}/token_price/{addresses}
+   * and the response keys prices by token contract address. So each supported
+   * symbol must map to the concrete on-chain contract we want to price.
+   *
+   * EVM addresses are stored lower-case (GeckoTerminal echoes them lower-case;
+   * Solana base58 is case-sensitive and kept verbatim). We intentionally DROP
+   * DOGE and SUI: they are L1 native assets with no canonical GeckoTerminal
+   * token-contract address, so there is nothing to price here (they resolve
+   * to null, same as CoinGecko's 403 already did). The fee-gate-critical
+   * symbols (BTC/ETH/SOL) are still covered — BTC/ETH via wrapped contracts
+   * here, SOL via the exchange-ticker fallback below.
+   */
+  private symbolRefs: Record<string, { network: string; address: string }> = {
+    BTC: { network: 'eth', address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599' }, // WBTC
+    ETH: { network: 'eth', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' }, // WETH
+    USDC: { network: 'eth', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' },
+    PEPE: { network: 'eth', address: '0x6982508145454ce325ddbe47a25d4ec3d2311933' },
+    LINK: { network: 'eth', address: '0x514910771af9ca656af840dff83e8264ecf986ca' },
+    AVAX: { network: 'avax', address: '0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7' }, // WAVAX
+    BONK: { network: 'solana', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' },
+    WIF: { network: 'solana', address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm' },
   };
 
   constructor(opts: { cacheDurationMs?: number; now?: () => number } = {}) {
@@ -29,8 +44,7 @@ export class PriceFeedService {
 
   public async getPrice(symbol: string): Promise<number | null> {
     const cleanSymbol = symbol.toUpperCase().trim();
-    const geckoId = this.symbolToGeckoId[cleanSymbol];
-    if (!geckoId) {
+    if (!this.symbolRefs[cleanSymbol]) {
       console.warn(`[PRICE SERVICE] Unsupported symbol "${symbol}" — returning null.`);
       return null;
     }
@@ -42,8 +56,7 @@ export class PriceFeedService {
 
   public async get24hChange(symbol: string): Promise<number | null> {
     const cleanSymbol = symbol.toUpperCase().trim();
-    const geckoId = this.symbolToGeckoId[cleanSymbol];
-    if (!geckoId) return null;
+    if (!this.symbolRefs[cleanSymbol]) return null;
     if (this.freshness.isStale() || this.changes.size() === 0) {
       await this.refreshPrices();
     }
@@ -61,33 +74,50 @@ export class PriceFeedService {
 
   private async refreshPrices(): Promise<void> {
     try {
-      const ids = Object.values(this.symbolToGeckoId).join(',');
-      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`CoinGecko HTTP error: ${response.status}`);
+      // GeckoTerminal simple-price is PER-NETWORK: one call returns prices for
+      // addresses on a single network. Group symbol refs by network so each
+      // network needs exactly one request (addresses are comma-joined, up to
+      // 100). We fire the network calls sequentially, not Promise.all — they
+      // share the keyless 30/min budget, and concurrent loops would collapse
+      // pacing and trip a 429 (same failure mode the discovery feed documents).
+      const byNetwork = new Map<string, Array<{ symbol: string; address: string }>>();
+      for (const [symbol, ref] of Object.entries(this.symbolRefs)) {
+        const list = byNetwork.get(ref.network) ?? [];
+        list.push({ symbol, address: ref.address });
+        byNetwork.set(ref.network, list);
       }
-      const data = (await response.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
-      for (const [symbol, geckoId] of Object.entries(this.symbolToGeckoId)) {
-        const price = data[geckoId]?.usd;
-        if (typeof price === 'number' && price > 0) {
-          this.prices.set(symbol, price);
+      for (const [network, entries] of byNetwork) {
+        const addresses = entries.map((e) => e.address).join(',');
+        const url = `https://api.geckoterminal.com/api/v2/simple/networks/${network}/token_price/${addresses}?include_24hr_price_change=true`;
+        const response = await fetch(url, {
+          headers: { Accept: 'application/json;version=20230203' },
+        });
+        if (!response.ok) {
+          console.warn(`[PRICE SERVICE] GeckoTerminal ${network} HTTP error: ${response.status}`);
+          continue; // try the next network; missing networks stay null
         }
-        const change = data[geckoId]?.usd_24h_change;
-        if (typeof change === 'number') {
-          this.changes.set(symbol, change);
+        const body = (await response.json()) as {
+          data?: { attributes?: { token_prices?: Record<string, string>; h24_price_change_percentage?: Record<string, string> } };
+        };
+        const prices = body?.data?.attributes?.token_prices ?? {};
+        const changes = body?.data?.attributes?.h24_price_change_percentage ?? {};
+        for (const { symbol, address } of entries) {
+          const price = Number(prices[address]);
+          if (Number.isFinite(price) && price > 0) this.prices.set(symbol, price);
+          const change = Number(changes[address]);
+          if (Number.isFinite(change)) this.changes.set(symbol, change);
         }
       }
       this.freshness.touch();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      // Item 2: CoinGecko is a single point of failure for the fee gate — when
-      // it 429s or goes stale, EVERY token with a fee fails "live price
-      // unavailable". Fall back to the public exchange tickers (Binance →
-      // Coinbase) so ETH/SOL/BTC prices keep flowing. Fail-soft: if all three
-      // fail, the gate stays fail-closed (correct) but the operator sees which
-      // fallback worked.
-      console.warn(`[PRICE SERVICE ERROR] CoinGecko failed (${message}) — trying exchange fallbacks.`);
+      // Item 2: a single price provider is a point of failure for the fee gate
+      // — when it 429s (keyless 30/min budget) or goes stale, EVERY token with
+      // a fee fails "live price unavailable". Fall back to the public exchange
+      // tickers (Binance → Coinbase) so ETH/SOL/BTC prices keep flowing.
+      // Fail-soft: if all sources fail, the gate stays fail-closed (correct)
+      // but the operator sees which fallback worked.
+      console.warn(`[PRICE SERVICE ERROR] GeckoTerminal failed (${message}) — trying exchange fallbacks.`);
       await this.refreshFromExchangeFallbacks();
     }
   }
