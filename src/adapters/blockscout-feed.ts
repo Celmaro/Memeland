@@ -110,7 +110,7 @@ export class BlockscoutFeed implements MarketDataProvider {
         if (amountUsd <= 0) continue;
         const timestamp = t.timestamp ? Date.parse(t.timestamp) : Date.now();
         if (!Number.isFinite(timestamp)) continue;
-        events.push({ wallet: from, amountUsd, timestamp });
+        events.push({ wallet: from, amountUsd, timestamp, txHash: t.hash, blockNumber: t.blockNumber });
       }
       return events;
     } catch {

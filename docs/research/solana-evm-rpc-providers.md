@@ -190,3 +190,17 @@ applies a per-window freshness budget (24h~6h, 7d~1d, 30d~3d) so a stale window
 decays out of "current" presence: a trader historically in 24h but not on the
 current board no longer counts as persistent — fixing the accumulate-forever bug.
 `lastSeenAt` exposed on PersistentTrader.
+
+## 14. Phase 2 — VerifyCoordinator + best-effort demotion (enrichment)
+
+- **Two-source verify**: Blockscout token-transfer `hash`/`blockNumber` are now
+  carried on `BuyEvent.txHash`/`blockNumber`. On convergence hydration the agent
+  runs an independent on-chain confirmation — `rpcVerifyCrossCheck` →
+  `eth_getTransactionReceipt` over the failover pool (`src/services/onchain/rpc-verify.ts`).
+  Explorer-indexed view + raw-chain view = two independent confirmations; RPC
+  disagreement/absence degrades to "unconfirmed", never a false pass.
+- **Best-effort demotion**: `src/services/source-quota.ts` classifies HTTP
+  failures (400/402/429 → quota, 5xx/network → transient) and puts a source in a
+  cooldown window; the collector short-circuits and logs only the first hit, so a
+  third-party indexer outage (GMGN/Paprika/Gecko/Routescan/CMC/SolTracker) is
+  non-blocking and log-quiet. Applied in `collectProviderCandidates`.

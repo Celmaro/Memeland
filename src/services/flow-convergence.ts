@@ -11,6 +11,13 @@ export interface BuyEvent {
   wallet: string;
   amountUsd: number;
   timestamp: number;
+  /**
+   * The on-chain transaction hash behind this buy, when the producer knows it
+   * (Blockscout token-transfer `hash`). Lets the RPC verify layer independently
+   * confirm the transaction exists on-chain (second, raw-chain confirmation).
+   */
+  txHash?: string;
+  blockNumber?: number;
 }
 
 export interface FlowConvergenceConfig {

@@ -29,6 +29,9 @@ import { GoPlusSecurityService } from '../../services/goplus-security-service.js
 import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
 import { JsonRpcWsTape } from '../../adapters/jsonrpc-ws-tape.js';
+import { RpcVerify } from '../../services/onchain/rpc-verify.js';
+import { globalSourceQuota, classifyHttpFailure, statusOf } from '../../services/source-quota.js';
+import type { BuyEvent } from '../../services/flow-convergence.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
@@ -162,6 +165,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
   private goplusService: GoPlusSecurityService;
   /** I0-1 Blockscout BuyEvent producer for the convergence voter (env-gated). */
   private blockscout: BlockscoutFeed | null;
+  /**
+   * Strategic move — independent on-chain verify over the failover pool
+   * (eth_getTransactionReceipt). The second verify source vs Blockscout.
+   */
+  private rpcVerify: RpcVerify;
 
   /** Last pass funnel stats — consumed by index.ts for the Phase-1 [FUNNEL] counters. */
   private lastFunnel: { scanned: number; prefiltered: number; emitted: number } = { scanned: 0, prefiltered: 0, emitted: 0 };
@@ -190,6 +198,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       sellability?: SellabilitySimulator;
       blockscout?: BlockscoutFeed | null;
       jsonRpcWsTapes?: JsonRpcWsTape[];
+      rpcVerify?: RpcVerify;
     } = {}
   ) {
     this.gmgn = new GMGNAdapter();
@@ -226,6 +235,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.coinstatsRisk = process.env.COINSTATS_API_KEY ? new CoinStatsRiskService() : null;
     this.jevRouter = this.buildJevRouter();
     this.blockscout = opts.blockscout ?? null;
+    this.rpcVerify = opts.rpcVerify ?? new RpcVerify();
   }
 
   /**
@@ -417,6 +427,23 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     }
   }
 
+  /**
+   * Strategic move — second, independent verify signal. Blockscout reports buy
+   * events from its INDEXED view; this confirms the latest buy transaction
+   * directly on-chain via eth_getTransactionReceipt over the failover pool.
+   * Returns null when the chain has no RPC verify lane or the tx is unconfirmable
+   * (fail-soft → "no independent confirmation", never a false confirmation).
+   */
+  private async rpcVerifyCrossCheck(chain: Chain, buys: BuyEvent[]): Promise<{ confirmed: boolean; txHash?: string; status?: boolean } | null> {
+    const rpcKey = chain === 'eth' ? 'eth' : chain === 'base' ? 'base' : chain === 'bsc' ? 'bsc' : chain === 'robinhood' ? 'rh' : undefined;
+    if (!rpcKey) return null;
+    const tx = buys.find((b) => b.txHash);
+    if (!tx?.txHash) return null;
+    const receipt = await this.rpcVerify.getTransactionReceipt(rpcKey, tx.txHash);
+    if (!receipt) return null;
+    return { confirmed: receipt.confirmed, txHash: receipt.txHash, status: receipt.status };
+  }
+
   /** SolanaTracker Sol ENRICHER (price/overview/stats via free Data API).
    *  Guarded by SOLANATRACKER_FEED_ENABLED=true + SOLANATRACKER_API_KEY; Sol-only,
    *  so it yields nothing on non-Sol chains (filtered inside the feed). */
@@ -544,12 +571,20 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     if (!provider) return [];
     // DISCOVERY_INTRODUCERS allowlist gate (unset → every enabled feed participates).
     if (!isIntroducerEnabled(source, process.env.DISCOVERY_INTRODUCERS)) return [];
+    // Best-effort demotion: a source in cooldown is short-circuited (no hammering,
+    // no repeated logs) instead of blocking the funnel.
+    if (globalSourceQuota.isCooling(source)) return [];
     try {
       const chainId = chainIdFor(chain);
       const tokens = await provider.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
       return tokens.map((t) => normalizeDexToken(chain, t, source));
     } catch (err: any) {
-      console.warn(`[MEME AGENT] ${source} candidates failed (skipped): ${err.message}`);
+      // Classify (400/402/429 → quota cooldown) and log only on the first hit
+      // in the window, so an indexer outage degrades silently.
+      const cls = classifyHttpFailure(statusOf(err), err);
+      if (globalSourceQuota.backoff(source, cls)) {
+        console.warn(`[MEME AGENT] ${source} candidates failed (skipped) [${cls}]: ${err?.message ?? err}`);
+      }
       return [];
     }
   }
@@ -1327,7 +1362,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               const chainId = chainIdFor(chain);
               if (chainId !== undefined && !(t as any).convergence) {
                 const buys = await this.blockscout.getBuyEvents(chainId, t.address);
-                if (buys.length > 0) (t as any).convergence = { buys };
+                if (buys.length > 0) {
+                  (t as any).convergence = { buys };
+                  // Second verify signal: confirm the latest buy tx on-chain via RPC.
+                  (t as any).rpcVerified = await this.rpcVerifyCrossCheck(chain, buys);
+                }
               }
             }
             opinions.push(await ownerDedupedConvergenceVote(globalDecisionCache, { ...baseCtx, convergence: (t as any).convergence }));
