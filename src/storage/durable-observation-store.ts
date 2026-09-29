@@ -274,7 +274,11 @@ export class PostgresObservationStore implements ObservationStore {
     // Lazy dynamic import keeps `pg` out of the sync import graph (tree-shaking + cold start).
     const { default: pg } = await import('pg');
     this.pool = new pg.Pool({ connectionString: this.url, max: 5, idleTimeoutMillis: 30_000 });
-    await this.pool.query(SCHEMA_IF_NOT_EXISTS);
+    // P12 — apply versioned schema migrations (tracked in schema_migrations),
+    // replacing the inline CREATE-IF-NOT-EXISTS blob. Fail-open: a migration
+    // error is logged below and the in-memory mirror keeps serving the pass.
+    const { runMigrations } = await import('./migration-runner.js');
+    await runMigrations(this.pool);
     this.ready = true;
     return this.pool;
   }
@@ -283,18 +287,6 @@ export class PostgresObservationStore implements ObservationStore {
     return process.env.DURABLE_VERBOSE === 'true';
   }
 }
-
-const SCHEMA_IF_NOT_EXISTS = `
-CREATE TABLE IF NOT EXISTS discovery_observations (
-  chain          TEXT NOT NULL,
-  token_address  TEXT NOT NULL,
-  source         TEXT NOT NULL,
-  at             BIGINT NOT NULL,
-  cost_credits   NUMERIC DEFAULT 0,
-  PRIMARY KEY (chain, token_address, source, at)
-);
-CREATE INDEX IF NOT EXISTS idx_discovery_observations_at ON discovery_observations (at DESC);
-`;
 
 /**
  * Select the durable store for the process. No Postgres URL (DATABASE_URL or

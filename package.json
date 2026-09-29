@@ -18,7 +18,7 @@
     "dev": "tsx watch src/index.ts",
     "terminal": "tsx src/cli/tui.ts",
     "tui": "tsx src/cli/tui.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-migrations.mjs",
     "start": "node dist/index.js",
     "deploy": "npm ci && npm audit --omit=dev && npm run build && (npx pm2 delete memeland-agent || npx pm2 delete opencatz-agent || npx pm2 delete opencat-agent || true) && npx pm2 start dist/index.js --name memeland-agent --update-env",
     "update": "node scripts/update-core.mjs",
