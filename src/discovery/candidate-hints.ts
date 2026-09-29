@@ -131,24 +131,42 @@ export class HintRegistry {
    * hint gate so an unreachable RPC oracle FAILS OPEN (the gate demotes to prior
    * behavior + cooldown) instead of silently failing closed on every row.
    */
-  public async drainChecked(verify: (hint: CandidateHint) => Promise<HintCheckOutcome>): Promise<{
+  public async drainChecked(verify: (hint: CandidateHint) => Promise<HintCheckOutcome>, opts: { concurrency?: number } = {}): Promise<{
     promoted: CandidateHint[];
     /** True when any hint's oracle was unreachable this pass. */
     transportDown: boolean;
   }> {
+    const concurrency = Math.max(1, opts.concurrency ?? 8);
     const promoted: CandidateHint[] = [];
     const batch = [...this.pending.entries()];
     this.pending.clear();
     let transportDown = false;
-    for (const [k, hint] of batch) {
-      let exists = false;
-      try {
-        const out = await verify(hint);
-        exists = out.exists;
-        if (out.transportDown) transportDown = true;
-      } catch {
-        exists = false; // verification failure = not promotable (fail-closed)
+    // P2 — bounded-concurrency verification (Finding 6): the old serial
+    // `for (...) { await verify(hint) }` turned 100-300 GMGN hints into the
+    // same number of sequential RPC calls (the 180s-pass bottleneck). Run at
+    // most `concurrency` in flight; results map back to their input slot so
+    // the promoted set, transportDown flag, and resolution keys are EXACTLY
+    // the serial outcome (G7) — only wall-clock and write-order change.
+    const results = new Array<{ exists: boolean; failure: boolean }>(batch.length);
+    let head = 0;
+    const workers = Array.from({ length: concurrency }, async () => {
+      for (;;) {
+        const idx = head++;
+        if (idx >= batch.length) return;
+        const hint = batch[idx][1];
+        try {
+          const out = await verify(hint);
+          results[idx] = { exists: out.exists, failure: false };
+          if (out.transportDown) transportDown = true;
+        } catch {
+          results[idx] = { exists: false, failure: true }; // fail-closed on transport error
+        }
       }
+    });
+    await Promise.all(workers);
+    for (let i = 0; i < batch.length; i++) {
+      const [k, hint] = batch[i];
+      const exists = results[i].exists;
       const res: HintResolution = { hint, exists, resolvedAt: Date.now() };
       this.resolutions.set(k, res);
       if (exists) promoted.push(hint);

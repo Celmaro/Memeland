@@ -7,6 +7,17 @@ export class PriceFeedService {
   private readonly freshness: StalenessClock;
   private readonly cacheDurationMs: number;
 
+  /** P3 — abort signal so a stalled price source cannot pin the screening pass. */
+  private static async fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8_000): Promise<Response> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { ...opts, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /**
    * Symbol -> GeckoTerminal simple-price reference.
    *
@@ -35,6 +46,19 @@ export class PriceFeedService {
     WIF: { network: 'solana', address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm' },
   };
 
+  /**
+   * Native L1 coins with no canonical GeckoTerminal contract address. The
+   * GeckoTerminal ref map can't price them, so they resolve via the public
+   * exchange-ticker fallback (Binance → Coinbase). Price keeps flowing here
+   * even when GeckoTerminal 429s or the map lacks an address (P5/E3/Item 2):
+   * the fee gate depends on SOL/ETH/BTC staying priceable.
+   */
+  private static readonly NATIVE_FALLBACK: Record<string, boolean> = {
+    SOL: true,
+    BTC: true,
+    ETH: true,
+  };
+
   constructor(opts: { cacheDurationMs?: number; now?: () => number } = {}) {
     this.cacheDurationMs = opts.cacheDurationMs ?? 60_000;
     this.prices = new TtlCache<number>({ ttlMs: this.cacheDurationMs, now: opts.now });
@@ -44,9 +68,21 @@ export class PriceFeedService {
 
   public async getPrice(symbol: string): Promise<number | null> {
     const cleanSymbol = symbol.toUpperCase().trim();
-    if (!this.symbolRefs[cleanSymbol]) {
+    const isNative = PriceFeedService.NATIVE_FALLBACK[cleanSymbol] === true;
+    if (!this.symbolRefs[cleanSymbol] && !isNative) {
       console.warn(`[PRICE SERVICE] Unsupported symbol "${symbol}" — returning null.`);
       return null;
+    }
+    // P5/E3: native L1 coins with NO GeckoTerminal contract address (SOL)
+    // resolve through the public exchange tickers instead of the ref-map.
+    // Symbols present in symbolRefs (BTC/ETH/WBTC/WETH) keep their GeckoTerminal
+    // path, which already falls back to exchange tickers on failure.
+    const cached = this.prices.get(cleanSymbol);
+    if (isNative && !this.symbolRefs[cleanSymbol] && cached === null) {
+      try {
+        await this.refreshNativeFallback(cleanSymbol);
+      } catch { /* next call retries */ }
+      return this.prices.get(cleanSymbol) ?? null;
     }
     if (this.freshness.isStale() || this.prices.size() === 0) {
       await this.refreshPrices();
@@ -89,7 +125,7 @@ export class PriceFeedService {
       for (const [network, entries] of byNetwork) {
         const addresses = entries.map((e) => e.address).join(',');
         const url = `https://api.geckoterminal.com/api/v2/simple/networks/${network}/token_price/${addresses}?include_24hr_price_change=true`;
-        const response = await fetch(url, {
+        const response = await PriceFeedService.fetchWithTimeout(url, {
           headers: { Accept: 'application/json;version=20230203' },
         });
         if (!response.ok) {
@@ -135,7 +171,7 @@ export class PriceFeedService {
     // Binance: GET /api/v3/ticker/price?symbol=BTCUSDT — keyless public.
     for (const [symbol, pair] of Object.entries(binanceSymbols)) {
       try {
-        const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`);
+        const res = await PriceFeedService.fetchWithTimeout(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`);
         if (res.ok) {
           const data = (await res.json()) as { price?: string };
           const price = Number(data.price);
@@ -151,7 +187,7 @@ export class PriceFeedService {
     if (!any) {
       for (const [symbol, pair] of Object.entries(coinbaseSymbols)) {
         try {
-          const res = await fetch(`https://api.coinbase.com/v2/prices/${pair}/spot`);
+          const res = await PriceFeedService.fetchWithTimeout(`https://api.coinbase.com/v2/prices/${pair}/spot`);
           if (res.ok) {
             const data = (await res.json()) as { data?: { amount?: string } };
             const price = Number(data?.data?.amount);
@@ -170,6 +206,46 @@ export class PriceFeedService {
     } else {
       console.warn('[PRICE SERVICE] All price sources failed — fee gate remains fail-closed.');
     }
+  }
+
+  /**
+   * P5/E3: fetch a single native coin (SOL/BTC/ETH) through the exchange tickers
+   * when the GeckoTerminal ref-map can't price it. Mirrors
+   * refreshFromExchangeFallbacks() but only for the requested symbol, so a SOL
+   * price request doesn't force-refresh all tickers or trip a Binance rate wall.
+   */
+  private async refreshNativeFallback(symbol: string): Promise<void> {
+    const binance = { SOL: 'SOLUSDT', BTC: 'BTCUSDT', ETH: 'ETHUSDT' }[symbol];
+    const coinbase = { SOL: 'SOL-USD', BTC: 'BTC-USD', ETH: 'ETH-USD' }[symbol];
+    if (!binance || !coinbase) return;
+    let any = false;
+    try {
+      const res = await PriceFeedService.fetchWithTimeout(`https://api.binance.com/api/v3/ticker/price?symbol=${binance}`);
+      if (res.ok) {
+        const data = (await res.json()) as { price?: string };
+        const price = Number(data.price);
+        if (Number.isFinite(price) && price > 0) {
+          this.prices.set(symbol, price);
+          this.changes.set(symbol, 0);
+          any = true;
+        }
+      }
+    } catch { /* try coinbase */ }
+    if (!any) {
+      try {
+        const res = await PriceFeedService.fetchWithTimeout(`https://api.coinbase.com/v2/prices/${coinbase}/spot`);
+        if (res.ok) {
+          const data = (await res.json()) as { data?: { amount?: string } };
+          const price = Number(data?.data?.amount);
+          if (Number.isFinite(price) && price > 0) {
+            this.prices.set(symbol, price);
+            this.changes.set(symbol, 0);
+            any = true;
+          }
+        }
+      } catch { /* next call retries */ }
+    }
+    if (any) this.freshness.touch();
   }
 }
 

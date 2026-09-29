@@ -16,6 +16,7 @@ import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
 import { globalObservationStore } from '../../storage/durable-observation-store.js';
 import { DiscoveryCoordinator, type CandidateEmitter } from '../../discovery/candidate-emitter.js';
+import { timed } from '../../runtime/pass-timing.js';
 import { globalHintGate } from '../../discovery/hint-gate.js';
 import { sourceParticipation } from '../../startup/provider-banner.js';
 import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
@@ -955,9 +956,12 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
                   // GMGN overlay (upgrade existing addresses only, preserving who
                   // FOUND it). tape/track need per-pass state → passed as extras;
                   // GMGN discovery rows ride in as overlay.
-                  const { candidates: allCandidates, observations } = await this.discoveryCoordinator.discoverAll(chain, {
-                    extras: { tape: tapeCandidates, track: trackCandidates },
-                    overlay: (await globalHintGate.gate(gmgnDiscovery, chain, 'gmgn')).promoted,
+                  const { candidates: allCandidates, observations } = await timed(`discover:${chain}`, async () => {
+                    const gateOut = await globalHintGate.gate(gmgnDiscovery, chain, 'gmgn');
+                    return this.discoveryCoordinator.discoverAll(chain, {
+                      extras: { tape: tapeCandidates, track: trackCandidates },
+                      overlay: gateOut.promoted,
+                    });
                   });
         scanned += allCandidates.length;
         scannedByChain[chain] = (scannedByChain[chain] ?? 0) + allCandidates.length;

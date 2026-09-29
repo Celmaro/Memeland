@@ -18,8 +18,38 @@
  */
 
 import type { Chain, GMGNRawToken } from '../adapters/gmgn-adapter.js';
-import { globalSourceQuota, classifyHttpFailure, statusOf } from '../services/source-quota.js';
+import { globalSourceQuota, classifyHttpFailure, statusOf, type FailureClass } from '../services/source-quota.js';
 import type { DiscoveryObservation } from './discovery-registry.js';
+
+/**
+ * P4 — default per-emitter discovery timeout. A single hung source can stall
+ * every chain (discoverAll awaits emitters sequentially); bounding each call
+ * keeps the pass inside SCREENING_TIMEOUT_MS. Env-overridable.
+ */
+export const DEFAULT_EMITTER_TIMEOUT_MS = Math.max(
+  1000,
+  Number(process.env.DISCOVERY_EMITTER_TIMEOUT_MS) || 15_000,
+);
+
+/** Race a provider call against a deadline; rejects with TimeoutError on expiry. */
+async function withTimeout<T>(fn: () => Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const err = new Error(`emitter exceeded ${ms}ms`);
+          err.name = 'TimeoutError';
+          reject(err);
+        }, ms);
+        if (typeof (timer as any)?.unref === 'function') (timer as any).unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** A discovery source that yields normalized candidate tokens for a chain. */
 export interface CandidateEmitter {
@@ -139,15 +169,24 @@ export class DiscoveryCoordinator {
         tokens = extra; // externally collected, already gated (tape/track)
       } else if (emitter) {
         if (!emitter.enabled()) continue;
-        try {
-          tokens = await emitter.discover(chain);
-        } catch (err: unknown) {
-          const cls = classifyHttpFailure(statusOf(err), err);
+        // P4 — per-emitter timeout: one hung source must not stall every chain.
+        // On timeout the emitter is skipped and backoff-registered (reusing the
+        // established source-quota cooldown) so discovery continues. Fail-open.
+        tokens = await withTimeout(
+          () => emitter.discover(chain),
+          DEFAULT_EMITTER_TIMEOUT_MS,
+        ).catch((err: unknown) => {
+          const timedOut = err instanceof Error && err.name === 'TimeoutError';
+          const cls: FailureClass = timedOut
+            ? 'transient'
+            : classifyHttpFailure(statusOf(err), err);
           if (globalSourceQuota.backoff(emitter.id, cls, this.now())) {
-            console.warn(`[DISCOVERY] ${emitter.id} failed (skipped) [${cls}]: ${err instanceof Error ? err.message : String(err)}`);
+            console.warn(`[DISCOVERY] ${emitter.id} failed (skipped) [${timedOut ? 'timeout' : cls}]: ${err instanceof Error ? err.message : String(err)}`);
           }
-          continue;
-        }
+          return undefined;
+        });
+        if (tokens === undefined) continue; // timed out or errored → skip source
+        if (!Array.isArray(tokens)) tokens = undefined; // safety: caller must return array
       } else {
         continue;
       }
