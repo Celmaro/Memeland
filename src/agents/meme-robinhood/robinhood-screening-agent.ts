@@ -14,6 +14,7 @@ import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
+import { DiscoveryCoordinator, type CandidateEmitter } from '../../discovery/candidate-emitter.js';
 import { sourceParticipation } from '../../startup/provider-banner.js';
 import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from '../../adapters/fomo-emitter.js';
@@ -149,6 +150,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
    * Injected after startup (tapes are wired after the agent is constructed).
    */
   private jsonRpcWsTapes: JsonRpcWsTape[];
+  /**
+   * Phase 3 — DiscoveryCoordinator: owns candidate-merge priority, allowlist +
+   * cooldown, and fail-soft across all discovery emitters so the agent stops
+   * knowing how each provider works. Built in the constructor from this agent's
+   * feeds; tape/track (dynamic per-pass state) are supplied as `extras`.
+   */
+  private discoveryCoordinator: DiscoveryCoordinator;
   /** P1.5 DeFiLlama regime feed (regime CONTEXT, not a token-score voter). Empty until injected. */
   private defillama: DeFiLlamaRegimeFeed | null;
   /** P1.4 Arkham entity enricher (entity/deployer/label resolution on finalists). Empty until injected. */
@@ -236,6 +244,34 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     this.jevRouter = this.buildJevRouter();
     this.blockscout = opts.blockscout ?? null;
     this.rpcVerify = opts.rpcVerify ?? new RpcVerify();
+    this.discoveryCoordinator = this.buildDiscoveryCoordinator();
+  }
+
+  /**
+   * Phase 3 — build the DiscoveryCoordinator from this agent's feeds. Provider
+   * feeds + fomo + WS-tape register as named emitters; tape/track (dynamic
+   * per-pass state) are supplied to discoverAll as `extras`.
+   */
+  private buildDiscoveryCoordinator(): DiscoveryCoordinator {
+    const c = new DiscoveryCoordinator();
+    // Each emitter delegates to the agent's collect method, which self-gates
+    // its own enable env-var + DISCOVERY_INTRODUCERS allowlist + cooldown.
+    // enabled() is `true` so the coordinator never bypasses a spied/mocked
+    // method — the method (or its mock) decides.
+    const reg = (id: string, discover: (chain: Chain) => Promise<GMGNRawToken[]>, allowlistSource?: string) =>
+      c.add({ id, allowlistSource, enabled: () => true, discover });
+    reg('dexscreener', (ch) => this.collectDexscreenerCandidates(ch));
+    reg('dexpaprika', (ch) => this.collectDexpaprikaCandidates(ch));
+    reg('gecko', (ch) => this.collectGeckoCandidates(ch));
+    reg('ankr', (ch) => this.collectAnkrCandidates(ch));
+    reg('routescan', (ch) => this.collectRoutescanCandidates(ch));
+    reg('cmc', (ch) => this.collectCmcDexCandidates(ch));
+    reg('solana-rpc', (ch) => this.collectSolanaRpcCandidates(ch));
+    reg('solanatracker', (ch) => this.collectSolanaTrackerCandidates(ch));
+    reg('fomo', (ch) => this.collectFomoCandidates(ch));
+    // WS-tape pump.fun mints promote under the solana-rpc introducer.
+    reg('ws-tape', (ch) => this.collectJsonRpcWsTapeCandidates(ch), 'solana-rpc');
+    return c;
   }
 
   /**
@@ -884,55 +920,19 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           this.collectTrackAccumulation(chain),
                   ]);
                   const trackCandidates = await this.collectTrackCandidates(trackAcc, chain);
-                  // Keyless discovery tier (all self-guarded, fail-open empty when off).
                   const tapeCandidates = await this.collectTapeCandidates(chain);
-                  const dexscreenerCandidates = await this.collectDexscreenerCandidates(chain);
-                  const dexpaprikaCandidates = await this.collectDexpaprikaCandidates(chain);
-                  const geckoCandidates = await this.collectGeckoCandidates(chain);
-                  const ankrCandidates = await this.collectAnkrCandidates(chain);
-                  const routescanCandidates = await this.collectRoutescanCandidates(chain);
-                  const cmcDexCandidates = await this.collectCmcDexCandidates(chain);
-                  const solanaRpcCandidates = await this.collectSolanaRpcCandidates(chain);
-                  const wsTapeCandidates = await this.collectJsonRpcWsTapeCandidates(chain);
-                  const solanaTrackerCandidates = await this.collectSolanaTrackerCandidates(chain);
-                  const fomoCandidates = await this.collectFomoCandidates(chain);
                   await this.collectFomoTraderIntel(chain);
-                  // Merge order = prefilter priority: keyless-DEX feeds first, GMGN
-                  // enrichment last. By-address dedupe (no 60s cooldown).
-                  const merged = new Map<string, GMGNRawToken>();
-                  // Final (2026-09-26, feed-matrix decision): keyless discovery
-                  // feeds INTRODUCE candidates — dexpaprika/gecko/dexscreener/
-                  // tape/track/ankr all cover the 5 chains. GMGN rank/trenches/
-                  // hot no longer introduces new addresses (its 748/cycle was
-                  // 429-prone and, per the verified feed research, not a
-                  // freshness source): GMGN rows now OVERLAY enrichment onto
-                  // addresses a keyless feed already found (smartDegen/CTO/KOL
-                  // fields that detectMemeSignal needs), and GMGN-only
-                  // addresses are dropped.
-                  for (const t of [...dexpaprikaCandidates, ...geckoCandidates, ...dexscreenerCandidates, ...tapeCandidates, ...trackCandidates, ...ankrCandidates, ...routescanCandidates, ...cmcDexCandidates, ...solanaRpcCandidates, ...wsTapeCandidates, ...solanaTrackerCandidates, ...fomoCandidates]) {
-                    const key = t.address.toLowerCase();
-                    const prev = merged.get(key);
-                    // Fresh-pair lane survival: a later, richer source (e.g. GMGN
-                    // rank) may overwrite an ankr raw pair — preserve freshLane so
-                    // the low fresh floor still applies to a pair first seen on-chain.
-                    const fresh = (prev?.freshLane || t.freshLane) ? true : undefined;
-                    merged.set(key, fresh ? { ...t, freshLane: true } : t);
-                  }
-                  // GMGN overlay pass: upgrade EXISTING addresses only. A GMGN
-                  // row for an address the keyless feeds never surfaced is
-                  // skipped (GMGN no longer a discovery source). freshLane
-                  // survives the overlay. The DISCOVERY source is preserved —
-                  // the overlay no longer relabels the row as 'gmgn' (Q1: the
-                  // funnel bySource mislabeled every overlay-upgraded token).
-                  for (const g of gmgnDiscovery) {
-                    const key = g.address.toLowerCase();
-                    const existing = merged.get(key);
-                    if (!existing) continue;
-                    const fresh = existing.freshLane || g.freshLane ? true : undefined;
-                    const discoveredBy = existing.source; // keep who FOUND it
-                    merged.set(key, { ...g, freshLane: fresh ? true : undefined, discoveredBy });
-                  }
-        const allCandidates = [...merged.values()];
+                  // Phase 3 — DiscoveryCoordinator owns the funnel mechanics that
+                  // used to be inline here: priority order (keyless-DEX first,
+                  // indexers last), by-address dedupe with freshLane survival,
+                  // DISCOVERY_INTRODUCERS allowlist + best-effort cooldown, and the
+                  // GMGN overlay (upgrade existing addresses only, preserving who
+                  // FOUND it). tape/track need per-pass state → passed as extras;
+                  // GMGN discovery rows ride in as overlay.
+                  const allCandidates = await this.discoveryCoordinator.discoverAll(chain, {
+                    extras: { tape: tapeCandidates, track: trackCandidates },
+                    overlay: gmgnDiscovery,
+                  });
         scanned += allCandidates.length;
         scannedByChain[chain] = (scannedByChain[chain] ?? 0) + allCandidates.length;
         for (const t of allCandidates) {
