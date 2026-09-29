@@ -102,4 +102,20 @@ describe('DiscoveryCoordinator — priority merge + demotion + P5 observation si
     expect(observations).toHaveLength(1);
     expect(observations[0]!.source).toBe('ankr');
   });
+
+  it('P10: carries source-reported providerEventTime (ms) from creationTimestamp, else undefined', async () => {
+    const c = new DiscoveryCoordinator();
+    c.add(emitter('gecko', [
+      tok('WITH_TS', 'gecko', { creationTimestamp: 1_600_000_000 }),   // seconds → ms
+      tok('NO_TS', 'gecko', { creationTimestamp: null }),
+      tok('ZERO_TS', 'gecko', { creationTimestamp: 0 }),
+    ]));
+    const { observations } = await c.discoverAll('sol', { observeAt: () => 2_000 });
+    const byAddr = Object.fromEntries(observations.map((o) => [o.tokenAddress, o]));
+    // Local `at` stays the ingest snapshot time (poll-schedule artifact).
+    expect(byAddr['WITH_TS']!.at).toBe(2_000);
+    expect(byAddr['WITH_TS']!.providerEventTime).toBe(1_600_000_000 * 1000);
+    expect(byAddr['NO_TS']!.providerEventTime).toBeUndefined();
+    expect(byAddr['ZERO_TS']!.providerEventTime).toBeUndefined();
+  });
 });

@@ -199,7 +199,18 @@ export class DiscoveryCoordinator {
         const prev = merged.get(key);
         const fresh = prev?.freshLane || t.freshLane ? true : undefined;
         merged.set(key, fresh ? { ...t, freshLane: true } : t);
-        observations.push({ chain, tokenAddress: t.address, source: obsSource as DiscoveryObservation['source'], at });
+        observations.push({
+          chain,
+          tokenAddress: t.address,
+          source: obsSource as DiscoveryObservation['source'],
+          at,
+          // P10 — carry the source-reported event time (GMGN creationTimestamp is
+          // seconds; convert to ms) so first-seen/latency can separate provider
+          // freshness from the local poll-schedule snapshot time.
+          providerEventTime: typeof t.creationTimestamp === 'number' && t.creationTimestamp > 0
+            ? t.creationTimestamp * 1000
+            : undefined,
+        });
       }
     }
 

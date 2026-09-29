@@ -65,6 +65,13 @@ export interface DiscoveryObservation {
   at: number;
   /** Optional discovery credit/call cost for this sighting (for spend metrics). */
   costCredits?: number;
+  /**
+   * P10 — source-reported event time (ms epoch) when the provider timestamps the
+   * token (e.g. GMGN `creationTimestamp`). `at` stays the LOCAL ingest time so
+   * first-seen/latency can distinguish provider freshness (this field) from the
+   * polling-schedule artifact (the local snapshot time).
+   */
+  providerEventTime?: number;
 }
 
 /** Registry-level aggregate metrics (coverage / dup-rate / spend / first-seen). */
