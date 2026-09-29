@@ -198,3 +198,78 @@ are factual, not conceptual.
 - **Do NOT implement verbatim:** treating BullX/Photon/Axiom as sourceable feeds; the universal
   "ETH introducer" framing; DeFiLlama as a token-score voter; fomo *without* the on-chain
   verify gate (it is a proxied social-app view, not discovery truth).
+
+---
+
+## 5. Addendum — fresh pass vs actual current `master` (2026-09-29)
+
+### 5.0 Git-state reconciliation (reads this section first)
+
+A later review was run against head **`143ea05d`** and reported a red CI: **1 of 1,140 tests
+fails** in `tests/robinhood-agent-additional-sources.test.ts` (composition-root DexScreener
+test — expected 1 candidate, received 0). That review predates the pushed work on this branch.
+
+**Actual current `master` is `c5d165f7`**, and `143ea05d` is **5 commits below it**
+(`143ea05d` → `1dba05f` → `88db13d` → `4c00920` → `6c22a64b` → `c5d165f7`). The DexScreener
+failure at `143ea05d` is the **cross-test `globalSourceQuota` leak** — a test in file `(c)`
+injects a throwing DexScreener, which registers a cooldown on the process-global quota and
+leaks into the following healthy-collector test. That was already fixed in `c5d165f7`
+(`afterEach` now clears `globalSourceQuota`).
+
+**Verified on current `master` (`c5d165f7`, clean tree, via SSH fetch of the real remote):**
+- `tests/robinhood-agent-additional-sources.test.ts` → **4/4 pass**.
+- Full gate `npx vitest run --coverage` → **158 files / 1136 tests pass**, coverage thresholds
+  hold, `tsc --noEmit` clean.
+
+So the fresh-pass's priority #1 ("fix failing DexScreener test") is **already satisfied** on
+the current branch. Do not re-apply it.
+
+### 5.1 Approved scope correction (two-of-six)
+
+Of the six "candidate-emitter" sources named in the second opinion
+(GMGN / FOMO / Pump.fun / Axiom / DEXScreener / BullX / Photon), **only two have a real
+developer API in-repo: GMGN and FOMO API.** There is **no adapter for BullX, Photon, or Axiom**
+(UI terminals, no public free API), and pump.fun has no official data API (route on-chain /
+PumpPortal WS). Approved scope = the leaderboard/trader-intelligence layer is fed via
+**GMGN + FOMO API**; the rest are on-chain.
+
+### 5.2 Fresh-pass claims verified against current code
+
+| Fresh-pass claim | Verdict | Evidence (current `master`) |
+| --- | --- | --- |
+| A DiscoveryCoordinator already exists; don't build another | ✅ | `src/discovery/candidate-emitter.ts` — `DISCOVERY_PRIORITY` is exactly `dexpaprika, gecko, dexscreener, tape, track, ankr, routescan, cmc, solana-rpc, ws-tape, solanatracker, fomo`; handles priority, fail-soft, cooldowns, GMGN overlay. |
+| **The real gap: source-level observations are lost before `CandidateRegistry`** | ✅ **Confirmed** | `discoverAll()` (candidate-emitter.ts:106-149) merges by address and returns **only the merged `GMGNRawToken[]`**. The agent then calls `globalCandidateRegistry.observe()` (robinhood-screening-agent.ts:955-964) **once per survivor** with a single `source = discoveredBy ?? source`. Per-source first-seen, multi-source sighting, and latency (`latencyMs`) are therefore never recorded — each candidate carries only its surviving source. "Who saw it first / how many did Gecko find / how much later" is currently unanswerable from registry stats. |
+| Pool/Dex identity is dropped by normalization | ✅ | `MarketToken` has `pairAddress?` / `dex?` (market-data-provider.ts:27-28; ankr/dexscreener/dexpaprika/cmc all set them), but `normalizeDexToken()` (robinhood-discovery.ts:49+) maps to `GMGNRawToken`, which retains neither. Token↔pool separation is lost. |
+| FOMO isn't on the CandidateHint path it documents | ✅ | `FomoTokenBoardProvider implements MarketDataProvider` (fomo-emitter.ts:18); `fomo` sits in `DISCOVERY_PRIORITY` as a normal emitter. `candidate-hints.ts` (`CandidateHint` → verify → promote) exists but is **not** FOMO/GMGN's canonical path. |
+| TraderPersistence is already good; needs durability | ✅ | `trader-persistence.ts` has 24h/7d/30d freshness + `strictPersistent`; `wallet-graph.ts` has wallet-native cohorts + provider attribution. Still process-local `Map`s — restart loses history. |
+| FeatureSnapshot is sound but not final/persistent + coarse provenance | ✅ | `features/feature-snapshot.ts` has `evidenceLineage`, `modelVersion`, `Object.freeze()`, but is attached to a payload, not a durable record; `buildFeatureSnapshot()` accepts one `source`/`fetchedAt` applied across a whole group. |
+| DecisionLedger / PaperTradingLedger are JSONL/Map, not rebuilt from durable history | ✅ | `database/decision-ledger.jsonl` append-only; runtime state is `events[]`/`Map`; `PaperTradingLedger` is a process-local `Map` — paper-gate knowledge resets on restart. |
+
+### 5.3 Adopted forward directive (from the fresh pass)
+
+1. **Green CI first** — already done on current `master` (§5.0). Any future change must not
+   regress it.
+2. **Add PostgreSQL as the durable evidence/history layer** — but **do not start by converting
+   every JSON file to SQL.** Start at the **observation boundary** (migrate the lost source-level
+   observations first), then move existing ledgers behind their current APIs.
+3. **Discovery layer produces two outputs**, not one merged list:
+   `{ candidates: GMGNRawToken[], observations: DiscoveryObservation[] }` (or an
+   `onObservation` sink before merge), so `CandidateRegistry` sees every per-source sighting.
+4. **Model token / pool / wallet / trade as separate entities**; preserve `pairAddress` / `dex`
+   through normalization.
+5. **Make FOMO/GMGN true hint sources** — `CandidateHint` → on-chain verify → promote — while
+   on-chain/RPC/WS sources may introduce candidates directly.
+6. **Redis = ephemeral only** (queues/locks/rate-limits/TTL); **Postgres = durable**
+   (observations, snapshots, decisions, fills, paper trades, learning datasets).
+7. **`ResearchCoordinator`** — the one genuinely new coordinator (cheap→medium→costly evidence
+   policy) — do **not** build a second DiscoveryCoordinator.
+8. **FeatureSnapshot must be truly final + persisted** — build it only after all enrichment and
+   security evidence, with per-feature provenance.
+9. Do **not** build microservices/Kafka/Temporal — one process, data plane separated from the
+   decision plane.
+
+### 5.4 Caveat on the fresh-pass's test count
+
+The fresh pass reports "1,140 tests" at `143ea05d`; current `master` runs **1,136** tests. The
+delta is from the price-migration rewrite of `tests/price-feed-service.test.ts` (fewer, denser
+cases) landing between the two heads — it is not a test removal from the review's own work.
