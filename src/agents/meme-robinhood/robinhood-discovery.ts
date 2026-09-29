@@ -65,6 +65,10 @@ export function normalizeDexToken(
     // prefilter can distinguish "feed down" from "token trades nothing".
     sourceUnavailable: t.sourceUnavailable ?? undefined,
     freshLane: t.freshLane ?? undefined,
+    // P5: retain the DEX pool identity so token-level vs pool-level evidence
+    // stays distinguishable (a token can trade on many pools).
+    pairAddress: t.pairAddress ?? undefined,
+    dex: t.dex ?? undefined,
     // Keyless feeds (dexpaprika) only report 24h volume; dexscreener now carries
     // a real 1h value when the pair exposes `volume.h1`. Prefer the real 1h over
     // the /24 estimate, or the prefilter floor (minVolume1hUsd) would reject a

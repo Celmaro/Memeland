@@ -8,7 +8,25 @@
  * by measured latency + coverage, never by docs.
  */
 
-export type DiscoverySource = 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'cmc' | 'birdeye' | 'fomo' | 'pons' | 'solanatracker' | 'pumpdev' | 'solana-rpc';
+export type DiscoverySource =
+  | 'rpc'
+  | 'dexpaprika'
+  | 'gecko'
+  | 'dexscreener'
+  | 'gmgn'
+  | 'routescan'
+  | 'ankr'
+  | 'cmc'
+  | 'birdeye'
+  | 'fomo'
+  | 'pons'
+  | 'solanatracker'
+  | 'pumpdev'
+  | 'solana-rpc'
+  // P5: per-pass dynamic emitters and the WS tape also feed the funnel.
+  | 'tape'
+  | 'track'
+  | 'ws-tape';
 
 /**
  * DISCOVERY_INTRODUCERS allowlist gate. When the env var is set it is a

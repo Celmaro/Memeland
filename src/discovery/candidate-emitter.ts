@@ -19,6 +19,7 @@
 
 import type { Chain, GMGNRawToken } from '../adapters/gmgn-adapter.js';
 import { globalSourceQuota, classifyHttpFailure, statusOf } from '../services/source-quota.js';
+import type { DiscoveryObservation } from './discovery-registry.js';
 
 /** A discovery source that yields normalized candidate tokens for a chain. */
 export interface CandidateEmitter {
@@ -70,6 +71,22 @@ export interface DiscoverAllOptions {
   extras?: Partial<Record<(typeof DISCOVERY_PRIORITY)[number], GMGNRawToken[]>>;
   /** GMGN overlay rows — upgrade EXISTING addresses only (enrichment). */
   overlay?: GMGNRawToken[];
+  /** Clock for observation timestamps (determinism in tests). Defaults to Date.now. */
+  observeAt?: () => number;
+}
+
+/**
+ * P5 — discovery output carries BOTH the merged candidates and the raw
+ * per-source observations captured BEFORE the merge. The merged list is what
+ * the decision needs; the observations are the evidence the decision consumes —
+ * "how many tokens did Gecko find?", "which source saw it first, and how much
+ * later?" — which is answerable only if per-source sightings survive.
+ */
+export interface DiscoverAllResult {
+  /** Merged candidate list (Phase 3 merge semantics unchanged). */
+  candidates: GMGNRawToken[];
+  /** One observation per (source × token) sighting, in priority order. */
+  observations: DiscoveryObservation[];
 }
 
 export class DiscoveryCoordinator {
@@ -102,9 +119,17 @@ export class DiscoveryCoordinator {
    * emitter (as in tests) flows exactly as its method returns. GMGN overlay
    * rows that were never surfaced by an introducer are dropped here (GMGN is
    * enrichment, not discovery).
+   *
+   * P5 — alongside the merged candidates, ONE DiscoveryObservation is emitted
+   * per (source × token) BEFORE the merge, so per-source coverage, first-seen
+   * and latency stay answerable. Observation source is the emitter id (or its
+   * allowlistSource), NOT the token's normalized `source` tag (tape rows are
+   * tagged `dexscreener` internally).
    */
-  public async discoverAll(chain: Chain, opts: DiscoverAllOptions = {}): Promise<GMGNRawToken[]> {
+  public async discoverAll(chain: Chain, opts: DiscoverAllOptions = {}): Promise<DiscoverAllResult> {
     const merged = new Map<string, GMGNRawToken>();
+    const observations: DiscoveryObservation[] = [];
+    const observeAt = opts.observeAt ?? (() => Date.now());
 
     for (const id of DISCOVERY_PRIORITY) {
       const extra = opts.extras?.[id];
@@ -126,12 +151,16 @@ export class DiscoveryCoordinator {
       } else {
         continue;
       }
+      // P5 — snapshot the sighting time per source so first-seen/latency are honest.
+      const at = observeAt();
+      const obsSource = emitter?.allowlistSource ?? id;
       for (const t of tokens ?? []) {
         if (!t || !t.address) continue;
         const key = t.address.toLowerCase();
         const prev = merged.get(key);
         const fresh = prev?.freshLane || t.freshLane ? true : undefined;
         merged.set(key, fresh ? { ...t, freshLane: true } : t);
+        observations.push({ chain, tokenAddress: t.address, source: obsSource as DiscoveryObservation['source'], at });
       }
     }
 
@@ -145,6 +174,6 @@ export class DiscoveryCoordinator {
       merged.set(key, { ...g, freshLane: fresh ? true : undefined, discoveredBy: existing.source });
     }
 
-    return [...merged.values()];
+    return { candidates: [...merged.values()], observations };
   }
 }

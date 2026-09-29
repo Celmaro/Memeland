@@ -81,6 +81,12 @@ export interface GMGNRawToken {
    *  through the GMGN overlay so the funnel bySource never mislabels an
    *  overlay-upgraded token as gmgn-discovered (Q1 live fix). */
   discoveredBy?: 'gmgn' | 'dexscreener' | 'dexpaprika' | 'gecko' | 'ankr' | 'routescan' | 'cmc' | 'solana-rpc' | 'fomo' | 'solanatracker' | 'pumpdev';
+  /** P5: DEX pair/pool identity retained from keyless feeds (MarketToken.pairAddress).
+   *  Kept separate from the token address so pool-level vs token-level evidence
+   *  stays distinguishable (a token can trade on many pools). */
+  pairAddress?: string;
+  /** P5: the DEX this pool lives on (e.g. raydium/meteora/uniswap-v2). */
+  dex?: string;
   /** I1-4: true when the source feed failed to supply market data. */
   sourceUnavailable?: boolean;
   /**

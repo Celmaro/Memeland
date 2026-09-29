@@ -946,7 +946,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // GMGN overlay (upgrade existing addresses only, preserving who
                   // FOUND it). tape/track need per-pass state → passed as extras;
                   // GMGN discovery rows ride in as overlay.
-                  const allCandidates = await this.discoveryCoordinator.discoverAll(chain, {
+                  const { candidates: allCandidates, observations } = await this.discoveryCoordinator.discoverAll(chain, {
                     extras: { tape: tapeCandidates, track: trackCandidates },
                     overlay: gmgnDiscovery,
                   });
@@ -955,13 +955,13 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
         for (const t of allCandidates) {
           const src = t.discoveredBy ?? t.source;
           scannedBySource[src] = (scannedBySource[src] ?? 0) + 1;
-          // P3.1 Candidate Registry: record per-source firstSeen + latency.
-          globalCandidateRegistry.observe({
-            chain,
-            tokenAddress: t.address,
-            source: src as 'rpc' | 'dexpaprika' | 'gecko' | 'dexscreener' | 'gmgn' | 'routescan' | 'ankr' | 'solana-rpc' | 'pons' | 'solanatracker' | 'pumpdev',
-            at: Date.now(),
-          });
+        }
+        // P5 — Candidate Registry observes EVERY per-source sighting (before the
+        // coordinator's merge), not just the merge survivor. This is what makes
+        // "how many tokens did Gecko find / which source saw it first / how much
+        // later" answerable (the registry tracks firstSeen/coverage/dup/latency).
+        for (const obs of observations) {
+          globalCandidateRegistry.observe(obs);
         }
         // P3.1 empirical primary discovery source — the "measure, don't guess"
         // decision input (after weeks of data, this selects the discovery lead).

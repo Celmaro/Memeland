@@ -63,6 +63,18 @@ describe('I1-4 UNAVAILABLE ≠ 0', () => {
     expect(token.sourceUnavailable).toBe(true);
   });
 
+  it('P5: normalizeDexToken retains the DEX pool identity (pairAddress + dex)', () => {
+    const token = normalizeDexToken('sol', { address: '0xA', chainId: 56, symbol: 'A', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, pairAddress: '0xPool', dex: 'raydium' }, 'dexpaprika');
+    expect(token.pairAddress).toBe('0xPool');
+    expect(token.dex).toBe('raydium');
+  });
+
+  it('P5: absent pool fields stay absent (no phantom pool identity)', () => {
+    const token = normalizeDexToken('bsc', { address: '0xA', chainId: 56, symbol: 'A', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0 }, 'dexscreener');
+    expect(token.pairAddress).toBeUndefined();
+    expect(token.dex).toBeUndefined();
+  });
+
   it('prefilter reports an unavailable feed distinctly from a low-volume token', () => {
     const token = normalizeDexToken('bsc', { address: '0xA', chainId: 56, symbol: 'A', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0, sourceUnavailable: true }, 'dexscreener');
     const r = preFilterToken(token, baseConfig);
