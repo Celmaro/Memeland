@@ -2,11 +2,37 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
 import { isAllowed } from '../src/decision/decision-result.js';
 import { RefusalCode } from '../src/decision/refusal-code.js';
+import { CONSENSUS_FLOOR } from '../src/orchestrator/swarm-guards.js';
 
 describe('Swarm Consensus gate-only path (agent-computed confidence)', () => {
+  const swarm = new SwarmConsensusEngine();
+  /** Agent-confidence candidate at an exact confidence level. */
+  const candidate = (confidence: number) => ({
+    symbol: `C_${confidence}`,
+    domain: 'MEME_ROBINHOOD' as const,
+    contractAddress: `c${confidence}`,
+    liquidityUsd: 0,
+    volume1hUsd: 0,
+    securityAuditPassed: true,
+    socialHypeScore: 0,
+    confidence,
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     SwarmConsensusEngine.setStrategyProvider(null);
+  });
+
+  // The floor constant is derived from CONSENSUS_FLOOR; this is the single
+  // owner of the boundary pair. Other suites that asserted a bare `80` were
+  // re-asserting a derived literal without pinning the constant itself.
+  it('the consensus floor is CONSENSUS_FLOOR, inclusive at the boundary', () => {
+    expect(CONSENSUS_FLOOR).toBe(0.8);
+    const floor = Math.round(CONSENSUS_FLOOR * 100);
+    const at = swarm.evaluateSignal(candidate(floor));
+    const below = swarm.evaluateSignal(candidate(floor - 1));
+    expect(at.passed).toBe(true);
+    expect(below.passed).toBe(false);
   });
 
   it('passes a candidate with agent confidence 85 + securityAuditPassed true', () => {

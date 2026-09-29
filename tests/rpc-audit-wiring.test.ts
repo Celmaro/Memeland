@@ -319,10 +319,11 @@ describe('RPCFailoverManager failure memory (P1-3/P1-4)', () => {
     const first = mgr.getActiveRPC('rh');
     mgr.reportRPCFailure('rh', first);
     await mgr.probeLatencies();
-    // After a fresh probe the previously-failed host is eligible again.
-    const again = mgr.getActiveRPC('rh');
-    expect(['rh', 'eth', 'bsc', 'base', 'sol']).toContain('rh');
-    expect(typeof again).toBe('string');
+    // After a fresh probe the previously-failed host is eligible again, so the
+    // selection is back to the pool default. Assert the VALUE, not a literal
+    // array containing the chain key — the old form passed without touching
+    // `again` and proved nothing about the clear.
+    expect(mgr.getActiveRPC('rh')).toBe(first);
   });
 });
 

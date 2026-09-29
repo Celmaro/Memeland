@@ -85,23 +85,6 @@ export interface DexpaprikaFeedOptions {
   apiKey?: string;
 }
 
-export interface DrainInput {
-  pairAddress: string;
-  chain: string;
-  prevLiquidityUsd: number;
-  currLiquidityUsd: number;
-}
-
-export interface DexpaprikaDrainEvent {
-  pairAddress: string;
-  chain: string;
-  drained: boolean;
-  dropPct: number;
-}
-
-/** Drain threshold: liquidity dropping >= 50% in an SSE tick is flagged. */
-const DRAIN_THRESHOLD_PCT = 50;
-
 export class DexpaprikaFeed implements MarketDataProvider {
   readonly id = 'dexpaprika';
   private readonly fetch: FetchLike;
@@ -131,22 +114,6 @@ export class DexpaprikaFeed implements MarketDataProvider {
   async discover(options: MarketDiscoveryOptions = {}): Promise<MarketToken[]> {
     const base = await this.baseTokens();
     return this.applyOptions(base, options);
-  }
-
-  /** Declarative drain detection over an SSE reserve tick. */
-  public drainEvent(input: DrainInput): DexpaprikaDrainEvent {
-    const prev = input.prevLiquidityUsd;
-    const curr = input.currLiquidityUsd;
-    let dropPct = 0;
-    if (prev > 0) {
-      dropPct = Math.max(0, Math.min(100, ((prev - curr) / prev) * 100));
-    }
-    return {
-      pairAddress: input.pairAddress,
-      chain: input.chain,
-      drained: dropPct >= DRAIN_THRESHOLD_PCT,
-      dropPct: Math.round(dropPct),
-    };
   }
 
   private async baseTokens(): Promise<MarketToken[]> {

@@ -56,13 +56,26 @@ describe('GeckoDiscoveryFeed (SRC-153 keyless discovery tier)', () => {
     expect(pepe!.priceUsd).toBeGreaterThan(0);
   });
 
-  it('maps all supported networks via geckoNetworkIdFor', async () => {
-    const { fn } = fetchStub([]);
+  it('maps all supported networks to distinct chain ids (geckoNetworkIdFor owner)', async () => {
+    // The old version of this test named the mapping but stubbed an EMPTY
+    // response and asserted `[] === []` — it never touched the mapper. These
+    // two real callers (robinhood-screening-agent, cli/calibrate) resolve a
+    // network per row, so assert one resolved id per network.
+    const { fn } = fetchStub([
+      poolRow({ address: '0xSOL', name: 'A', network: 'solana' }),
+      poolRow({ address: '0xBSC', name: 'B', network: 'bsc' }),
+      poolRow({ address: '0xBASE', name: 'C', network: 'base' }),
+      poolRow({ address: '0xETH', name: 'D', network: 'eth' }),
+      poolRow({ address: '0xRH', name: 'E', network: 'robinhood' }),
+    ]);
     const feed = new GeckoDiscoveryFeed({ fetch: fn, minIntervalMs: 0 });
-    await feed.discover();
-    // sol->solana, bsc->bsc, base->base, eth->eth, robinhood->robinhood
-    // base URL calls: 5 chains x 2 endpoints = 10 calls
-    expect(await feed.discover()).toEqual([]);
+    const tokens = await feed.discover();
+    const bySymbol = new Map(tokens.map((t) => [t.symbol, t.chainId]));
+    expect(bySymbol.get('A')).toBe(101);      // solana
+    expect(bySymbol.get('B')).toBe(56);       // bsc
+    expect(bySymbol.get('C')).toBe(8453);     // base
+    expect(bySymbol.get('D')).toBe(1);        // eth
+    expect(bySymbol.get('E')).toBe(4663);     // robinhood
   });
 
   it('handles Solana (non-EVM) token ids without 0x and with the solana network id', async () => {

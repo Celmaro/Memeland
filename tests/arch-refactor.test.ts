@@ -36,6 +36,43 @@ describe('#1 security hard-gate in swarm-consensus', () => {
     });
     expect(res.passed).toBe(true);
   });
+
+  // #1 evidence-coverage gate. aggregateVoterScores renormalizes over the slots
+  // that RENDERED, so an abstaining voter (missing feed — UNAVAILABLE, not a
+  // neutral read) drops out of the denominator and RAISES the average. The same
+  // candidate therefore scores 59 with full evidence and 90 once the weak slots
+  // go dark — missing data must never make a candidate easier to trade.
+  it('refuses when weak slots abstain and missing evidence would inflate the score past the floor', () => {
+    const withFullEvidence = engine.evaluateSignal({
+      ...base,
+      voterScores: { momentum: 90, flow: 20, security: 90, sentiment: 20, critic: 20 },
+    });
+    expect(withFullEvidence.passed).toBe(false);
+
+    const withAbstainedSlots = engine.evaluateSignal({
+      ...base,
+      voterScores: { momentum: 90, security: 90 },
+    });
+    expect(withAbstainedSlots.passed).toBe(false);
+    expect(withAbstainedSlots.decision?.refusal).toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('refuses a lone-slot candidate (renormalized 100 from one voter)', () => {
+    const res = engine.evaluateSignal({ ...base, voterScores: { security: 100 } });
+    expect(res.passed).toBe(false);
+    expect(res.decision?.refusal).toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('still refuses (not INSUFFICIENT_EVIDENCE) when security itself is absent', () => {
+    // The -1 fail-closed sentinel is the OWNER of an absent security slot; the
+    // evidence gate must not shadow it with a vaguer code.
+    const res = engine.evaluateSignal({
+      ...base,
+      voterScores: { momentum: 95, flow: 95, sentiment: 95, critic: 95 },
+    });
+    expect(res.passed).toBe(false);
+    expect(res.decision?.refusal).toBe('SECURITY');
+  });
 });
 
 describe('#2 offline calibration harness', () => {

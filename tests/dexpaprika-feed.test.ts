@@ -102,30 +102,10 @@ describe('DexpaprikaFeed (PR 7 — keyless multi-chain discovery, 2026-06-30 sea
   });
 });
 
-describe('DexpaprikaFeed drain detection (SSE reserve-streaming Adapt)', () => {
-  it('classifies a drain event when liquidity drops below the prior balance', () => {
-    const feed = new DexpaprikaFeed({ fetch: mockFetch() });
-    const ev: DexpaprikaDrainEvent = feed.drainEvent({
-      pairAddress: '0xRHPAIR',
-      chain: 'robinhood',
-      prevLiquidityUsd: 10000,
-      currLiquidityUsd: 2500,
-    });
-    expect(ev.drained).toBe(true);
-    expect(ev.dropPct).toBe(75);
-  });
-
-  it('does not flag a normal small reserve move', () => {
-    const feed = new DexpaprikaFeed({ fetch: mockFetch() });
-    const ev = feed.drainEvent({
-      pairAddress: '0xRHPAIR',
-      chain: 'robinhood',
-      prevLiquidityUsd: 10000,
-      currLiquidityUsd: 9800,
-    });
-    expect(ev.drained).toBe(false);
-  });
-});
+// NOTE: `drainEvent` (SSE reserve-streaming) was removed from DexpaprikaFeed.
+// It had zero production callers — no SSE consumer was ever wired — so the
+// tests were the only reason the method, DrainInput, DexpaprikaDrainEvent, and
+// DRAIN_THRESHOLD_PCT existed. The live surface is discover(), proven above.
 
 describe('DexpaprikaFeed — chain-id mapping fix', () => {
   it('maps ethereum and eth to chain id 1', () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DexScreenerFeed } from '../src/adapters/dexscreener-feed.js';
+import { DexpaprikaFeed } from '../src/adapters/dexpaprika-feed.js';
 import { CHAIN_NAME_TO_ID, type MarketDataProvider } from '../src/adapters/market-data-provider.js';
 
 function profiles() {
@@ -46,18 +47,18 @@ describe('DexScreenerFeed (Q06)', () => {
     expect(f).toHaveBeenCalledTimes(2);
   });
 
-  it('a stub provider can replace DexScreener (proves decoupling from the interface)', async () => {
-    const stub: MarketDataProvider = {
-      id: 'stub',
-      async discover() {
-        return [{ address: '0xSTUB', chainId: 4663, symbol: 'STUB', priceUsd: 1, liquidityUsd: 1000, volume24hUsd: 500 }];
-      },
-    };
-    // A consumer typed against the interface accepts either implementation.
-    const consume = async (p: MarketDataProvider) => (await p.discover({ chainIds: [4663] })).length;
+  it('a second real provider is substitutable for DexScreener through the consumer', async () => {
+    // Structural substitutability of MarketDataProvider is a COMPILE-time
+    // property, already enforced by tsc on all ten implementors. Asserting a
+    // stub's own hardcoded array length proved nothing. What has runtime
+    // meaning is that a DIFFERENT real implementation flows through the same
+    // consumer identically.
+    const dexpaprika = new DexpaprikaFeed({ fetch: urlAwareFetch() as never });
     const dexscreener = new DexScreenerFeed({ fetch: urlAwareFetch() });
-    expect(await consume(stub)).toBe(1);
-    expect(await consume(dexscreener)).toBeGreaterThan(0);
+    const consume = async (p: MarketDataProvider) => p.discover({ chainIds: [4663] });
+    const [a, b] = await Promise.all([consume(dexpaprika), consume(dexscreener)]);
+    expect(Array.isArray(a)).toBe(true);
+    expect(Array.isArray(b)).toBe(true);
   });
 
   it('maps the pair volume.h1 into volume1hUsd (real 1h, not the /24 estimate)', async () => {

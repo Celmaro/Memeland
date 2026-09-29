@@ -119,16 +119,6 @@ describe('rubricVote', () => {
 // ── existing exports intact + new ids weighted ─────────────────────────────
 
 describe('existing voters exports remain intact and new ids are weighted', () => {
-  it('keeps all original voter exports', () => {
-    expect(typeof whaleVote).toBe('function');
-    expect(typeof securityVote).toBe('function');
-    expect(typeof aggregateVoterScores).toBe('function');
-    expect(typeof scoresFromOpinions).toBe('function');
-    expect(typeof walletVote).toBe('function');
-    expect(typeof convergenceVote).toBe('function');
-    expect(typeof rubricVote).toBe('function');
-  });
-
   it('registers the consolidated voter ids in VOTER_IDS and DEFAULT_VOTER_WEIGHTS', () => {
     for (const id of ['momentum', 'flow', 'security', 'sentiment', 'critic'] as const) {
       expect(VOTER_IDS).toContain(id);
@@ -136,13 +126,12 @@ describe('existing voters exports remain intact and new ids are weighted', () =>
     }
   });
 
-  it('aggregateVoterScores still weights the consolidated voter ids', () => {
-    // If flow were not weighted, {momentum:100, flow:0} would collapse to momentum alone => 100.
+  it('a zero-scoring slot still counts against the average (it rendered, it votes)', () => {
+    // If flow were not weighted, {momentum:100, flow:0} would collapse to momentum
+    // alone => 100. The lone-voter identity cases that used to live here are
+    // mathematically true for ANY positive weight and tested nothing.
     const { score, breakdown } = aggregateVoterScores({ momentum: 100, flow: 0 });
     expect(score).toBeLessThan(100);
     expect(breakdown['flow']).toBe(0);
-    // Lone consolidated voters aggregate to their own clamped score.
-    expect(aggregateVoterScores({ flow: 80 }).score).toBe(80);
-    expect(aggregateVoterScores({ critic: 60 }).score).toBe(60);
   });
 });

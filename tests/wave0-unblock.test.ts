@@ -92,13 +92,40 @@ describe('DexScreenerFeed (I0-2)', () => {
     expect(m!.pairAddress).toBe('0xPAIR');
   });
 
-  it('fail-soft: enrichment error leaves fields zero, does not throw', async () => {
+  // I1-4 `UNAVAILABLE != 0`. A dead enrichment feed must NOT be
+  // indistinguishable from a token with genuinely no volume: that is what
+  // `markBatchUnavailable` (dexscreener-feed.ts) exists to prevent. The
+  // consumer half is proven in tests/wave1-rate-limit.test.ts; this proves the
+  // PRODUCER sets the flag. Without it, markBatchUnavailable could be deleted
+  // and every outage would silently read as a zero-volume dead token.
+  it('enrichment transport failure marks the batch sourceUnavailable, never a real zero', async () => {
     const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ tokenProfiles: [{ chainId: 'base', tokenAddress: '0xBASE', symbol: 'B' }] }) })
       .mockRejectedValueOnce(new Error('enrich down'));
     const feed = new DexScreenerFeed({ fetch: fetch as never });
     const tokens = await feed.discover({ chainIds: [8453] });
     expect(tokens.length).toBe(1);
-    expect(tokens[0]!.volume24hUsd).toBe(0);
+    expect(tokens[0]!.sourceUnavailable).toBe(true);
+  });
+
+  it('enrichment non-ok response marks the batch sourceUnavailable', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ tokenProfiles: [{ chainId: 'base', tokenAddress: '0xBASE', symbol: 'B' }] }) })
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) });
+    const feed = new DexScreenerFeed({ fetch: fetch as never });
+    const tokens = await feed.discover({ chainIds: [8453] });
+    expect(tokens.length).toBe(1);
+    expect(tokens[0]!.sourceUnavailable).toBe(true);
+  });
+
+  it('a successful enrichment leaves sourceUnavailable unset (negative control)', async () => {
+    // Without this, "always marks unavailable" would satisfy the two cases
+    // above while breaking the live path.
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ tokenProfiles: [{ chainId: 'base', tokenAddress: '0xBASE', symbol: 'B' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ pairs: [{ chainId: 'base', dexId: 'd', url: 'u', pairAddress: '0xP', baseToken: { address: '0xBASE', name: 'B', symbol: 'B' }, quoteToken: { address: '0xQ', name: 'Q', symbol: 'Q' }, priceUsd: '0.001', liquidity: { usd: 50000 }, volume: { h24: 120000, h1: 1500 } }] }) });
+    const feed = new DexScreenerFeed({ fetch: fetch as never });
+    const tokens = await feed.discover({ chainIds: [8453] });
+    expect(tokens.length).toBe(1);
+    expect(tokens[0]!.sourceUnavailable).toBeUndefined();
+    expect(tokens[0]!.volume24hUsd).toBe(120000);
   });
 });
 
@@ -124,15 +151,8 @@ describe('AnkrDiscoveryFeed (I0-3) chunked scan', () => {
   });
 });
 
-describe('decodePairCreated fixture (regression guard)', () => {
-  it('decodes pair from data word, not the factory', () => {
-    const log = {
-      address: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
-      topics: ['0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9', '0x000000000000000000000000C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', '0x000000000000000000000000A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'],
-      data: '0x000000000000000000000000B4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc',
-    } as any;
-    const d = decodePairCreated(log);
-    expect(d!.pair).toBe('0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc');
-    expect(d!.pair).not.toBe(log.address.toLowerCase());
-  });
-});
+// NOTE: the `decodePairCreated` regression fixture that used to live here is
+// byte-identical to the stronger copy in tests/rpc-audit-wiring.test.ts, which
+// imports the real PAIR_CREATED_TOPIC0 constant and additionally covers the
+// malformed-input case. Two copies of one real-world log; the owner is
+// rpc-audit-wiring.

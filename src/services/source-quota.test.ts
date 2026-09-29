@@ -29,12 +29,9 @@ describe('SourceQuota — best-effort demotion', () => {
     expect(q.isCooling('gmgn', now + 1500)).toBe(false); // cooldown expired
   });
 
-  it('cooldown summary reports active cooldowns with remaining ms', () => {
-    q.clear();
-    q.backoff('dexpaprika', 'quota', now);
-    const active = q.cooling();
-    expect(active).toHaveLength(1);
-    expect(active[0].source).toBe('dexpaprika');
-    expect(active[0].cooldownMs).toBeGreaterThan(0);
-  });
+  // NOTE: `SourceQuota.cooling()` (a cooldown summary "for the banner /
+  // diagnostics") was removed — the banner has its own gate logic and never
+  // called it, so the method existed only for its own test. The contract that
+  // production depends on is isCooling(), proven above and by
+  // candidate-emitter.test.ts.
 });

@@ -69,16 +69,6 @@ export class SourceQuota {
     return first;
   }
 
-  /** Active cooldowns (for the banner / diagnostics). */
-  public cooling(): { source: string; cooldownMs: number }[] {
-    const now = this.now();
-    const out: { source: string; cooldownMs: number }[] = [];
-    for (const [source, until] of this.coolingUntil) {
-      if (until > now) out.push({ source, cooldownMs: until - now });
-    }
-    return out;
-  }
-
   public clear(): void {
     this.coolingUntil.clear();
     this.lastLogged.clear();

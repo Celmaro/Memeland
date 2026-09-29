@@ -1,7 +1,7 @@
 import { StateStore, SignalLedgerEntry } from '../services/state-store.js';
 import { allowDecision, refuseDecision, type DecisionResult } from '../decision/decision-result.js';
 import { RefusalCode } from '../decision/refusal-code.js';
-import { aggregateVoterScores } from './voters.js';
+import { aggregateVoterScores, VOTER_IDS } from './voters.js';
 import { globalSwarmLearning } from './swarm-learning.js';
 import {
   CONSENSUS_FLOOR,
@@ -12,6 +12,23 @@ import {
   StickyConviction,
   type DirectionVote,
 } from './swarm-guards.js';
+
+/**
+ * Minimum gate slots that must actually render a score before the weighted
+ * average is allowed to mean anything (fail-closed evidence coverage).
+ *
+ * The 5 slots are momentum .30 / flow .20 / security .25 / sentiment .15 /
+ * critic .10. Three is the smallest number that can never be satisfied by a
+ * single loud slot plus a thin margin: momentum+security (2) is always 0.55 of
+ * the weight, and no two slots can reach a 0.75 majority of it. At 3 rendered
+ * slots the abstaining remainder is at most 0.45, so a single dissenting vote
+ * can still pull the average under the floor — renormalization stops being the
+ * only thing standing between a dark feed and a pass.
+ *
+ * This NEVER lowers CONSENSUS_FLOOR. It is a conjunctive precondition: both the
+ * coverage requirement and the flat floor must hold.
+ */
+export const MIN_RENDERED_VOTER_SLOTS = 3;
 
 export interface SignalCandidate {
   symbol: string;
@@ -346,6 +363,61 @@ export class SwarmConsensusEngine {
     // the audit boolean must hold. A missing/abstained security vote (-1) can
     // never slip through here.
     const passed = confidenceScore >= floor && securityVoteScore >= securityHardFloor && candidate.securityAuditPassed;
+
+    // EVIDENCE-COVERAGE GATE. aggregateVoterScores renormalizes over the slots
+    // that RENDERED, which is right for a slot that abstained with no opinion
+    // but wrong at the GATE: dropping a 0.20-weight slot that would have voted
+    // 20 lifts the same candidate from 59 (refuse) to 90 (pass). Missing data
+    // would then make a token EASIER to trade — the exact inverse of
+    // fail-closed / `UNAVAILABLE != 0`.
+    //
+    // Separate from the security hard-gate above, which owns an absent or
+    // untrusted SECURITY read; this owns a too-thin slate of everything else.
+    // It runs AFTER the security gate so a missing security slot still reports
+    // SECURITY rather than this vaguer code.
+    if (voterBreakdown) {
+      const renderedSlots = Object.keys(voterBreakdown).filter(
+        (k) => typeof voterBreakdown![k] === 'number' && Number.isFinite(voterBreakdown![k]),
+      );
+      if (renderedSlots.length < MIN_RENDERED_VOTER_SLOTS) {
+        const missing = VOTER_IDS.filter((v) => !renderedSlots.includes(v));
+        const reason =
+          `Only ${renderedSlots.length}/${MIN_RENDERED_VOTER_SLOTS} gate slots rendered ` +
+          `(missing: ${missing.join(', ')}) — the weighted average is not a real read.`;
+        if (this.stateStore) {
+          this.stateStore.appendSignalLedger({
+            id: `SIG_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+            timestamp: new Date().toISOString(),
+            sourceAgent: candidate.domain,
+            domain: candidate.domain,
+            symbol: candidate.symbol,
+            contractAddress: candidate.contractAddress || '',
+            quantScore,
+            catalystScore,
+            securityScore,
+            totalConfidence: confidenceScore,
+            passed: false,
+            reason,
+            rawPayloadJson: JSON.stringify(candidate),
+          });
+        }
+        return {
+          passed: false,
+          confidenceScore,
+          decision: refuseDecision(
+            `CONSENSUS_${candidate.domain}_${symbolKey}_EVIDENCE_${Date.now()}`,
+            RefusalCode.INSUFFICIENT_EVIDENCE,
+            reason,
+            [
+              { id: 'evidenceCoverage', passed: false, reason },
+              { id: 'confidence', passed: false, reason: `not scored: ${confidenceScore}% is renormalized over ${renderedSlots.length} slot(s)` },
+            ],
+          ),
+          breakdown: { quantScore, catalystScore, securityScore, reputationMultiplier, voters: voterBreakdown },
+          reason: `🛑 **Insufficient Evidence:** ${reason}`,
+        };
+      }
+    }
 
     const checks = [
       { id: 'confidence', passed: confidenceScore >= floor, reason: `${confidenceScore}% confidence (floor ${floor}%)` },
