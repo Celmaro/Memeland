@@ -25,6 +25,8 @@ import { bookFromMid } from '../services/paper-trading.js';
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
 /** #6: consecutive afterGate=0 cycles — the automated "fired=0 ⇒ diagnostic" norm. */
 let staleGateCycles = 0;
+/** Streak length at which the message is re-worded as a long streak (≈1h at 5-min). */
+const STALE_GATE_ESCALATE_AFTER = 12;
 
 /**
  * Dependency surface of the screening cycle. Typed `any` deliberately: the
@@ -193,13 +195,20 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} meme.scan=${memeStats.scanned} meme.prefilter=${memeStats.prefiltered} meme.emit=${memeStats.emitted} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
 
     // #6 stale-gate detector: sustained afterGate=0 is the "fired=0 across
-    // deploys ⇒ diagnostic report, not another patch" norm automated. Logs a
-    // distinct marker after the first N consecutive zero-gate cycles so the
-    // operator sees calibration drift instead of a silent non-firing bot.
+    // deploys ⇒ diagnostic report, not another patch" norm automated. Logs on
+    // EVERY zero-gate cycle: the previous `% STALE_GATE_AFTER` modulo meant a
+    // silently non-firing bot was invisible in any log window shorter than ~1h,
+    // which is exactly what happened during the 2026-09-29 Zeabur audit — the
+    // funnel counters had to be read to notice a 5,957-scan / 0-fire streak.
+    // The counter still escalates the message once the streak is long.
     staleGateCycles = postGateCount > 0 ? 0 : staleGateCycles + 1;
-    const STALE_GATE_AFTER = Number(process.env.STALE_GATE_ALERT_AFTER_CYCLES ?? 12); // ≈1h at 5-min cycles
-    if (postGateCount === 0 && staleGateCycles > 0 && staleGateCycles % STALE_GATE_AFTER === 0) {
-      console.warn(`[STALE GATE] afterGate=0 for ${staleGateCycles} consecutive cycles (${(staleGateCycles * CYCLE_INTERVAL_MS / 60000 / 60).toFixed(1)}h) — screening is not firing. Diagnose before adding features.`);
+    if (postGateCount === 0 && staleGateCycles > 0) {
+      const hours = (staleGateCycles * CYCLE_INTERVAL_MS / 60000 / 60).toFixed(1);
+      const tag = staleGateCycles >= STALE_GATE_ESCALATE_AFTER ? 'STALE GATE (long streak)' : 'STALE GATE';
+      console.warn(
+        `[${tag}] afterGate=0 for ${staleGateCycles} consecutive cycle(s) (${hours}h) — screening is not firing. ` +
+          'Diagnose before adding features.',
+      );
     }
 
     // Register real heartbeats for every active agent that ran this pass

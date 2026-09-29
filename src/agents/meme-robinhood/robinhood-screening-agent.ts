@@ -181,6 +181,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
 
   /** Last pass funnel stats — consumed by index.ts for the Phase-1 [FUNNEL] counters. */
   private lastFunnel: { scanned: number; prefiltered: number; emitted: number } = { scanned: 0, prefiltered: 0, emitted: 0 };
+  /** Prefilter rejection buckets for the CURRENT pass. Diagnostic only —
+   *  counters which of the fail-closed floors is actually binding, so an
+   *  operator can tell a $50k volume bar from a dead feed without reading
+   *  every token's rejection line. Reset each pass; never gates anything. */
+  private prefilterRejections = new Map<string, number>();
 
   constructor(
     config?: Partial<RobinhoodScreeningConfig>,
@@ -1056,7 +1061,11 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           }
 
           const filter = this.preFilter(t, nativePriceUsd);
-          if (!filter.ok) { if (this.isVerbose()) console.log(`[MEME AGENT] ${filter.reason}`); continue; }
+          if (!filter.ok) {
+            this.recordPrefilterRejection(filter.reason, t);
+            if (this.isVerbose()) console.log(`[MEME AGENT] ${filter.reason}`);
+            continue;
+          }
           // Fresh-pair enrichment (gap fix): a freshLane candidate passed the
           // low/bypass floor but carries ZERO market data — it can never score
           // momentum or mature that way. Hydrate from the batched pre-pass map
@@ -1469,6 +1478,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       }
 
       console.log(`[MEME AGENT] Pass complete. ${reports.length} signals passed.`);
+      this.logPrefilterRejectionDistribution();
       this.lastFunnel = { scanned, prefiltered, emitted: reports.length };
       const funnelRoles = {
         promote: Object.keys(scannedBySource).filter((s) => sourceParticipation(s) === 'promote').join(','),
@@ -1482,6 +1492,56 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
       public getLastFunnelStats(): { scanned: number; prefiltered: number; emitted: number } {
       return { ...this.lastFunnel };
       }
+
+  /**
+   * Classify a prefilter rejection into a stable diagnostic bucket.
+   *
+   * The reason string is already built by preFilterToken's `fail()`; this maps
+   * it to the FLOOR that bound rather than the token, so the distribution says
+   * "volume floor killed 80" instead of restating 80 near-identical lines.
+   * Order matters: `sourceUnavailable` is checked first because a dead feed and
+   * a dead token must never be conflated (I1-4 `UNAVAILABLE != 0`).
+   */
+  private prefilterRejectionBucket(reason: string): string {
+    const r = reason.toLowerCase();
+    if (r.includes('unavailable')) return 'feed-down';
+    if (r.includes('volume 1h')) return 'volume-floor';
+    if (r.includes('liq')) return 'liquidity-floor';
+    if (r.includes('market cap')) return 'marketcap-floor';
+    if (r.includes('age')) return 'age-gate';
+    if (r.includes('total fee')) return 'fee-floor';
+    // securityGateToken joins its own reasons with spaces
+    if (r.includes('honeypot')) return 'security-honeypot';
+    if (r.includes('tax')) return 'security-tax';
+    if (r.includes('rug') || r.includes('insider')) return 'security-rug';
+    if (r.includes('top10') || r.includes('top-10') || r.includes('holder')) return 'security-concentration';
+    if (r.includes('blacklist') || r.includes('sell')) return 'security-selllock';
+    if (r.includes('rat') || r.includes('wash')) return 'security-rats';
+    return 'other';
+  }
+
+  /** Count one rejection into its bucket for the current pass. */
+  private recordPrefilterRejection(reason: string, _t: GMGNRawToken): void {
+    const bucket = this.prefilterRejectionBucket(reason);
+    this.prefilterRejections.set(bucket, (this.prefilterRejections.get(bucket) ?? 0) + 1);
+  }
+
+  /**
+   * Emit the per-pass rejection distribution, then reset it.
+   *
+   * This is the diagnostic that answers "which floor is binding?" without
+   * changing any gate. It is a SEPARATE line from [FUNNEL] on purpose: the
+   * funnel line is the stable contract that downstream tooling and the
+   * stale-gate detector parse, so it must not grow a new field.
+   */
+  private logPrefilterRejectionDistribution(): void {
+    const entries = [...this.prefilterRejections.entries()].sort((a, b) => b[1] - a[1]);
+    const total = entries.reduce((n, [, c]) => n + c, 0);
+    this.prefilterRejections.clear();
+    if (total === 0) return; // nothing rejected — don't emit an empty line
+    const body = entries.map(([k, n]) => `${k}:${n}`).join(' ');
+    console.log(`[PREFILTER REJECTS] pass total=${total} byFloor=${body}`);
+  }
 
   /** Map GMGNRawToken -> snake_case GMGN field contract consumed by strategy .mjs modules */
   public toStrategyGmgn(t: GMGNRawToken): Record<string, unknown> {
