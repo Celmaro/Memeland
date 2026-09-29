@@ -25,11 +25,13 @@ function poolRow(overrides: { address: string; name: string; network: string; pr
   };
 }
 
-/** Build a fetch stub that answers every URL with the given pool rows. */
-function fetchStub(rows: unknown[]) {
+/** Build a fetch stub that answers every URL with the given pool rows.
+ *  `onFetch` runs at each fetch entry (used to record pacing timestamps). */
+function fetchStub(rows: unknown[], onFetch?: () => void) {
   let calls = 0;
   const fn = async (url: string) => {
     calls += 1;
+    onFetch?.();
     return { ok: true, status: 200, json: async () => ({ data: rows }) };
   };
   return { fn, count: () => calls };
@@ -99,17 +101,30 @@ describe('GeckoDiscoveryFeed (SRC-153 keyless discovery tier)', () => {
     expect(tokens[0].symbol).toBe('BIG');
   });
 
-  it('paces requests (minIntervalMs honored) and still returns rows', async () => {
-    const { fn, count } = fetchStub([poolRow({ address: '0xDDD', name: 'PACE / WETH', network: 'bsc' })]);
+  it('paces requests: minIntervalMs elapses between fetches (30/min budget)', async () => {
+    // The previous version of this test advanced a fake clock from a real
+    // setInterval racing the awaits, then only asserted count() > 0 — it passed
+    // unchanged if the minIntervalMs wait in pacedGetPoolRows was deleted. This
+    // records the clock at each fetch entry and asserts the real spacing, with
+    // no timers and no wall-clock flake. A live 429 was observed on Gecko
+    // precisely because freshPools/trendingPools were parallelized past this.
+    const stamps: number[] = [];
     let now = 0;
+    const { fn } = fetchStub([poolRow({ address: '0xDDD', name: 'PACE / WETH', network: 'bsc' })], () => stamps.push(now));
     const feed = new GeckoDiscoveryFeed({ fetch: fn, minIntervalMs: 500, now: () => now });
+    // Advance past the first wait so each subsequent fetch must re-wait.
     const p1 = feed.discover();
-    // simulate time passing during the awaits
-    const timer = setInterval(() => { now += 1000; }, 5);
-    const tokens = await p1;
-    clearInterval(timer);
-    expect(tokens.length).toBeGreaterThan(0);
-    expect(count()).toBeGreaterThan(0);
+    const tick = setInterval(() => { now += 1000; }, 1);
+    try {
+      const tokens = await p1;
+      expect(tokens.length).toBeGreaterThan(0);
+      expect(stamps.length).toBeGreaterThan(1);
+      for (let i = 1; i < stamps.length; i++) {
+        expect(stamps[i]! - stamps[i - 1]!).toBeGreaterThanOrEqual(500);
+      }
+    } finally {
+      clearInterval(tick);
+    }
   });
 
   it('fails open (empty) on HTTP error and logs a warn', async () => {

@@ -27,14 +27,17 @@ describe('RPCFailoverManager', () => {
     expect(mgr.getRpcUrls('sol')).toContain('https://solana-mainnet.gateway.tatum.io/');
   });
 
-  it('measures real latencies and picks the fastest healthy RPC', async () => {
+  it('selects a host from the configured pool after a latency probe', async () => {
+    // The old test was named "picks the FASTEST healthy RPC" but both stubbed
+    // responses were byte-identical and resolved in the same tick, so latency
+    // ordering was arbitrary — deleting the .sort() on latencyMs would not have
+    // failed it. Latency *selection* needs an injectable probe clock that does
+    // not exist; the exact-equality failover assertion below owns host choice.
     process.env.RPC_FAILOVER_URLS = JSON.stringify({ rh: ['https://slow.example.com', 'https://fast.example.com'] });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ result: '0x1237' }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ result: '0x1237' }) }));
     const mgr = new RPCFailoverManager();
     await mgr.probeLatencies();
-    const active = mgr.getActiveRPC('rh');
-    expect(typeof active).toBe('string');
-    expect(active.length).toBeGreaterThan(0);
+    expect(['https://slow.example.com', 'https://fast.example.com']).toContain(mgr.getActiveRPC('rh'));
   });
 
   it('reports an unhealthy RPC and fails over to the next', async () => {

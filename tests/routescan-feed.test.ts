@@ -75,14 +75,11 @@ describe('RoutescanFeed (free keyless new-token + holder enrichment)', () => {
     expect(eth.map((t) => t.chainId).sort()).toEqual([1, 8453]);
   });
 
-  it('enriches holders via /erc20/{addr}/holders when requested', async () => {
-    const { fn } = fetchStub([]);
-    const feed = new RoutescanFeed({ fetch: fn });
-    const holders = await feed.fetchHolders(1, '0xabc', 5);
-    expect(holders).toHaveLength(1);
-    expect(holders[0]!.address).toBe('0xH1');
-    expect(holders[0]!.percentage).toBeCloseTo(5.2);
-  });
+  // NOTE: `RoutescanFeed.fetchHolders` was removed. It had zero production
+  // callers — no agent, voter, or position path ever requested holders from
+  // this feed (holder concentration comes from GMGN and Arkham). The tests
+  // were the only reason the method existed. The live surface is discover(),
+  // proven above.
 
   it('drops unsupported chains (non-EVM / unknown chain id)', async () => {
     const { fn } = fetchStub([]);

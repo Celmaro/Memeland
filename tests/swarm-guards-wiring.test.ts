@@ -50,9 +50,10 @@ describe('Kernel B guard wiring (swarm-guards -> swarm-consensus)', () => {
       swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 50 }));
       const res = swarm.evaluateSignal(candidate({ symbol: 'CIRC', confidence: 90 }));
       expect(res.passed).toBe(true); // scored, not CIRCUIT_OPEN
-      if (res.decision && !res.decision.allowed) {
-        expect(res.decision.refusal).not.toBe(RefusalCode.CIRCUIT_OPEN);
-      }
+      // Direct assertion, not a narrowing `if`: the old conditional could only
+      // ever run when the line above had already established allowed === true,
+      // so the CIRCUIT_OPEN check never executed.
+      expect(res.decision?.allowed).toBe(true);
     });
 
     it('circuit breaker: explicit system failures (registerConsensusOutcome(true) x3) trip it and refuse the next signal as CIRCUIT_OPEN', () => {

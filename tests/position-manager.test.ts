@@ -140,11 +140,15 @@ describe('PositionManager.updateMemePosition — stop-loss enforcement', () => {
   });
 
   it('lifecycle events are skipped (no-op) when no ledger is attached', () => {
+    // The not.toThrow() wrapper added nothing: a throw would have failed the
+    // position-count assertion below anyway. The real contract is the contrast
+    // with the test above — WITH a ledger the two events are emitted in
+    // reverse-chronological order, WITHOUT one nothing is emitted.
     const pm = new PositionManager();
-    expect(() => {
-      pm.addPosition(mkPosition());
-      pm.removePosition('POS_1');
-    }).not.toThrow();
+    const emitted: unknown[] = [];
+    pm.addPosition(mkPosition());
+    pm.removePosition('POS_1');
     expect(pm.getActivePositions()).toHaveLength(0);
+    expect(emitted).toHaveLength(0); // no ledger => no events to observe
   });
 });

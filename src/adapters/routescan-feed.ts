@@ -43,13 +43,6 @@ interface RawErc20Row {
   createOperation?: { timestamp?: string; txHash?: string };
 }
 
-/** Ranked holder row (routescan /v2/.../erc20/{address}/holders). */
-export interface TokenHolder {
-  address: string;
-  balance: string;
-  percentage: number;
-}
-
 export interface RoutescanFeedOptions {
   fetch?: FetchLike;
   baseUrl?: string;
@@ -121,21 +114,6 @@ export class RoutescanFeed implements MarketDataProvider {
     }
     this.cache.set(key, tokens);
     return tokens;
-  }
-
-  /** Ranked holders for a token on an EVM chain — whale/concentration checks. */
-  public async fetchHolders(chainId: number, address: string, limit = 100): Promise<TokenHolder[]> {
-    const url = `${this.baseUrl}/v2/network/mainnet/evm/${chainId}/erc20/${encodeURIComponent(address)}/holders?limit=${limit}`;
-    const res = await this.fetch(url, this.auth());
-    if (!res.ok) return [];
-    const body = (await res.json()) as { items?: Array<{ holderAddress?: string; balance?: string; percentage?: number | string }> };
-    const rows = Array.isArray(body?.items) ? body.items : [];
-    const out: TokenHolder[] = [];
-    for (const r of rows) {
-      if (!r.holderAddress) continue;
-      out.push({ address: r.holderAddress, balance: String(r.balance ?? '0'), percentage: Number(r.percentage) || 0 });
-    }
-    return out;
   }
 
   private normalizeRow(row: RawErc20Row, chainId?: number): MarketToken | undefined {

@@ -107,22 +107,6 @@ export class CmcDexFeed implements MarketDataProvider {
     return out;
   }
 
-  /** Holder count + top-10 concentration (works on Solana, free). */
-  public async fetchHolders(platform: string, address: string): Promise<{ count: number; top10Percent: number } | null> {
-    try {
-      const url = `${this.baseUrl}/v1/dex/holders/count?platform=${encodeURIComponent(platform)}&address=${encodeURIComponent(address)}`;
-      const res = await this.fetch(url, { headers: this.authHeaders() });
-      if (!res.ok) return null;
-      const body = (await res.json()) as { data?: { holder_count?: number | string; distribution?: { top_10_percent?: number | string } } };
-      const count = Number(body?.data?.holder_count);
-      const top10 = Number(body?.data?.distribution?.top_10_percent);
-      if (!Number.isFinite(count) || count <= 0) return null;
-      return { count, top10Percent: Number.isFinite(top10) ? top10 : 0 };
-    } catch {
-      return null;
-    }
-  }
-
   private normalize(row: RawSpotPair, chainId: number): MarketToken | undefined {
     const addr = row.base_asset?.contract_address;
     if (!addr) return undefined;

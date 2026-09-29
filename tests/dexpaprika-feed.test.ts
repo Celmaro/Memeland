@@ -107,16 +107,16 @@ describe('DexpaprikaFeed (PR 7 — keyless multi-chain discovery, 2026-06-30 sea
 // tests were the only reason the method, DrainInput, DexpaprikaDrainEvent, and
 // DRAIN_THRESHOLD_PCT existed. The live surface is discover(), proven above.
 
-describe('DexpaprikaFeed — chain-id mapping fix', () => {
-  it('maps ethereum and eth to chain id 1', () => {
-    expect(CHAIN_NAME_TO_ID.ethereum).toBe(1);
-    expect(CHAIN_NAME_TO_ID.eth).toBe(1);
-  });
-
-  it('keeps robinhood/solana/bsc/base canonical', () => {
-    expect(CHAIN_NAME_TO_ID.robinhood).toBe(4663);
-    expect(CHAIN_NAME_TO_ID.solana).toBe(101);
-    expect(CHAIN_NAME_TO_ID.bsc).toBe(56);
-    expect(CHAIN_NAME_TO_ID.base).toBe(8453);
-  });
-});
+// NOTE: the `CHAIN_NAME_TO_ID` literal table used to be re-asserted in FOUR
+// files (here, dexscreener-feed, gecko-discovery-feed, gmgn-market-data). This
+// describe block also instantiated no feed and touched no feed code — it was a
+// market-data-provider test filed under a feed's name. The map is a contract, so
+// it keeps exactly one owner, and that owner asserts the ids RESOLVED OUT OF A
+// REAL FEED rather than the table's own literals:
+//
+//   tests/dexscreener-feed.test.ts —
+//     expect(tokens.map(t => t.chainId).sort()).toEqual([1,56,101,4663,8453].sort())
+//   tests/gecko-discovery-feed.test.ts —
+//     asserts each supported network resolves to its chain id
+//
+// Any feed whose chain resolution is wrong now fails through its own boundary.

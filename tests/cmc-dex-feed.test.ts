@@ -31,18 +31,9 @@ describe('CmcDexFeed (P4.1 free keyless DEX stack)', () => {
     expect(tokens[0]!.freshLane).toBe(true); // pool_created-ordered = fresh
   });
 
-  it('enriches holder count via /v1/dex/holders/count (works on Solana)', async () => {
-    let called = '';
-    const fn: FetchLike = async (url: string) => {
-      called = url;
-      return ok({ data: { holder_count: 412, distribution: { top_10_percent: 21.5 } } });
-    };
-    const feed = new CmcDexFeed({ fetch: fn });
-    const h = await feed.fetchHolders('solana', 'SoMint');
-    expect(called).toContain('/v1/dex/holders/count');
-    expect(h?.count).toBe(412);
-    expect(h?.top10Percent).toBeCloseTo(21.5);
-  });
+  // NOTE: `CmcDexFeed.fetchHolders` was removed — zero production callers, and
+  // a near-duplicate of the deleted RoutescanFeed.fetchHolders test. Holder
+  // concentration is read from GMGN and Arkham, not this feed.
 
   it('returns empty on transport failure (fail-soft)', async () => {
     const fn: FetchLike = async () => { throw new Error('down'); };

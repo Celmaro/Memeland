@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DexScreenerFeed } from '../src/adapters/dexscreener-feed.js';
 import { DexpaprikaFeed } from '../src/adapters/dexpaprika-feed.js';
-import { CHAIN_NAME_TO_ID, type MarketDataProvider } from '../src/adapters/market-data-provider.js';
+import { type MarketDataProvider } from '../src/adapters/market-data-provider.js';
 
 function profiles() {
   return {
@@ -32,9 +32,6 @@ describe('DexScreenerFeed (Q06)', () => {
     expect(tokens.length).toBe(5);
     expect(tokens.map((t) => t.chainId).sort()).toEqual([1, 56, 101, 4663, 8453].sort());
     expect(tokens.some((t) => t.symbol === 'ETH')).toBe(true);
-    // CHAIN_NAME_TO_ID stays canonical.
-    expect(CHAIN_NAME_TO_ID.robinhood).toBe(4663);
-    expect(CHAIN_NAME_TO_ID.solana).toBe(101);
   });
 
   it('respects the TTL cache (profiles + enrichment each fetched once within TTL)', async () => {

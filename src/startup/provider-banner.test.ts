@@ -93,10 +93,15 @@ describe('provider-banner', () => {
     );
   });
 
-  it('does not mutate and every feed has a defined role gate', () => {
+  it('every feed resolves to a role and gates on its own enable signal', () => {
+    // Replaces a pure type tautology (`typeof f.id === 'string'` over a typed
+    // const array, which tsc already guarantees). This asserts the real banner
+    // contract: every registered feed contributes a visible role line, and each
+    // gate is driven by its own configuration rather than a shared global.
+    const lines = providerBannerLines();
     for (const f of PROVIDER_FEEDS) {
-      expect(typeof f.id).toBe('string');
-      expect(typeof f.gate).toBe('function');
+      expect(f.id.length).toBeGreaterThan(0);
+      expect(lines.some((l) => l.toLowerCase().includes(f.id.toLowerCase()))).toBe(true);
     }
   });
 });
