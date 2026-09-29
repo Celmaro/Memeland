@@ -176,6 +176,29 @@ describe('OpportunityStrategist', () => {
     expect(ledger.get(cycle.nextCandidates[0])?.currentState).toBe('WATCH_TRIGGER');
   });
 
+  it('P7: ResearchCoordinator is the single admission authority — admitted set IS nextCandidates, overflow refused, state does not leak', () => {
+    const ledger = newLedger();
+    const s = strategist(ledger, { maxScorePerCycle: 2 });
+    for (let i = 0; i < 3; i++) {
+      const addr = `0xP7${i}`;
+      s.ingest({ chain: 'sol', contractAddress: addr, source: 'rank', liquidityUsd: 30_000, volume24hUsd: 20_000 });
+      s.decide(new Date('2026-09-19T00:00:00Z')); // WATCHING
+      s.decide(new Date('2026-09-19T01:30:00Z')); // ACCELERATING
+      s.ingest({ chain: 'sol', contractAddress: addr, source: 'rank', liquidityUsd: 30_000, volume24hUsd: 20_000, graduated: true });
+      s.decide(new Date('2026-09-19T03:00:00Z')); // WATCH_TRIGGER
+    }
+    // 3 WATCH_TRIGGER candidates, budget=2 → coordinator admits the earliest 2,
+    // refuses the overflow (PATH A pre-cap removed). The admitted set is exactly
+    // the returned nextCandidates — ResearchCoordinator owns the decision.
+    const c1 = s.decide(new Date('2026-09-19T04:00:00Z'));
+    expect(c1.nextCandidates).toHaveLength(2);
+    for (const id of c1.nextCandidates) expect(ledger.get(id)?.currentState).toBe('WATCH_TRIGGER');
+    // Fresh coordinator per cycle — admission state must NOT leak: the next pass
+    // again admits a full budget of 2 (a leaked cycleSpent would admit fewer).
+    const c2 = s.decide(new Date('2026-09-19T05:00:00Z'));
+    expect(c2.nextCandidates).toHaveLength(2);
+  });
+
   it('recordSwarmResult with consensus >= 80 moves to READY_SMALL_BET, else back to WATCHING', () => {
     const ledger = newLedger();
     const s = strategist(ledger);

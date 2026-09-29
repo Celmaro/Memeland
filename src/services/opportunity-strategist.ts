@@ -172,23 +172,34 @@ export class OpportunityStrategist {
       if (!decision) continue;
       decisions.push(decision);
       if (decision.action === 'SCORE' && decision.opportunityId) {
-        if (nextCandidates.length < this.config.maxScorePerCycle) nextCandidates.push(decision.opportunityId);
+        // P7 — collect EVERY SCORE candidate this cycle; ResearchCoordinator
+        // (below) is the SINGLE authority that decides which are admitted to the
+        // research budget. The old pre-loop cap (PATH A) is removed so the
+        // coordinator's admission (PATH B) genuinely decides and can refuse the
+        // overflow with a deterministic reason — not a silent truncation.
+        nextCandidates.push(decision.opportunityId);
       } else if (decision.action === 'ENQUEUE') {
         enqueueCandidates.push(decision.opportunityId);
       }
     }
 
-    // P5 — the research admission budget is now MEASURED by ResearchCoordinator
-    // (a fresh coordinator per cycle so budget state never leaks across passes,
-    // matching the old stateless maxScorePerCycle cap) and surfaced for telemetry.
+    // P7 — ResearchCoordinator is the single authority for the research budget:
+    // it admits the highest-priority prefix that fits per-cycle and REFUSES the
+    // overflow with a deterministic reason (so the operator sees WHY a candidate
+    // wasn't scored — measurement, not silence). Fresh instance per cycle so
+    // admission state never leaks across passes.
     const research = new ResearchCoordinator({ perCycle: this.config.maxScorePerCycle });
-    const admissions = research.admit(nextCandidates).admissions;
+    const { admissions, admittedCount } = research.admit(nextCandidates);
     const admittedSet = new Set(admissions.filter((a) => a.admitted).map((a) => a.candidateId));
+    const refused = admissions.filter((a) => !a.admitted);
     nextCandidates = nextCandidates.filter((id) => admittedSet.has(id));
     const researchView = research.view();
-    console.log(
-      `[RESEARCH] budget ${researchView.cycleSpent}/${researchView.cycleBudget} remaining=${researchView.remaining} window=${researchView.windowSpent} admitted=${nextCandidates.length}/${admissions.length}`,
-    );
+    const base = `budget ${researchView.cycleSpent}/${researchView.cycleBudget} remaining=${researchView.remaining} window=${researchView.windowSpent} admitted=${admittedCount}/${admissions.length}`;
+    if (refused.length > 0) {
+      console.log(`[RESEARCH] ${base} refused=${refused.length} ${refused.slice(0, 3).map((r) => `${r.candidateId}:${r.reason}`).join(' | ')}`);
+    } else {
+      console.log(`[RESEARCH] ${base} refused=0`);
+    }
 
     return { decisions, nextCandidates, enqueueCandidates, observedAt: now.toISOString() };
   }
