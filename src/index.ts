@@ -137,10 +137,19 @@ function gateSignal(payload: any): boolean {
     const agentConf = Number(payload.confidenceScore);
     const gateConf = res.confidenceScore;
     const drift = Number.isFinite(agentConf) ? gateConf - agentConf : null;
+    // I-4 — per-voter confidence attribution: the consensus weighted average
+    // hides which voter dragged the signal under the floor. The gate already
+    // carries the rendered per-slot breakdown; surface it so "which voter did
+    // it" is visible instead of an opaque aggregate.
+    const voters = (res.breakdown as { voters?: Record<string, number> } | undefined)?.voters;
+    const voterAttrib =
+      voters && Object.keys(voters).length > 0
+        ? ` voters=${JSON.stringify(voters)}`
+        : '';
     console.warn(
       `[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected ` +
         `(consensus=${gateConf}% vs agent=${Number.isFinite(agentConf) ? agentConf : 'n/a'}` +
-        `${drift === null ? '' : ` drift=${drift >= 0 ? '+' : ''}${drift}`}${refusal}) — not posting.`,
+        `${drift === null ? '' : ` drift=${drift >= 0 ? '+' : ''}${drift}`}${refusal}${voterAttrib}) — not posting.`,
     );
   }
   return res.passed;

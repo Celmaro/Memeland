@@ -23,6 +23,47 @@ export const GMGN_CHAINS: Chain[] = ['sol', 'bsc', 'base', 'eth', 'robinhood'];
 let requestQueue: Promise<void> = Promise.resolve();
 let lastRequestAt = 0;
 
+// I-12 — windowed GMGN rate-limit roll-up. Tracks which endpoints have 429'd
+// in the current window so the 6 sequential `Rate limited` warnings collapse
+// into ONE `[GMGN FABRIC] ... down` line per window (recallFabric=down) plus a
+// single per-endpoint notice the first time each 429s. Repeated same-endpoint
+// 429s inside the window stay silent, so the operator sees fabric-level truth
+// instead of per-cycle noise. Reset on any success or after the window elapses.
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+let rateLimitedEndpoints = new Set<string>();
+let rateLimitWindowStartedAt = 0;
+let rateLimitFabricReported = false;
+
+interface RateLimitRecord {
+  /** First time this endpoint 429'd in the current window. */
+  firstSeen: boolean;
+  /** First 429 of the window — announces the whole recall fabric is down. */
+  announceFabric: boolean;
+}
+
+/** Record a 429 for a subPath and return what to log (I-12 roll-up). */
+function recordRateLimit(subPath: string): RateLimitRecord {
+  const now = Date.now();
+  if (rateLimitWindowStartedAt === 0 || now - rateLimitWindowStartedAt > RATE_LIMIT_WINDOW_MS) {
+    // New window — start fresh.
+    rateLimitedEndpoints = new Set<string>();
+    rateLimitWindowStartedAt = now;
+    rateLimitFabricReported = false;
+  }
+  const firstSeen = !rateLimitedEndpoints.has(subPath);
+  const announceFabric = firstSeen && !rateLimitFabricReported;
+  rateLimitedEndpoints.add(subPath);
+  if (announceFabric) rateLimitFabricReported = true;
+  return { firstSeen, announceFabric };
+}
+
+/** Any successful GMGN response resets the tracker so a recovered fabric starts clean. */
+function resetRateLimitTracker(): void {
+  rateLimitedEndpoints = new Set<string>();
+  rateLimitWindowStartedAt = 0;
+  rateLimitFabricReported = false;
+}
+
 export class GmgnRestClient {
   protected baseUrl = 'https://openapi.gmgn.ai';
   protected keyPool: ApiKeyPool;
@@ -119,7 +160,20 @@ export class GmgnRestClient {
             return doRequest(attemptsLeft - 1);
           }
           if (banned) this.keyPool.markFailed('rate limit banned');
-          console.warn(`[GMGN] Rate limited${banned ? ' (BANNED)' : ''} — skip ${subPath}, retry on the next pass (~5m).`);
+          // I-12 — roll up repeated 429s into a fabric-level line instead of a
+          // wall of identical `Rate limited` warnings every 5-min pass. Still
+          // logs the first per-endpoint notice and one `[GMGN FABRIC] down` line
+          // per window; repeat 429s of the same endpoint stay silent.
+          const { announceFabric, firstSeen } = recordRateLimit(subPath);
+          if (announceFabric) {
+            console.warn(
+              `[GMGN FABRIC] recallFabric=down 429s=[${[...rateLimitedEndpoints].join(',')}] ` +
+                `→ hint-gate idle, recall-only empty. Retry in ~5m.`,
+            );
+          }
+          if (firstSeen) {
+            console.warn(`[GMGN] Rate limited${banned ? ' (BANNED)' : ''} — skip ${subPath}, retry on the next pass (~5m).`);
+          }
           return null;
         }
         if (res.status === 401 || res.status === 402 || res.status === 403) {
@@ -134,6 +188,9 @@ export class GmgnRestClient {
           return null;
         }
         if (!res.ok) { console.warn(`[GMGN] HTTP ${res.status} for ${subPath}`); return null; }
+        // A successful response means the fabric is alive again — reset the
+        // rate-limit roll-up so the next down-cycle reports fresh.
+        resetRateLimitTracker();
         const json: any = await res.json();
         if (json && typeof json === 'object' && json.code !== undefined && json.code !== 0) {
           console.warn(`[GMGN] API code ${json.code}: ${json.message || json.error || ''}`);
