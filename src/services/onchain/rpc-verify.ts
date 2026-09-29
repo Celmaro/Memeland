@@ -101,3 +101,79 @@ export class RpcVerify {
     return receipt?.confirmed === true && receipt.status === true;
   }
 }
+
+/** On-chain existence check result for a token address / mint. */
+export interface ExistenceCheck {
+  exists: boolean;
+  /** True when the oracle could not reach the chain (transport failure). */
+  transportDown: boolean;
+}
+
+export interface ExistencePrims {
+  fetch?: (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
+    ok: boolean;
+    json: () => Promise<{ result?: unknown; error?: unknown }>;
+  }>;
+  getActiveRPC?: (chain: string) => string | undefined;
+}
+
+async function rpcPost(
+  chainKey: string,
+  method: string,
+  params: unknown[],
+  deps: ExistencePrims,
+): Promise<{ result?: unknown; error?: unknown } | null> {
+  const rpc = deps.getActiveRPC
+    ? deps.getActiveRPC(chainKey)
+    : globalRPCFailoverManager.getActiveRPC(chainKey);
+  if (!rpc) return null;
+  const fetchImpl = deps.fetch ?? ((url, init) => (globalThis as { fetch: (url: string, init: unknown) => Promise<Response> }).fetch(url, init) as Promise<{ ok: boolean; json: () => Promise<{ result?: unknown; error?: unknown }> }>);
+  try {
+    const res = await fetchImpl(rpc, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * EVM oracle: does an ERC-20 token contract exist at `address`? eth_getCode is
+ * non-empty for a real contract; '0x' means no contract (an EOA or empty
+ * address). Any transport failure surface returns transportDown=true so the
+ * hint gate can fail open rather than mislabel a live token as fake.
+ */
+export async function evmTokenExists(
+  chain: RpcVerifyChain,
+  address: string,
+  deps: ExistencePrims = {},
+): Promise<ExistenceCheck> {
+  const body = await rpcPost(POOL_KEY[chain], 'eth_getCode', [address], deps);
+  if (body === null) return { exists: false, transportDown: true };
+  const result = body.result;
+  if (typeof result !== 'string') return { exists: false, transportDown: true };
+  // '0x' → empty bytecode → no contract at that address.
+  return { exists: result.length > 2 && result !== '0x', transportDown: false };
+}
+
+/**
+ * Solana oracle: does the token mint exist / has token accounts?
+ * getTokenLargestAccounts returns `value` when the mint is real and held;
+ * a parse/RPC error surface (invalid param) typically means the address is not
+ * a valid mint. We treat a definitive RPC `error` payload as `exists:false`
+ * (the mint is not real), and transport failures as transportDown=true.
+ */
+export async function solanaMintExists(
+  mint: string,
+  deps: ExistencePrims = {},
+): Promise<ExistenceCheck> {
+  const body = await rpcPost('sol', 'getTokenLargestAccounts', [mint], deps);
+  if (body === null) return { exists: false, transportDown: true };
+  if (body.error) return { exists: false, transportDown: false };
+  const value = (body.result as { value?: unknown } | undefined)?.value;
+  return { exists: Array.isArray(value) && value.length > 0, transportDown: false };
+}

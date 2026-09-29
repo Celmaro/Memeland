@@ -15,6 +15,7 @@ import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
 import { DiscoveryCoordinator, type CandidateEmitter } from '../../discovery/candidate-emitter.js';
+import { globalHintGate } from '../../discovery/hint-gate.js';
 import { sourceParticipation } from '../../startup/provider-banner.js';
 import { FomoApiClient, type FomoChain } from '../../adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from '../../adapters/fomo-emitter.js';
@@ -503,7 +504,12 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
     try {
       const chainId = chainIdFor(chain);
       const tokens = await this.fomo.discover({ chainIds: chainId !== undefined ? [chainId] : [] });
-      return tokens.map((t) => normalizeDexToken(chain, t, 'fomo'));
+      const rows = tokens.map((t) => normalizeDexToken(chain, t, 'fomo'));
+      // Phase 6 — FOMO is a recall-only source: it says "interesting", not
+      // "exists". Route through the hint gate (HintRegistry + chain-aware
+      // existence oracle). Transport-down fails OPEN (rows flow as prior
+      // behavior + cooldown); verified-real rows promote; phantoms drop.
+      return (await globalHintGate.gate(rows, chain, 'fomo')).promoted;
     } catch (err: any) {
       console.warn(`[MEME AGENT] fomo candidates failed (skipped): ${err.message}`);
       return [];
@@ -948,7 +954,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
                   // GMGN discovery rows ride in as overlay.
                   const { candidates: allCandidates, observations } = await this.discoveryCoordinator.discoverAll(chain, {
                     extras: { tape: tapeCandidates, track: trackCandidates },
-                    overlay: gmgnDiscovery,
+                    overlay: (await globalHintGate.gate(gmgnDiscovery, chain, 'gmgn')).promoted,
                   });
         scanned += allCandidates.length;
         scannedByChain[chain] = (scannedByChain[chain] ?? 0) + allCandidates.length;

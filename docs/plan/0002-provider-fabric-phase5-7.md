@@ -148,6 +148,20 @@ Risk notes:
 - Behavior change is observable: some FOMO rows previously candidate-eligible now require
   on-chain existence. Test against fixtures; deploy with the same env gates.
 
+### 3.2 Status — ✅ COMPLETE (`<commit>`)
+
+- `src/discovery/hint-gate.ts` (new) — `HintGate` wires FOMO/GMGN rows through
+  `HintRegistry.recordBatch` → `drainChecked` with a chain-aware existence oracle:
+  EVM `eth_getCode` (rh/eth/bsc/base) + Solana `getTokenLargestAccounts`. Transport
+  unreachable → **fail OPEN** (rows flow as prior behavior + `hint-<source>` cooldown).
+  `isCanonical` skip checked against the global CandidateRegistry (verify-only-if-not-already-canonical).
+- `rpc-verify.ts` — exported `evmTokenExists` / `solanaMintExists` existence prims.
+- `candidate-hints.ts` — added `recordBatch` + transport-aware `drainChecked`.
+- Agent: `collectFomoCandidates` + GMGN overlay rows routed through `globalHintGate`.
+- New `hint-gate.test.ts` — 8 tests: fail→drop, pass→promote, transport-down→fail-open,
+  canonical-skip, per-chain oracle routing, empty short-circuit.
+- tsc clean; full suite 1149/1149 green (159 files).
+
 ---
 
 ## 4. Phase 7 — Final FeatureSnapshot after security evidence

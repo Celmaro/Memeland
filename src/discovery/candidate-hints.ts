@@ -43,6 +43,15 @@ export interface CandidateHint {
 /** Verifies an address truly exists on-chain for the hint's chain. */
 export type HintVerifyFn = (hint: CandidateHint) => Promise<{ exists: boolean }>;
 
+/**
+ * Transport-aware existence outcome. `exists:false` is a DEFINITIVE on-chain
+ * answer (the address has no token contract / the mint is not real) → fail-closed,
+ * never promoted. `transportDown:true` means the oracle itself could not be
+ * reached (RPC unreachable / classified transient/quota) → the hint gate FAILS
+ * OPEN for that pass rather than silently starve the funnel.
+ */
+export type HintCheckOutcome = { exists: boolean; transportDown?: boolean };
+
 export interface HintResolution {
   hint: CandidateHint;
   exists: boolean;
@@ -71,6 +80,11 @@ export class HintRegistry {
     }
     this.pending.set(k, hint);
     this.observed += 1;
+  }
+
+  /** Queue many hints at once (dedups within + across the batch, per key). */
+  public recordBatch(hints: CandidateHint[]): void {
+    for (const h of hints) this.record(h);
   }
 
   public pendingSize(): number {
@@ -108,6 +122,38 @@ export class HintRegistry {
       if (exists) promoted.push(hint);
     }
     return promoted;
+  }
+
+  /**
+   * Transport-aware drain: same semantics as `drain` (verify every pending hint,
+   * record the resolution, clear the queue, return only verified-real hints) but
+   * the injected checker can also report `transportDown`. Used by the Phase 6
+   * hint gate so an unreachable RPC oracle FAILS OPEN (the gate demotes to prior
+   * behavior + cooldown) instead of silently failing closed on every row.
+   */
+  public async drainChecked(verify: (hint: CandidateHint) => Promise<HintCheckOutcome>): Promise<{
+    promoted: CandidateHint[];
+    /** True when any hint's oracle was unreachable this pass. */
+    transportDown: boolean;
+  }> {
+    const promoted: CandidateHint[] = [];
+    const batch = [...this.pending.entries()];
+    this.pending.clear();
+    let transportDown = false;
+    for (const [k, hint] of batch) {
+      let exists = false;
+      try {
+        const out = await verify(hint);
+        exists = out.exists;
+        if (out.transportDown) transportDown = true;
+      } catch {
+        exists = false; // verification failure = not promotable (fail-closed)
+      }
+      const res: HintResolution = { hint, exists, resolvedAt: Date.now() };
+      this.resolutions.set(k, res);
+      if (exists) promoted.push(hint);
+    }
+    return { promoted, transportDown };
   }
 
   /** Promotable (verified-real) hint resolutions so far. */
