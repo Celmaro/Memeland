@@ -26,7 +26,7 @@ import { ArkhamEnrich, type ArkhamEntity } from '../../adapters/arkham-enrich.js
 import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
 import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
-import type { ScreeningAgent, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
+import type { ScreeningAgent as ScreeningAgentContract, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
@@ -100,7 +100,7 @@ const DEFAULT_CONFIG: RobinhoodScreeningConfig = {
   trackFreshMinutes: 30,
 };
 
-export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> {
+export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
   // Memeland fork: the agent class is still named after its origin (Robinhood) but it now
   // runs on the full 5-chain scope (sol,bsc,base,eth,robinhood). Log prefix [MEME AGENT]
   // (was [ROBINHOOD AGENT]) so the cycle output reflects the fork's multichain identity,
@@ -1254,39 +1254,8 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
           const thesis = buildMemeThesis(t, det.type, confidence, det.reasons, strategyReason);
           const payload = this.buildPayload(t, confidence, thesis, trackLabel, chain);
 
-          // #1 Point-in-time FeatureSnapshot: immutable, provenance-tagged capture
-          // of the decision-time data. Wired so any later observer (Jev/ML/audit)
-          // can reconstruct EXACTLY what the bot knew when it called this a signal —
-          // no future information can be back-read into it.
-          try {
-            const snap = buildFeatureSnapshot({
-              candidateId: `${chain.toLowerCase()}:${t.address.toLowerCase()}`,
-              timestamp: Date.now(),
-              strategyVersion: this.strategyEngine.getActiveStrategy('meme-robinhood')?.id,
-              modelVersion: 'arch-3-5slot',
-              source: { name: t.source ?? 'unknown', fetchedAt: Date.now() },
-              market: {
-                priceUsd: t.priceUsd,
-                liquidityUsd: t.liquidityUsd,
-                volume24hUsd: volume24hOf(t),
-              },
-              flow: {
-                buyUsd1h: t.buyUsd1h ?? t.volume1hUsd / 2,
-                sellUsd1h: t.sellUsd1h ?? t.volume1hUsd / 2,
-              },
-              security: { sellable: true }, // sellability proven later in the security block; snapshot defaults conservative
-              momentum: { change1hPct: t.priceChange1h ?? 0, mlProb: klines ? predictUpMomentum(klines).score : undefined },
-              smartMoney: { smartDegenCount: t.smartDegenCount, kolCount: t.renownedCount },
-            });
-            (payload as unknown as Record<string, unknown>).featureSnapshot = snap;
-            if (this.isVerbose()) {
-              console.log(
-                `[SNAPSHOT] ${t.symbol} dq=${snap.dataQuality} groups=${snap.evidenceLineage.length} lineage=[${snap.evidenceLineage.map((e) => `${e.group}.${e.field}`).join(',')}]`,
-              );
-            }
-          } catch (snapErr: any) {
-            console.warn(`[SNAPSHOT] build failed (signal still fires): ${snapErr.message}`);
-          }
+          // (Phase-7 final FeatureSnapshot is built BELOW, after the security/risk
+          // evidence in the voter-swarm block, so it captures post-audit truth.)
 
           // P1.4 Arkham ENTITY enrichment for this FINALIST (overlay, fail-open,
           // never a gate). Resolves the DEPLOYER/creator wallet (falling back to
@@ -1297,6 +1266,14 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             console.log(`[ARKHAM] ${t.symbol} deployer→ ${entity.displayName ?? entity.ownerType}${entity.tags && entity.tags.length ? ` [${entity.tags.slice(0, 3).join(',')}]` : ''}`);
           }
 
+          // #1 FINAL FeatureSnapshot: Phase-7 capture is built AFTER all security/
+          // risk evidence (voter swarm below) so the immutable decision-time record
+          // reflects what the bot ACTUALLY knew — not a placeholder. Per-facet
+          // provenance threads honest lineage (market→DexScreener, flow→DEXPaprika,
+          // security→audit). If the swarm never ran, security stays conservatively
+          // unproven (never claims sellable) rather than assuming safe.
+          let finalSellability: { sellable: boolean; reasons: string[] } | undefined;
+          let finalSecurityPenaltyCount = 0;
           // Arch-3 voter swarm: assemble opinions for this FINALIST and attach them to the
           // payload — the consensus gate in index.ts re-derives confidence from the weighted
           // average, so the swarm (not the agent) has the final word.
@@ -1346,6 +1323,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
             }
             const sellCheck = await this.sellability.check(t.sellTrade ?? { liquidityUsd: t.liquidityUsd });
             if (!sellCheck.sellable) securityPenalties.push(...sellCheck.reasons);
+            finalSellability = sellCheck;
             // #3 deterministic anti-fooling: cross-source contradictions the
             // heuristics wouldn't flag alone (sellability contradiction, launch-
             // bundle forensics, honeypot deny-list). fooled → hard security demerit.
@@ -1355,6 +1333,7 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               claimedLiquidityUsd: t.liquidityUsd ?? undefined,
             });
             securityPenalties.push(...antiFoolingPenalties(fooling));
+            finalSecurityPenaltyCount = securityPenalties.length;
             const baseCtx: VoterContext = {
               token: t,
               chain,
@@ -1440,6 +1419,54 @@ export class RobinhoodScreeningAgent implements ScreeningAgent<RobinhoodSignal> 
               }
             }
             payload.voterScores = consolidateOpinions(opinions);
+          }
+
+          // #1 POINT-IN-TIME FINAL FeatureSnapshot — Phase-7: built last, only now
+          // that sellability + security penalties are proven. Immutable, per-facet
+          // provenance: a later observer (Jev/ML/audit) reconstructs EXACTLY what
+          // the bot knew at decision time — no future info can be back-read in.
+          try {
+            const snap = buildFeatureSnapshot({
+              candidateId: `${chain.toLowerCase()}:${t.address.toLowerCase()}`,
+              timestamp: Date.now(),
+              strategyVersion: this.strategyEngine.getActiveStrategy('meme-robinhood')?.id,
+              modelVersion: 'arch-3-5slot',
+              source: { name: t.source ?? 'unknown', fetchedAt: Date.now() },
+              market: {
+                priceUsd: t.priceUsd,
+                liquidityUsd: t.liquidityUsd,
+                volume24hUsd: volume24hOf(t),
+              },
+              flow: {
+                buyUsd1h: t.buyUsd1h ?? t.volume1hUsd / 2,
+                sellUsd1h: t.sellUsd1h ?? t.volume1hUsd / 2,
+              },
+              // Phase-7: real post-audit security state, not the old `sellable:true`
+              // placeholder. Absent evidence (swarm off) → conservatively unproven.
+              security: {
+                sellable: finalSellability ? finalSellability.sellable : false,
+                auditClean: finalSecurityPenaltyCount === 0,
+              },
+              momentum: { change1hPct: t.priceChange1h ?? 0, mlProb: klines ? predictUpMomentum(klines).score : undefined },
+              smartMoney: { smartDegenCount: t.smartDegenCount, kolCount: t.renownedCount },
+              // Per-facet lineage: security evidence + its fetch time ride on the
+              // security group; market/flow carry the candidate feed; all fall back
+              // to `source` above when a facet lacks its own provider.
+              provenance: {
+                security: {
+                  name: finalSecurityPenaltyCount > 0 ? 'security-audit' : 'security-audit-clean',
+                  fetchedAt: Date.now(),
+                },
+              },
+            });
+            (payload as unknown as Record<string, unknown>).featureSnapshot = snap;
+            if (this.isVerbose()) {
+              console.log(
+                `[SNAPSHOT] ${t.symbol} dq=${snap.dataQuality} sellable=${finalSellability ? finalSellability.sellable : '-'} auditPenalties=${finalSecurityPenaltyCount} groups=${snap.evidenceLineage.length} lineage=[${snap.evidenceLineage.map((e) => `${e.group}.${e.field}`).join(',')}]`,
+              );
+            }
+          } catch (snapErr: any) {
+            console.warn(`[SNAPSHOT] build failed (signal still fires): ${snapErr.message}`);
           }
 
           const signal: RobinhoodSignal = { token: t, signalType: det.type, confidence, reasons: det.reasons };

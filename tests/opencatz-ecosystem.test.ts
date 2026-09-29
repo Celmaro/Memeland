@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SwarmConsensusEngine } from '../src/orchestrator/swarm-consensus.js';
-import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
+import { ScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { GMGNRawToken } from '../src/adapters/gmgn-adapter.js';
 import { PriceAlertService } from '../src/services/price-alert-service.js';
 
@@ -23,7 +23,7 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
   });
 
   it('3. Robinhood Meme Agent: evaluates healthy Robinhood Chain token (CTO confidence >= 80)', async () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     // Stub GoPlus to return a clean audit; agent is fail-closed without real audit data.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -58,7 +58,7 @@ describe('🐾 OPENCATZ MULTI-AGENT SYSTEM TEST SUITE', () => {
   });
 
   it('3b. Robinhood Meme Agent: fail-closed without audit — zero reports', async () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no network')));
     const reports = await agent.runScreeningPass();
     vi.unstubAllGlobals();

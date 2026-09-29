@@ -14,7 +14,7 @@ import { SkillLoader } from './services/skill-loader.js';
 import { EVMTradeAdapter } from './adapters/evm-adapter.js';
 import { globalLifiExecutor } from './adapters/lifi-executor.js';
 import { GMGNAdapter } from './adapters/gmgn-adapter.js';
-import { RobinhoodScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
+import { ScreeningAgent } from './agents/meme-robinhood/robinhood-screening-agent.js';
 import { DexScreenerFeed } from './adapters/dexscreener-feed.js';
 import { DexpaprikaFeed } from './adapters/dexpaprika-feed.js';
 import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
@@ -184,7 +184,7 @@ const evmTradeAdapter = new EVMTradeAdapter();
 // Arch-3 voter swarm: enabled unless VOTER_SWARM_ENABLED=false; the Critic voter gets
 // the AIService (fail-open neutral when LLM is unavailable).
 const savedScreeningConfigs = stateStore.getScreeningConfigs();
-const robinhoodScreeningAgent = new RobinhoodScreeningAgent(
+const robinhoodScreeningAgent = new ScreeningAgent(
   savedScreeningConfigs['meme-robinhood'] as any,
   () => strategyEngine.getActiveStrategy('meme-robinhood')?.params ?? {},
   {

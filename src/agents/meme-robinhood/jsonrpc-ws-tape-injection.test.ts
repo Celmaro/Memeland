@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { RobinhoodScreeningAgent } from './robinhood-screening-agent.js';
+import { ScreeningAgent } from './robinhood-screening-agent.js';
 import { JsonRpcWsTape } from '../../adapters/jsonrpc-ws-tape.js';
 
 interface MockSocket {
@@ -30,7 +30,7 @@ function mockSocket(): MockSocket {
   };
 }
 
-describe('RobinhoodScreeningAgent — own-tape (JsonRpcWsTape) → discovery injection', () => {
+describe('ScreeningAgent — own-tape (JsonRpcWsTape) → discovery injection', () => {
   beforeEach(() => {
     process.env.JSONRPC_WS_TAPE_ENABLED = 'true';
   });
@@ -58,7 +58,7 @@ describe('RobinhoodScreeningAgent — own-tape (JsonRpcWsTape) → discovery inj
     sock.onmessage?.({ data: mk('MintA') });
     sock.onmessage?.({ data: mk('MintB') });
 
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     agent.injectJsonRpcWsTapes([tape]);
     const candidates = await agent.collectJsonRpcWsTapeCandidates('sol');
     const addrs = candidates.map((c) => c.address).sort();
@@ -74,7 +74,7 @@ describe('RobinhoodScreeningAgent — own-tape (JsonRpcWsTape) → discovery inj
       chain: 'eth',
       createSocket: () => sock as never,
     });
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     agent.injectJsonRpcWsTapes([tape]);
     // non-sol chain → no drain
     expect(await agent.collectJsonRpcWsTapeCandidates('eth')).toHaveLength(0);

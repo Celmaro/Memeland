@@ -11,7 +11,7 @@ import {
  * OpportunityStrategist — deterministic (no LLM) per-cycle escalation layer.
  *
  * It answers "which opportunities get scored by the 7-voter swarm and why now",
- * leaving the scoring/thesis to the RobinhoodScreeningAgent and the ≥80 gate to
+ * leaving the scoring/thesis to the ScreeningAgent and the ≥80 gate to
  * swarm-consensus.ts. All state changes flow through the ledger's fail-closed
  * `transition()`, so invalid edges are rejected by construction.
  *

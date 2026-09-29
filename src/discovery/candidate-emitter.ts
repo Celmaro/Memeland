@@ -1,7 +1,7 @@
 /**
  * DiscoveryCoordinator (provider-architecture v3 — Phase 3).
  *
- * The plan's P0: stop `RobinhoodScreeningAgent` from knowing how every provider
+ * The plan's P0: stop `ScreeningAgent` from knowing how every provider
  * works. DiscoveryCoordinator owns the funnel mechanics that used to live
  * inline in the agent:
  *

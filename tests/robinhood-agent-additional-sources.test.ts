@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
+import { ScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { RhFillTapeReader, FillTapeWindow } from '../src/adapters/rh-fill-tape.js';
 import type { MarketDataProvider } from '../src/adapters/market-data-provider.js';
 import { DexScreenerFeed } from '../src/adapters/dexscreener-feed.js';
@@ -62,7 +62,7 @@ const makeDex = (tokens: { address: string }[]): MarketDataProvider => ({
   },
 });
 
-describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sources', () => {
+describe('ScreeningAgent — Q04 tape + Q06 DexScreener additional sources', () => {
   // Memeland fork defaults MULTICHAIN_CHAINS to all 5 chains. These tests were
   // authored single-chain; pin robinhood so the existing mocks stay valid.
   beforeEach(() => { process.env.MULTICHAIN_CHAINS = 'robinhood'; });
@@ -84,7 +84,7 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
   it('(a) flags off → pass returns exactly the prior candidates (no change)', async () => {
     process.env.GMGN_API_KEY = 'test-key';
     stubGmgnFetch();
-    const agent = new RobinhoodScreeningAgent(undefined, undefined, {
+    const agent = new ScreeningAgent(undefined, undefined, {
       tape: makeTape(['0xRANK', '0XTAPE']),
       tapeTokenAddresses: ['0xRANK', '0XTAPE'],
       dexscreener: makeDex([{ address: '0xRANK' }, { address: '0xNEW' }]),
@@ -102,7 +102,7 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
     stubGmgnFetch();
     process.env.RH_TAPE_ENABLED = 'true';
     process.env.DEXSCREENER_FEED_ENABLED = 'true';
-    const agent = new RobinhoodScreeningAgent(undefined, undefined, {
+    const agent = new ScreeningAgent(undefined, undefined, {
       tape: makeTape(['0xRANK', '0XTAPE']),
       tapeTokenAddresses: ['0xRANK', '0XTAPE'],
       dexscreener: makeDex([{ address: '0xRANK' }, { address: '0xNEW' }]),
@@ -119,7 +119,7 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
     process.env.DEXSCREENER_FEED_ENABLED = 'true';
     const throwingTape = { readFillTape: vi.fn().mockRejectedValue(new Error('tape down')) } as unknown as RhFillTapeReader;
     const throwingDex: MarketDataProvider = { id: 'dexscreener', discover: vi.fn().mockRejectedValue(new Error('dex down')) };
-    const agent = new RobinhoodScreeningAgent(undefined, undefined, {
+    const agent = new ScreeningAgent(undefined, undefined, {
       tape: throwingTape,
       tapeTokenAddresses: ['0xRANK'],
       dexscreener: throwingDex,
@@ -141,7 +141,7 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
         }),
       })) as never,
     });
-    const agent = new RobinhoodScreeningAgent(undefined, undefined, { dexscreener: feed });
+    const agent = new ScreeningAgent(undefined, undefined, { dexscreener: feed });
     const candidates = await agent.collectDexscreenerCandidates('robinhood');
     expect(candidates.length).toBe(1);
     expect(candidates[0]!.address).toBe('0xREAL');

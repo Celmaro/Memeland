@@ -4,7 +4,7 @@ import { preFilterToken } from '../src/agents/shared/gmgn-meme-helpers.js';
 import { BytecodeScanner } from '../src/services/bytecode-scanner.js';
 import { AnkrDiscoveryFeed, PAIR_CREATED_TOPIC0, decodePairCreated, FACTORY_ADDRESSES } from '../src/adapters/ankr-discovery-feed.js';
 import { RPCFailoverManager } from '../src/services/rpc-failover.js';
-import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
+import { ScreeningAgent } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import type { MarketDataProvider, MarketToken } from '../src/adapters/market-data-provider.js';
 import {
   consolidateOpinions,
@@ -347,7 +347,7 @@ describe('Ankr candidates flow into the screening merge (P1-1)', () => {
         pairAddress: '0xPAIR',
       }]),
     };
-    const agent = new RobinhoodScreeningAgent(undefined, undefined, { ankr: ankrFeed });
+    const agent = new ScreeningAgent(undefined, undefined, { ankr: ankrFeed });
     const candidates = await agent.collectAnkrCandidates('robinhood');
     expect(candidates.length).toBe(1);
     expect(candidates[0]!.address).toBe('0xNEWANKR');
@@ -362,9 +362,9 @@ describe('Ankr candidates flow into the screening merge (P1-1)', () => {
     };
     // Spy the collector itself: if the merge calls it, the ankr feed is wired
     // into the screening path. Avoids a full pass (GoPlus/GMGN network I/O).
-    const spy = vi.spyOn(RobinhoodScreeningAgent.prototype as any, 'collectAnkrCandidates')
+    const spy = vi.spyOn(ScreeningAgent.prototype as any, 'collectAnkrCandidates')
       .mockResolvedValue([]);
-    const agent = new RobinhoodScreeningAgent(undefined, undefined, { ankr: ankrFeed });
+    const agent = new ScreeningAgent(undefined, undefined, { ankr: ankrFeed });
     await agent.runScreeningPass();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();

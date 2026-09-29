@@ -86,6 +86,14 @@ type SnapshotInput = {
   momentum?: Partial<Record<string, number>>;
   smartMoney?: Partial<Record<string, number>>;
   deployer?: Partial<Record<string, number>>;
+  /**
+   * Phase 7 — per-facet provenance override. Keyed by group name; each value
+   * supplies THAT group's source+time (price→DexScreener, flow→DEXPaprika,
+   * security→GoPlus, etc). Groups missing here fall back to `source`. This is
+   * what lets a multi-provider finalist carry honest lineage instead of one
+   * coarse `{source, fetchedAt}` stamped across every field.
+   */
+  provenance?: Partial<Record<keyof FeatureGroup, { name: string; fetchedAt: number }>>;
 };
 
 const prov = <T>(v: T, source: string, observedAt: number): ProvenancedValue<T> => {
@@ -122,31 +130,38 @@ function freezeGroup(group: FeatureGroup): FeatureGroup {
 export function buildFeatureSnapshot(input: SnapshotInput): FeatureSnapshot {
   const src = input.source.name;
   const t = input.source.fetchedAt;
+  // Phase 7 — per-facet source/time override; falls back to the global source.
+  const provFor = (g: keyof FeatureGroup): { name: string; fetchedAt: number } => {
+    const p = input.provenance?.[g];
+    return p ? { name: p.name, fetchedAt: p.fetchedAt } : { name: src, fetchedAt: t };
+  };
 
-  const group = (entries?: Partial<Record<string, number>>): FeatureGroup['market'] | undefined => {
+  const group = (entries?: Partial<Record<string, number>>, g: keyof FeatureGroup = 'market'): FeatureGroup['market'] | undefined => {
     if (!entries) return undefined;
+    const { name, fetchedAt } = provFor(g);
     const out: Record<string, ProvenancedValue<number>> = {};
     for (const [k, v] of Object.entries(entries)) {
-      if (typeof v === 'number' && Number.isFinite(v)) out[k] = prov(v, src, t);
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = prov(v, name, fetchedAt);
     }
     return Object.keys(out).length > 0 ? out as never : undefined;
   };
-  const secGroup = (entries?: Partial<Record<string, boolean>>): FeatureGroup['security'] | undefined => {
+  const secGroup = (entries?: Partial<Record<string, boolean>>, g: keyof FeatureGroup = 'security'): FeatureGroup['security'] | undefined => {
     if (!entries) return undefined;
+    const { name, fetchedAt } = provFor(g);
     const out: Record<string, ProvenancedValue<boolean>> = {};
     for (const [k, v] of Object.entries(entries)) {
-      if (typeof v === 'boolean') out[k] = prov(v, src, t);
+      if (typeof v === 'boolean') out[k] = prov(v, name, fetchedAt);
     }
     return Object.keys(out).length > 0 ? out as never : undefined;
   };
 
   const featureGroups: FeatureGroup = {
-    market: group(input.market) as FeatureGroup['market'],
-    flow: group(input.flow) as FeatureGroup['flow'],
-    security: secGroup(input.security) as FeatureGroup['security'],
-    momentum: group(input.momentum) as FeatureGroup['momentum'],
-    smartMoney: group(input.smartMoney) as FeatureGroup['smartMoney'],
-    deployer: group(input.deployer) as FeatureGroup['deployer'],
+    market: group(input.market, 'market') as FeatureGroup['market'],
+    flow: group(input.flow, 'flow') as FeatureGroup['flow'],
+    security: secGroup(input.security, 'security') as FeatureGroup['security'],
+    momentum: group(input.momentum, 'momentum') as FeatureGroup['momentum'],
+    smartMoney: group(input.smartMoney, 'smartMoney') as FeatureGroup['smartMoney'],
+    deployer: group(input.deployer, 'deployer') as FeatureGroup['deployer'],
   };
   // Deep-freeze the groups so a late observation can never mutate the
   // decision-time record (point-in-time immutability).

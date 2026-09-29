@@ -47,6 +47,40 @@ describe('buildFeatureSnapshot (#1 point-in-time)', () => {
     }).toThrow();
   });
 
+  it('Phase-7: per-facet provenance override stamps each group with its OWN provider', () => {
+    const snap = buildFeatureSnapshot({
+      candidateId: 'cand-3',
+      timestamp: 2000,
+      source: { name: 'dexpaprika', fetchedAt: 1500 },
+      market: { priceUsd: 0.5, liquidityUsd: 25000 },
+      security: { sellable: true, auditClean: true },
+      provenance: {
+        market: { name: 'dexscreener', fetchedAt: 1490 },
+        security: { name: 'security-audit', fetchedAt: 1990 },
+      },
+    });
+    // market rides its own provider override...
+    expect(snap.market.priceUsd.source).toBe('dexscreener');
+    expect(snap.market.priceUsd.observedAt).toBe(1490);
+    // security group overridden by the audit provider...
+    expect(snap.security.sellable.source).toBe('security-audit');
+    expect(snap.security.sellable.observedAt).toBe(1990);
+    // groups without an override fall back to the global source.
+    expect(snap.flow).toBeUndefined();
+  });
+
+  it('Phase-7: absent security evidence stays conservatively unproven (never claims sellable)', () => {
+    const snap = buildFeatureSnapshot({
+      candidateId: 'cand-4',
+      timestamp: 1,
+      source: { name: 'feed', fetchedAt: 0 },
+      market: { priceUsd: 1 },
+      security: { sellable: false, auditClean: false },
+    });
+    expect(snap.security.sellable.value).toBe(false);
+    expect(snap.security.auditClean.value).toBe(false);
+  });
+
   it('records dataQuality from field completeness', () => {
     const full = buildFeatureSnapshot({
       candidateId: 'c1', timestamp: 1,

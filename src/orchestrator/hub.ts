@@ -176,8 +176,8 @@ export class OpenCatzHub {
   private async resolveAgent(id: AgentDomainId): Promise<ScreeningAgent> {
     switch (id) {
       case 'meme-robinhood': {
-        const { RobinhoodScreeningAgent } = await import('../agents/meme-robinhood/robinhood-screening-agent.js');
-        return new RobinhoodScreeningAgent();
+        const { ScreeningAgent } = await import('../agents/meme-robinhood/robinhood-screening-agent.js');
+        return new ScreeningAgent();
       }
       case 'alpha-robinhood': {
         const { AlphaRobinhoodScreeningAgent } = await import('../agents/alpha-robinhood/alpha-screening-agent.js');

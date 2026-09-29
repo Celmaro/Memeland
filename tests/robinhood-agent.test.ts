@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RobinhoodScreeningAgent, RobinhoodSignal } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
+import { ScreeningAgent, RobinhoodSignal } from '../src/agents/meme-robinhood/robinhood-screening-agent.js';
 import { createDedupe, volume24hOf, buildSignalBoostMap, applySignalBoost } from '../src/agents/shared/gmgn-meme-helpers.js';
 import type { GMGNRawToken } from '../src/adapters/gmgn-adapter.js';
 import { BytecodeScanner } from '../src/services/bytecode-scanner.js';
@@ -23,7 +23,7 @@ const mkToken = (over: Partial<GMGNRawToken> = {}): GMGNRawToken => ({
   ...over,
 });
 
-describe('RobinhoodScreeningAgent', () => {
+describe('ScreeningAgent', () => {
   // Memeland fork defaults MULTICHAIN_CHAINS to all 5 chains. These tests were
   // authored single-chain; pin robinhood so the existing mocks stay valid.
   beforeEach(() => { process.env.MULTICHAIN_CHAINS = 'robinhood'; });
@@ -40,7 +40,7 @@ describe('RobinhoodScreeningAgent', () => {
     },
   };
 
-  async function runVoterSwarmSecurityPass(agent: RobinhoodScreeningAgent, token: GMGNRawToken) {
+  async function runVoterSwarmSecurityPass(agent: ScreeningAgent, token: GMGNRawToken) {
     process.env.GMGN_API_KEY = 'test-key';
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
       if (url.includes('api.geckoterminal.com/api/v2/simple/networks/eth/token_price/')) {
@@ -80,7 +80,7 @@ describe('RobinhoodScreeningAgent', () => {
   }
 
   it('preFilter passes young & unknown-age tokens (age gate off — degen early)', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     // age gate default 0: age is not a criterion, fresh 1h token passes
     expect(agent.preFilter(mkToken({ creationTimestamp: Date.now()/1000 - 3600 }), ETH_PRICE).ok).toBe(true);
     // null creationTimestamp also passes (age is not a criterion)
@@ -88,13 +88,13 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('preFilter rejects wash trading (bundler is not gated)', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     expect(agent.preFilter(mkToken({ isWashTrading: true }), ETH_PRICE).ok).toBe(false);
     expect(agent.preFilter(mkToken({ bundlerRate: 0.6 }), ETH_PRICE).ok).toBe(true);
   });
 
   it('preFilter enforces market cap gate (requires > $100k, fail-closed)', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     expect(agent.preFilter(mkToken({ marketCapUsd: 50000 }), ETH_PRICE).ok).toBe(false);
     expect(agent.preFilter(mkToken({ marketCapUsd: 0 }), ETH_PRICE).ok).toBe(false);
     const r = agent.preFilter(mkToken({ marketCapUsd: 50000 }), ETH_PRICE);
@@ -109,25 +109,25 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('preFilter passes a rank-1h-style token with strong 1h volume (24h unknown)', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const res = agent.preFilter(mkToken({ volume24hUsd: 0, volume1hUsd: 60000 }), ETH_PRICE);
     expect(res.ok).toBe(true); // volume 1h 60k >= 50k → passes without 24h data
   });
 
   it('preFilter rejects token whose 1h volume is below the $50k gate', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const res = agent.preFilter(mkToken({ volume24hUsd: 0, volume1hUsd: 20000 }), ETH_PRICE);
     expect(res.ok).toBe(false);
     expect(res.reason).toContain('volume 1h');
   });
 
   it('preFilter passes a healthy token', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     expect(agent.preFilter(mkToken(), ETH_PRICE).ok).toBe(true);
   });
 
   it('preFilter enforces total-fee gate (> $500, live ETH price)', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     // 0.2 ETH @ $1929.03 = $385.81 < $500 → reject
     expect(agent.preFilter(mkToken({ totalFeeNative: 0.2 }), ETH_PRICE).ok).toBe(false);
     // null fee → fail-closed (organic activity unrecorded)
@@ -137,7 +137,7 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('preFilter re-enables age & fee gates when thresholds > 0', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     agent.updateConfig({ minAgeHours: 2, minTotalFeeUsd: 500 });
     expect(agent.preFilter(mkToken({ creationTimestamp: Date.now()/1000 - 3600 }), ETH_PRICE).ok).toBe(false);
     expect(agent.preFilter(mkToken({ totalFeeNative: 0.2 }), ETH_PRICE).ok).toBe(false);
@@ -146,32 +146,32 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('detectSignal returns CTO for cto_flag token', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const det = agent.detectSignal(mkToken({ ctoFlag: true }));
     expect(det.type).toBe('CTO');
     expect(det.confidence).toBeGreaterThanOrEqual(80);
   });
 
   it('detectSignal returns REVIVAL for dead token waking up without CTO', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const det = agent.detectSignal(mkToken({ ctoFlag: false, priceChange1h: 60 }));
     expect(det.type).toBe('REVIVAL');
   });
 
   it('detectSignal returns MOMENTUM for strong pump without CTO', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const det = agent.detectSignal(mkToken({ ctoFlag: false, priceChange1h: 40, priceChange5m: 3 }));
     expect(det.type).toBe('MOMENTUM');
   });
 
   it('detectSignal disables CTO on dexscreener source', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const det = agent.detectSignal(mkToken({ ctoFlag: true, source: 'dexscreener' }));
     expect(det.type).not.toBe('CTO');
   });
 
   it('detectSignal rejects empty tokens — at least 1 of 3 required (smart wallet/CTO/KOL)', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     // 0/3 signals: volume pump only, without smart wallet/CTO/KOL → NONE
     const empty = agent.detectSignal(mkToken({ smartDegenCount: 0, renownedCount: 0, ctoFlag: false, priceChange1h: 40, priceChange5m: 3, volume24hUsd: 300000 }));
     expect(empty.type).toBe('NONE');
@@ -189,7 +189,7 @@ describe('RobinhoodScreeningAgent', () => {
     // because keyless discovery feeds don't carry GMGN social fields yet. The old
     // gate sent every fresh pair to NONE. With observed flow (post-REVALIDATE),
     // the social gate is bypassed — security gates still run downstream.
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const fresh = agent.detectSignal(mkToken({
       smartDegenCount: 0, renownedCount: 0, ctoFlag: false,
       priceChange1h: 40, priceChange5m: 3, volume24hUsd: 300000,
@@ -201,7 +201,7 @@ describe('RobinhoodScreeningAgent', () => {
 
   it('detectSignal fresh-pair path: freshLane WITHOUT flow still NONE (fail-closed)', () => {
     // Fresh but no observed volume/liquidity — cannot score momentum honestly.
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const dead = agent.detectSignal(mkToken({
       smartDegenCount: 0, renownedCount: 0, ctoFlag: false,
       priceChange1h: 40, priceChange5m: 3, volume24hUsd: 0, volume1hUsd: 0, liquidityUsd: 0,
@@ -213,7 +213,7 @@ describe('RobinhoodScreeningAgent', () => {
   it('runScreeningPass returns [] without network', async () => {
     process.env.GMGN_API_KEY = 'test-key';
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no network')));
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const reports = await agent.runScreeningPass();
     expect(Array.isArray(reports)).toBe(true);
     expect(reports.length).toBe(0);
@@ -274,7 +274,7 @@ describe('RobinhoodScreeningAgent', () => {
       throw new Error(`unexpected fetch: ${url}`);
     }));
 
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     expect(agent.preFilter(healthy, ETH_PRICE).ok).toBe(true); // sanity: GMGN audit gates pass
     // Feed contract (2026-09-26): keyless discovery introduces candidates;
     // GMGN overlays onto addresses keyless feeds found. Mirror the healthy
@@ -296,7 +296,7 @@ describe('RobinhoodScreeningAgent', () => {
       bytecode: '0x6342966c6877',
       sellTrade: { liquidityUsd: 50000, blockAgeMs: 0, expectedSlippagePct: 1 },
     });
-    const agent = new RobinhoodScreeningAgent({}, undefined, { voterSwarm: true });
+    const agent = new ScreeningAgent({}, undefined, { voterSwarm: true });
 
     const reports = await runVoterSwarmSecurityPass(agent, token);
 
@@ -311,7 +311,7 @@ describe('RobinhoodScreeningAgent', () => {
       .mockResolvedValue({ sellable: false, score: 0, reasons: ['block not pinned or stale - score 0'] });
     const scanSpy = vi.spyOn(BytecodeScanner.prototype, 'scan');
     const token = mkToken({ creatorClose: false, bytecode: undefined });
-    const agent = new RobinhoodScreeningAgent({}, undefined, { voterSwarm: true });
+    const agent = new ScreeningAgent({}, undefined, { voterSwarm: true });
 
     const reports = await runVoterSwarmSecurityPass(agent, token);
 
@@ -322,7 +322,7 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('preFilter rejects honeypot & high-tax tokens from GMGN audit data', () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     expect(agent.preFilter(mkToken({ isHoneypot: true }), ETH_PRICE).ok).toBe(false);
     expect(agent.preFilter(mkToken({ buyTax: '15' }), ETH_PRICE).ok).toBe(false);
     expect(agent.preFilter(mkToken({ sellTax: '20' }), ETH_PRICE).ok).toBe(false);
@@ -330,7 +330,7 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('toStrategyGmgn contract maps GMGN fields for the default strategy (native_price_usd = ETH)', async () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const token = mkToken(); // healthy CTO token (totalFeeNative 1 ETH)
     const gmgnCtx = { ...agent.toStrategyGmgn(token), native_price_usd: ETH_PRICE };
     expect(gmgnCtx.ageHours).toBeGreaterThan(0);
@@ -342,7 +342,7 @@ describe('RobinhoodScreeningAgent', () => {
   });
 
   it('end-to-end: default .mjs strategy evaluates healthy CTO token (BUY >= 80, fail-closed on null fee)', async () => {
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const token = mkToken(); // healthy CTO token (totalFeeNative 1 ETH)
     const gmgnCtx = { ...agent.toStrategyGmgn(token), native_price_usd: ETH_PRICE };
 
@@ -384,7 +384,7 @@ describe('RobinhoodScreeningAgent', () => {
     // The audit's critical finding: 800×$20 buys vs 200×$500 sells = 80% 'BUY'
     // by count but net SELLER by USD. The +20 momentum bonus must NOT fire on an
     // actual net-seller. Regression: DEXPaprika now feeds buyUsd1h/sellUsd1h.
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const token = mkToken({ ctoFlag: false, priceChange1h: 35 }); // non-CTO → MOMENTUM path
     const gmgnCtx = {
       ...agent.toStrategyGmgn(token),
@@ -413,7 +413,7 @@ describe('RobinhoodScreeningAgent', () => {
 
   it('strategy: USD buy/sell flow awards +20 when net BUYER by USD', async () => {
     // Net buyer by USD (with USD data present) awards +20 and cites USD, not count.
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const token = mkToken({ ctoFlag: false, priceChange1h: 35 }); // non-CTO → MOMENTUM path
     const gmgnCtx = {
       ...agent.toStrategyGmgn(token),
@@ -474,7 +474,7 @@ describe('RobinhoodScreeningAgent', () => {
 
   it('collectSignalBoostMap is fail-open (empty map on network failure)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no network')));
-    const agent = new RobinhoodScreeningAgent();
+    const agent = new ScreeningAgent();
     const map = await agent.collectSignalBoostMap();
     expect(map.size).toBe(0);
   });
