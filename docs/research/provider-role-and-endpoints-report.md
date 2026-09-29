@@ -273,3 +273,87 @@ PumpPortal WS). Approved scope = the leaderboard/trader-intelligence layer is fe
 The fresh pass reports "1,140 tests" at `143ea05d`; current `master` runs **1,136** tests. The
 delta is from the price-migration rewrite of `tests/price-feed-service.test.ts` (fewer, denser
 cases) landing between the two heads — it is not a test removal from the review's own work.
+
+---
+
+## 6. Author's improvement recommendations (beyond the reviews)
+
+What I would add on top of the adopted directive. Each is grounded to a current file and tagged
+`P0/P1/P2` × `S/M/L` (priority × effort). None requires microservices or a schema dump; all are
+incremental and keep the current architecture recognizable.
+
+### 6.1 Per-pass `pass_receipt` — audit, not log-grep (P0 · S)
+We diagnose `fired=0` by grepping `[PREFILTER REJECTS]` / `[STALE GATE]` lines. Promote that to an
+**immutable per-pass record**: timestamp, chains scanned, candidate count by source, budget spent,
+sources that failed/degraded, and gate outcomes (prefilter / stale / consensus / execution). Write
+it beside the existing diagnostics. Turns "did the bot fire" from log-grep into a queryable fact.
+→ `screening-cycle.ts`, `robinhood-screening-agent.ts`.
+
+### 6.2 Structured logger + per-pass trace id (P0 · S)
+Adapters log ad hoc `[PRICE SERVICE ERROR]`, `[GMGN ERROR]`, `[DISCOVERY]`, `[AGENT RUNNER]` with
+no shared schema or correlation id. A single `trace(id)` wrapper (request-id per pass) lets you
+answer "what did this pass actually touch" without text-grep, and pairs with 6.1 to make the
+receipt reproducible. → `source-quota.ts`, `DiscoveryCoordinator`, adapters.
+
+### 6.3 Source-health canary → availability into promote/demote (P1 · S/M)
+`CandidateRegistry.stats()` has coverage/latency/dup/fp/spend but **no availability/uptime**
+dimension — exactly what the second opinion asked for (point #5). Add a periodic canary that pings
+each free endpoint and records a rolling availability score. Makes promote/demote robust to
+"source was down this week," not only "source was first-seen early." → `discovery-registry.ts`,
+`provider-governor.ts`.
+
+### 6.4 Centralize address normalization + a canonical entity key (P1 · S)
+Dedup today is `address.toLowerCase()` (EVM) vs base58 (sol) handled implicitly and inconsistently.
+A single `canonicalEntityKey(chain, address)` used by `CandidateRegistry.id()`, the coordinator
+merge, and any future token/pool table kills a whole class of dedup bugs (lowercased sol addresses,
+checksummed eth) — before Postgres makes them expensive. → `discovery-registry.ts`,
+`candidate-emitter.ts`.
+
+### 6.5 Hard-gate vs soft-feature degradation (P1 · M)
+The system fail-closes broadly on missing data. Distinguish:
+- **HARD gates** (must-have for safety): security, sellability, on-chain existence → fail-closed.
+- **SOFT features** (degrade gracefully): Arkham entity labels, sentiment, klines → mark
+  low-confidence and apply a risk discount instead of killing the pass.
+This generalizes the `feed-down ≠ dead-pair` distinction we already proved for volume across the
+whole enrichment layer, preserving liveness when a non-critical provider blips. → `prefilter`,
+`swarm-consensus.ts`, `source-quota.ts`.
+
+### 6.6 Golden normalization fixtures per chain (P1 · S)
+The CoinGecko→GeckoTerminal migration broke 3 tests precisely because a provider shape changed.
+Add golden fixtures for the normalization boundary (`normalizeDexToken`, `normalizeTapeWindow`)
+per chain so a provider format change is caught in CI at the boundary, not as a deep behavioral
+regression. Optionally: env-gated contract tests against the real free endpoints that regenerate
+the fixtures. → `robinhood-discovery.ts`, `tests/`.
+
+### 6.7 Self-writing `DISCOVERY_INTRODUCERS` proposal (P2 · M)
+The 2–4 week empirical observation is scaffolded, but acting on it is a manual env edit. Add a mode
+where, once stats mature, the system *proposes* an allowlist (`[DISCOVERY PROPOSAL] promote:
+[gecko, ankr]; demote: [cmc]`) and flags when config contradicts the measured primary. Closes the
+"measure, don't hand-pick" loop. → `discovery-registry.ts`, `isIntroducerEnabled` gate.
+
+### 6.8 Instrument the 24h∩7d∩30d intersection surface (P2 · S)
+`persistence-cohort.ts` already computes the persistent-trader tiers. Add a small recorded surface
+(cohort size, `COHORT_CONVERGENCE` events, count of tier-C traders) so the trader-intelligence
+layer's value is measurable during the observation window — otherwise we can't tell whether
+FOMO/GMGN spend earns its keep. → `persistence-cohort.ts`, `trader-persistence.ts`.
+
+### 6.9 Single typed provider-config schema with boot validation (P2 · S)
+There are ~a dozen provider env-gates (`ANKR_FEED_ENABLED`, `DISCOVERY_INTRODUCERS`, `GMGN_API_KEY`,
+`FOMO_API_KEY`, budget envs). `startup-validation.ts` exists but is partial. Centralize into one
+typed config object validated loudly at boot so a misconfigured provider fails fast
+(`FOMO_API_KEY missing`) instead of silently yielding no candidates. → `startup-validation.ts`,
+`config/`.
+
+### 6.10 Full clock injection for determinism (P2 · S/M)
+Several components already take an injectable `now()` (`candidate-emitter.ts`, `source-quota.ts`,
+`ttl-cache.ts`). Extend that to every time-dependent module (registry `observed_at`, persistence
+windows, staleness) so the whole suite is deterministic under a frozen clock — exact reproductions
+of any reported pass. → `discovery-registry.ts`, `trader-persistence.ts`, `staleness-clock.ts`.
+
+### 6.11 Where these sit in the adopted sequence
+- **Phase A (before DB):** 6.1, 6.2, 6.4, 6.6, 6.10 — observability + normalization hardening,
+  DB-independent, all small.
+- **Phase B (with durability):** 6.3 (availability into stats), 6.5 (degradation tiers), 6.7,
+  6.8, 6.9.
+- **Do now, alongside P13/P10 correctness fixes:** 6.1 + 6.2 (they make the existing diagnostic
+  work auditable).
