@@ -130,7 +130,18 @@ function gateSignal(payload: any): boolean {
   });
   if (!res.passed) {
     const refusal = res.decision && !res.decision.allowed ? ` [${res.decision.refusal}]` : '';
-    console.warn(`[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected (confidence ${res.confidenceScore}%)${refusal} — not posting.`);
+    // E2/I-2 — surface the agent-vs-gate confidence drift so the operator sees
+    // WHY a token the agent scored high was rejected by the consensus weighted
+    // average (voterScores account). The gate is authoritative; attribution
+    // just makes the contradiction legible.
+    const agentConf = Number(payload.confidenceScore);
+    const gateConf = res.confidenceScore;
+    const drift = Number.isFinite(agentConf) ? gateConf - agentConf : null;
+    console.warn(
+      `[CONSENSUS GATE] ${payload.domain} ${payload.symbol} rejected ` +
+        `(consensus=${gateConf}% vs agent=${Number.isFinite(agentConf) ? agentConf : 'n/a'}` +
+        `${drift === null ? '' : ` drift=${drift >= 0 ? '+' : ''}${drift}`}${refusal}) — not posting.`,
+    );
   }
   return res.passed;
 }

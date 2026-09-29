@@ -96,9 +96,12 @@ describe('DexpaprikaFeed (PR 7 — keyless multi-chain discovery, 2026-06-30 sea
       headers.push(init?.headers ?? {});
       return { ok: true, json: async () => searchBody() };
     }) as unknown as (url: string, init?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
-    const feed = new DexpaprikaFeed({ fetch: f, apiKey: 'api_KrpUt1Ct2QFtQFE_Zqbhbyx4346yN5TQ9a' });
+    // Placeholder token composed of non-secret, non-flagged parts so the
+    // secret-scan (gitleaks) passes — a test-only literal, never a real key.
+    const testApiKey = 'api_placeholder_' + 'test-key-not-a-secret';
+    const feed = new DexpaprikaFeed({ fetch: f, apiKey: testApiKey });
     await feed.discover();
-    expect(headers[0]!['Authorization']).toBe('api_KrpUt1Ct2QFtQFE_Zqbhbyx4346yN5TQ9a');
+    expect(headers[0]!['Authorization']).toBe(testApiKey);
   });
 });
 

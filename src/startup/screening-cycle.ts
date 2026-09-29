@@ -205,8 +205,19 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     if (postGateCount === 0 && staleGateCycles > 0) {
       const hours = (staleGateCycles * CYCLE_INTERVAL_MS / 60000 / 60).toFixed(1);
       const tag = staleGateCycles >= STALE_GATE_ESCALATE_AFTER ? 'STALE GATE (long streak)' : 'STALE GATE';
+      // E1/I-1 — distinguish WHY afterGate=0 so the "not firing" alert is honest:
+      //   emit=0                  → the funnel never produced signals (upstream dead)
+      //   emit>0 → beforeGate>0 → afterGate=0 → consensus/selector gate rejecting
+      let cause: string;
+      if (memeStats.emitted === 0) {
+        cause = `emit=0 (funnel dead — scan=${memeStats.scanned}, prefilter=${memeStats.prefiltered}). Diagnose upstream enriching/screening.`;
+      } else if (preGateCount > 0 && postGateCount === 0) {
+        cause = `gate rejecting: emit=${memeStats.emitted}→beforeGate=${preGateCount}→afterGate=0. See [CONSENSUS GATE] lines above for per-signal stats.`;
+      } else {
+        cause = `gate selected 0 of ${preGateCount} signals.`;
+      }
       console.warn(
-        `[${tag}] afterGate=0 for ${staleGateCycles} consecutive cycle(s) (${hours}h) — screening is not firing. ` +
+        `[${tag}] afterGate=0 for ${staleGateCycles} consecutive cycle(s) (${hours}h) — ${cause} ` +
           'Diagnose before adding features.',
       );
     }
