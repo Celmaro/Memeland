@@ -3,6 +3,7 @@ import { RobinhoodScreeningAgent } from '../src/agents/meme-robinhood/robinhood-
 import type { RhFillTapeReader, FillTapeWindow } from '../src/adapters/rh-fill-tape.js';
 import type { MarketDataProvider } from '../src/adapters/market-data-provider.js';
 import { DexScreenerFeed } from '../src/adapters/dexscreener-feed.js';
+import { globalSourceQuota } from '../src/services/source-quota.js';
 
 /**
  * The GMGN rank endpoint must return a candidate whose volume is too low to pass
@@ -26,7 +27,12 @@ const RANK_TOKEN = {
 const rankResponse = { code: 0, data: { data: { rank: [RANK_TOKEN] } } };
 const emptyTrenches = { code: 0, data: { new_creation: [], pump: [], near_completion: [], completed: [] } };
 const emptyHot = { code: 0, data: [{ tokens: [] }] };
-const priceResponse = { ethereum: { usd: 1929.03, usd_24h_change: 1.5 } };
+const priceResponse = {
+  data: { attributes: {
+    token_prices: { '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': '1929.03' },
+    h24_price_change_percentage: { '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': '1.5' },
+  } },
+};
 
 /** GMGN fetch stub: rank returns one low-volume candidate; everything destructured/unknown throws. */
 function stubGmgnFetch() {
@@ -34,7 +40,7 @@ function stubGmgnFetch() {
     if (url.includes('openapi.gmgn.ai/v1/market/rank')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => rankResponse };
     if (url.includes('openapi.gmgn.ai/v1/market/hot_searches')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => emptyHot };
     if (url.includes('openapi.gmgn.ai/v1/trenches')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => emptyTrenches };
-    if (url.includes('coingecko')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => priceResponse };
+    if (url.includes('api.geckoterminal.com/api/v2/simple/networks/eth/token_price/')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => priceResponse };
     throw new Error(`unexpected fetch: ${url}`);
   }));
 }
@@ -62,6 +68,13 @@ describe('RobinhoodScreeningAgent — Q04 tape + Q06 DexScreener additional sour
   beforeEach(() => { process.env.MULTICHAIN_CHAINS = 'robinhood'; });
   afterEach(() => {
     vi.unstubAllGlobals();
+    // Test (c) injects a THROWING dexscreener, which registers a cooldown on
+    // the process-global SourceQuota singleton. Without clearing it here, the
+    // cooldown leaks into test (d) and its `collectDexscreenerCandidates` is
+    // short-circuited at isCooling('dexscreener') -> [] (the observed
+    // "expected 1 candidate, received 0" regression). Clear per-test so no
+    // failure poisons the next test's funnel.
+    globalSourceQuota.clear();
     delete process.env.RH_TAPE_ENABLED;
     delete process.env.DEXSCREENER_FEED_ENABLED;
     delete process.env.GMGN_API_KEY;

@@ -43,8 +43,17 @@ describe('RobinhoodScreeningAgent', () => {
   async function runVoterSwarmSecurityPass(agent: RobinhoodScreeningAgent, token: GMGNRawToken) {
     process.env.GMGN_API_KEY = 'test-key';
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes('api.coingecko.com')) {
-        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ethereum: { usd: ETH_PRICE, usd_24h_change: 1.5 } }) };
+      if (url.includes('api.geckoterminal.com/api/v2/simple/networks/eth/token_price/')) {
+        // GeckoTerminal (replaced CoinGecko): address-keyed token prices.
+        return {
+          ok: true, status: 200, headers: { get: () => null },
+          json: async () => ({
+            data: { attributes: {
+              token_prices: { '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': String(ETH_PRICE) },
+              h24_price_change_percentage: { '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': '1.5' },
+            } },
+          }),
+        };
       }
       if (url.includes('openapi.gmgn.ai/v1/token/security')) {
         return { ok: true, status: 200, headers: { get: () => null }, json: async () => securityResponse };
@@ -238,7 +247,13 @@ describe('RobinhoodScreeningAgent', () => {
       data: { data: { rank: [mkWire(healthy)] } },
     };
     const emptyTrenches = { code: 0, data: { new_creation: [], pump: [], near_completion: [], completed: [] } };
-    const priceResponse = { ethereum: { usd: ETH_PRICE, usd_24h_change: 1.5 } };
+    // GeckoTerminal (replaced CoinGecko): address-keyed token prices.
+    const priceResponse = {
+      data: { attributes: {
+        token_prices: { '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': String(ETH_PRICE) },
+        h24_price_change_percentage: { '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': '1.5' },
+      } },
+    };
     const securityResponse = {
       code: 0,
       data: {
@@ -255,7 +270,7 @@ describe('RobinhoodScreeningAgent', () => {
       if (url.includes('openapi.gmgn.ai/v1/market/hot_searches')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ code: 0, data: [{ tokens: [] }] }) };
       if (url.includes('openapi.gmgn.ai/v1/trenches')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => emptyTrenches };
       if (url.includes('openapi.gmgn.ai/v1/token/security')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => securityResponse };
-      if (url.includes('coingecko')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => priceResponse };
+      if (url.includes('api.geckoterminal.com/api/v2/simple/networks/eth/token_price/')) return { ok: true, status: 200, headers: { get: () => null }, json: async () => priceResponse };
       throw new Error(`unexpected fetch: ${url}`);
     }));
 
