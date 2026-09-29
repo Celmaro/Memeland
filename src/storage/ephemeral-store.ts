@@ -51,7 +51,7 @@ export class InMemoryEphemeralStore {
     return this.cache.delete(key);
   }
 
-  acquireLock(key: string, ttlMs: number): boolean {
+  async acquireLock(key: string, ttlMs: number): Promise<boolean> {
     const now = this.now();
     const existing = this.locks.get(key);
     if (existing !== undefined && existing > now) return false; // held
@@ -59,18 +59,18 @@ export class InMemoryEphemeralStore {
     return true;
   }
 
-  releaseLock(key: string): void {
+  async releaseLock(key: string): Promise<void> {
     this.locks.delete(key);
   }
 
-  enqueue(key: string, value: string): number {
+  async enqueue(key: string, value: string): Promise<number> {
     const q = this.queues.get(key) ?? [];
     q.push(value);
     this.queues.set(key, q);
     return q.length;
   }
 
-  dequeue(key: string): string | undefined {
+  async dequeue(key: string): Promise<string | undefined> {
     const q = this.queues.get(key);
     if (!q || q.length === 0) return undefined;
     const v = q.shift();
@@ -84,10 +84,17 @@ export interface EphemeralStore {
   get<T>(key: string): T | undefined;
   set<T>(key: string, value: T, ttlMs: number): void;
   del(key: string): boolean;
-  acquireLock(key: string, ttlMs: number): boolean;
-  releaseLock(key: string): void;
-  enqueue(key: string, value: string): number;
-  dequeue(key: string): string | undefined;
+  /**
+   * Acquire an advisory lock. P8: the Redis backend makes this AUTHORITATIVE —
+   * it awaits the Redis `SET NX` and returns ITS result, so two processes cannot
+   * both proceed; the in-memory mirror is only a fail-open fallback when Redis
+   * is unavailable (never a throw, never a fabricated grant). In-memory backend
+   * resolves from its process-local lock map.
+   */
+  acquireLock(key: string, ttlMs: number): Promise<boolean>;
+  releaseLock(key: string): Promise<void>;
+  enqueue(key: string, value: string): Promise<number>;
+  dequeue(key: string): Promise<string | undefined>;
   /** Best-effort startup connectivity probe (in-memory impl reports armed=false). */
   probe?(): Promise<{ armed: boolean; ok: boolean; detail: string }>;
 }
@@ -163,46 +170,53 @@ export class RedisEphemeralStore implements EphemeralStore {
     return mirrored;
   }
 
-  acquireLock(key: string, ttlMs: number): boolean {
-    const mirrored = this.mirror.acquireLock(key, ttlMs);
-    if (this.url && mirrored && ttlMs > 0) {
-      // Best-effort distributed lock; the mirror is already authoritative here.
-      void this.ensureClient()
-        .then((c) => c.set(key, String(Date.now()), 'PX', ttlMs, 'NX'))
-        .catch(() => undefined);
-    }
-    return mirrored;
-  }
-
-  releaseLock(key: string): void {
-    this.mirror.releaseLock(key);
-    if (this.url) {
-      void this.ensureClient()
-        .then((c) => c.del(key))
-        .catch(() => undefined);
+  async acquireLock(key: string, ttlMs: number): Promise<boolean> {
+    // P8 — Redis is AUTHORITATIVE for the lock. Await the `SET NX` and return ITS
+    // result, so two processes cannot both proceed (the old mirror-first path
+    // returned `true` before the async NX, even when another process held it).
+    // The mirror is only a fail-open fallback when Redis is unreachable.
+    if (!this.url || ttlMs <= 0) return this.mirror.acquireLock(key, ttlMs);
+    try {
+      const c = await this.ensureClient();
+      // ioredis `set(..., 'NX')` resolves "OK" when acquired, null when held.
+      const res = await c.set(key, String(Date.now()), 'PX', ttlMs, 'NX');
+      return res === 'OK';
+    } catch {
+      return this.mirror.acquireLock(key, ttlMs);
     }
   }
 
-  enqueue(key: string, value: string): number {
-    const n = this.mirror.enqueue(key, value);
-    if (this.url) {
-      void this.ensureClient()
-        .then((c) => c.rpush(key, value))
-        .catch(() => undefined);
+  async releaseLock(key: string): Promise<void> {
+    if (!this.url) { this.mirror.releaseLock(key); return; }
+    try {
+      const c = await this.ensureClient();
+      await c.del(key);
+    } catch {
+      this.mirror.releaseLock(key);
     }
-    return n;
   }
 
-  dequeue(key: string): string | undefined {
-    const v = this.mirror.dequeue(key);
-    // Fire-and-forget LPop keeps Redis roughly consistent; the mirror is the
-    // authoritative read for this process.
-    if (this.url && v !== undefined) {
-      void this.ensureClient()
-        .then((c) => c.lpop(key))
-        .catch(() => undefined);
+  async enqueue(key: string, value: string): Promise<number> {
+    if (!this.url) return this.mirror.enqueue(key, value);
+    try {
+      const c = await this.ensureClient();
+      // rpush returns the list length (authoritative cross-process queue depth).
+      const n = await c.rpush(key, value);
+      return typeof n === 'number' ? n : this.mirror.enqueue(key, value);
+    } catch {
+      return this.mirror.enqueue(key, value);
     }
-    return v;
+  }
+
+  async dequeue(key: string): Promise<string | undefined> {
+    if (!this.url) return this.mirror.dequeue(key);
+    try {
+      const c = await this.ensureClient();
+      const v = await c.lpop(key);
+      return v ?? undefined;
+    } catch {
+      return this.mirror.dequeue(key);
+    }
   }
 
   private async ensureClient(): Promise<any> {
