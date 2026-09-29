@@ -1157,6 +1157,9 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
             if (goSec.source === 'goplus') {
               if (!goSec.ok) {
                 if (this.isVerbose()) console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — GoPlus ${goSec.reasons.join(' ')}`);
+                // P11 — a fresh candidate that fails security audited as dead,
+                // attributing an empirical false positive to its introducer.
+                globalCandidateRegistry.markDead(`${chain}:${t.address.toLowerCase()}`);
                 continue;
               }
             } else {
@@ -1166,6 +1169,8 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
               if (!sec.ok) {
                 auditFailedReason = `GMGN ${sec.reasons.join(' ')}`;
                 if (this.isVerbose()) console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${auditFailedReason}`);
+                // P11 — mark dead (empirical false positive for the introducer).
+                globalCandidateRegistry.markDead(`${chain}:${t.address.toLowerCase()}`);
                 continue;
               }
             }
@@ -1176,10 +1181,16 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
             if (!sec.ok) {
               auditFailedReason = `GMGN ${sec.reasons.join(' ')}`;
               console.log(`[MEME AGENT] ⛔ ${t.symbol}: AUDIT FAIL — ${auditFailedReason}`);
+              // P11 — mark dead (empirical false positive for the introducer).
+              globalCandidateRegistry.markDead(`${chain}:${t.address.toLowerCase()}`);
               continue;
             }
           }
           prefiltered += 1;
+          // P11 — a candidate that cleared prefilter + the security audit is
+          // revalidated (empirically NOT a false positive). This keeps the
+          // introducer's demotion signal driven by evidence, not hand-picking.
+          globalCandidateRegistry.markRevalidated(`${chain}:${t.address.toLowerCase()}`);
 
           let det = applySignalBoost(this.detectSignal(t), signalBoostMap, t.address);
           // P3.6: fold the QLO organic-lift (slow-fill time-on-curve) into the
