@@ -6,6 +6,7 @@ import {
   type OpportunitySighting,
   type OpportunityState,
 } from './opportunity-ledger.js';
+import { ResearchCoordinator } from '../research/research-coordinator.js';
 
 /**
  * OpportunityStrategist — deterministic (no LLM) per-cycle escalation layer.
@@ -157,7 +158,7 @@ export class OpportunityStrategist {
   /** Run the per-cycle escalation pass over all live opportunities. */
   public decide(now: Date = new Date()): StrategistCycle {
     const decisions: StrategistDecision[] = [];
-    const nextCandidates: string[] = [];
+    let nextCandidates: string[] = [];
     const enqueueCandidates: string[] = [];
 
     const identities = this.ledger
@@ -176,6 +177,18 @@ export class OpportunityStrategist {
         enqueueCandidates.push(decision.opportunityId);
       }
     }
+
+    // P5 — the research admission budget is now MEASURED by ResearchCoordinator
+    // (a fresh coordinator per cycle so budget state never leaks across passes,
+    // matching the old stateless maxScorePerCycle cap) and surfaced for telemetry.
+    const research = new ResearchCoordinator({ perCycle: this.config.maxScorePerCycle });
+    const admissions = research.admit(nextCandidates).admissions;
+    const admittedSet = new Set(admissions.filter((a) => a.admitted).map((a) => a.candidateId));
+    nextCandidates = nextCandidates.filter((id) => admittedSet.has(id));
+    const researchView = research.view();
+    console.log(
+      `[RESEARCH] budget ${researchView.cycleSpent}/${researchView.cycleBudget} remaining=${researchView.remaining} window=${researchView.windowSpent} admitted=${nextCandidates.length}/${admissions.length}`,
+    );
 
     return { decisions, nextCandidates, enqueueCandidates, observedAt: now.toISOString() };
   }

@@ -14,6 +14,7 @@ import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
 import { globalCandidateRegistry, isIntroducerEnabled } from '../../discovery/discovery-registry.js';
+import { globalObservationStore } from '../../storage/durable-observation-store.js';
 import { DiscoveryCoordinator, type CandidateEmitter } from '../../discovery/candidate-emitter.js';
 import { globalHintGate } from '../../discovery/hint-gate.js';
 import { sourceParticipation } from '../../startup/provider-banner.js';
@@ -966,8 +967,12 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
         // coordinator's merge), not just the merge survivor. This is what makes
         // "how many tokens did Gecko find / which source saw it first / how much
         // later" answerable (the registry tracks firstSeen/coverage/dup/latency).
+        // P2 — the same sighting also lands in the DURABLE store (Postgres when
+        // DATABASE_URL is present; in-memory otherwise), so first-seen/latency
+        // history survives restarts. Fail-open: the sink never blocks the funnel.
         for (const obs of observations) {
           globalCandidateRegistry.observe(obs);
+          globalObservationStore.append(obs);
         }
         // P3.1 empirical primary discovery source — the "measure, don't guess"
         // decision input (after weeks of data, this selects the discovery lead).
