@@ -56,4 +56,54 @@ describe('P2 durable observation store', () => {
       if (prev !== undefined) process.env.DATABASE_URL = prev;
     }
   });
+
+  it('P9 — durable reads serve Postgres rows across a fresh process (empty mirror)', async () => {
+    // A PostgresObservationStore armed with a URL whose ensurePool returns a
+    // fake pool returning a pre-seeded durable row — simulates a restart where
+    // the in-process mirror is empty but Postgres holds history.
+    const p = new PostgresObservationStore('postgres://fake');
+    const rows = [
+      { chain: 'sol', tokenAddress: '0xDEADBEEF', source: 'gecko', at: 500, costCredits: '1' },
+      { chain: 'eth', tokenAddress: '0xCOFFEE', source: 'dexpaprika', at: 700, costCredits: null },
+    ];
+    (p as unknown as { ensurePool: () => Promise<any> }).ensurePool = async () => ({
+      query: async (sql: string, args: any[]) => {
+        if (/COUNT\(\*\)/.test(sql)) {
+          const n = args[1] === '0xdeadbeef' ? 1 : 0;
+          return { rows: [{ n }] };
+        }
+        if (/DISTINCT source/.test(sql)) {
+          return { rows: [{ source: 'gecko' }] };
+        }
+        if (/LIMIT/.test(sql)) {
+          // Emulate the real ORDER BY at DESC the store issues.
+          const sorted = [...rows].sort((a, b) => b.at - a.at);
+          return { rows: sorted.slice(0, args[0]) };
+        }
+        return { rows: [] };
+      },
+    });
+    // Empty mirror (fresh process) — current-process reads see nothing durable.
+    expect(p.countFor('sol', '0xDEADBEEF')).toBe(0);
+    // Durable reads DO see the seeded Postgres rows.
+    expect(await p.countDurable('sol', '0xDEADBEEF')).toBe(1);
+    expect(await p.sourcesForDurable('sol', '0xDEADBEEF')).toEqual(['gecko']);
+    const recent = await p.recentDurable(100);
+    expect(recent).toHaveLength(2);
+    expect(recent[0]!.at).toBe(700); // newest-first
+    expect(recent[0]!.source).toBe('dexpaprika');
+    // Since-clause is honored.
+    expect(await p.countDurable('sol', '0xDEADBEEF', 600)).toBe(1);
+  });
+
+  it('P9 — durable reads fail-open to the mirror when the DB query fails', async () => {
+    const p = new PostgresObservationStore('postgres://fake');
+    p.append(OBS); // dexpaprika
+    p.append({ ...OBS, source: 'gecko' as const });
+    (p as unknown as { ensurePool: () => Promise<any> }).ensurePool = async () => ({
+      query: async () => { throw new Error('db down'); },
+    });
+    expect(await p.countDurable('sol', '0xDEADBEEF')).toBe(p.countFor('sol', '0xDEADBEEF'));
+    expect(await p.sourcesForDurable('sol', '0xDEADBEEF')).toEqual(['dexpaprika', 'gecko']);
+  });
 });

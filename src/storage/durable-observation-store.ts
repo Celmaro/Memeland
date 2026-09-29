@@ -40,6 +40,15 @@ export interface ObservationStore {
   sourcesFor(chain: string, tokenAddress: string): DiscoverySource[];
   /** Page over stored observations, newest-first. */
   recent(limit?: number): StoredObservation[];
+  /**
+   * Durable (Postgres) read path — serves cross-restart history that the
+   * in-process mirror no longer holds. Backends without a durable store
+   * (in-memory) return the current-process mirror instead. Fail-open: a DB
+   * failure degrades to the mirror, never blocks or changes a decision.
+   */
+  recentDurable?(limit?: number): Promise<StoredObservation[]>;
+  countDurable?(chain: string, tokenAddress: string, since?: number): Promise<number>;
+  sourcesForDurable?(chain: string, tokenAddress: string): Promise<DiscoverySource[]>;
   /** Approximate durable row count (for a [DURABLE] telemetry line). */
   size(): number;
   /**
@@ -78,6 +87,19 @@ export class InMemoryObservationStore implements ObservationStore {
 
   recent(limit = 100): StoredObservation[] {
     return this.rows.slice(-limit).reverse();
+  }
+
+  // P9 — no separate durable backend; the in-memory store IS the mirror, so the
+  // dual-path reads resolve to the same rows. Kept for a uniform ObservationStore
+  // contract even though there is no cross-restart history to serve.
+  async recentDurable(limit = 100): Promise<StoredObservation[]> {
+    return this.recent(limit);
+  }
+  async countDurable(chain: string, tokenAddress: string, since?: number): Promise<number> {
+    return this.countFor(chain, tokenAddress, since);
+  }
+  async sourcesForDurable(chain: string, tokenAddress: string): Promise<DiscoverySource[]> {
+    return this.sourcesFor(chain, tokenAddress);
   }
 
   size(): number {
@@ -152,6 +174,62 @@ export class PostgresObservationStore implements ObservationStore {
 
   size(): number {
     return this.mirror.size();
+  }
+
+  // P9 — durable read path. The mirror serves only the current process; these
+  // query Postgres so cross-restart history is actually readable. Fail-open to
+  // the mirror (never blocks, never changes a decision). When unarmed (no URL),
+  // they resolve straight to the in-process mirror.
+  public async recentDurable(limit = 100): Promise<StoredObservation[]> {
+    if (!this.url) return this.mirror.recent(limit);
+    try {
+      const pool = await this.ensurePool();
+      const res = await pool.query(
+        `SELECT chain, token_address AS "tokenAddress", source, at, cost_credits AS "costCredits"
+           FROM discovery_observations ORDER BY at DESC LIMIT $1`,
+        [limit],
+      );
+      return (res.rows ?? []).map((r: any) => ({
+        chain: r.chain,
+        tokenAddress: r.tokenAddress,
+        source: r.source as DiscoverySource,
+        at: Number(r.at),
+        costCredits: r.costCredits !== null && r.costCredits !== undefined ? Number(r.costCredits) : undefined,
+      }));
+    } catch {
+      return this.mirror.recent(limit);
+    }
+  }
+
+  public async countDurable(chain: string, tokenAddress: string, since?: number): Promise<number> {
+    if (!this.url) return this.mirror.countFor(chain, tokenAddress, since);
+    try {
+      const pool = await this.ensurePool();
+      const args: Array<string | number> = [chain, tokenAddress.toLowerCase()];
+      let sql = 'SELECT COUNT(*) AS n FROM discovery_observations WHERE chain = $1 AND token_address = $2';
+      if (since !== undefined) {
+        args.push(since);
+        sql += ' AND at >= $3';
+      }
+      const res = await pool.query(sql, args);
+      return Number(res.rows[0]?.n ?? 0);
+    } catch {
+      return this.mirror.countFor(chain, tokenAddress, since);
+    }
+  }
+
+  public async sourcesForDurable(chain: string, tokenAddress: string): Promise<DiscoverySource[]> {
+    if (!this.url) return this.mirror.sourcesFor(chain, tokenAddress);
+    try {
+      const pool = await this.ensurePool();
+      const res = await pool.query(
+        'SELECT DISTINCT source FROM discovery_observations WHERE chain = $1 AND token_address = $2',
+        [chain, tokenAddress.toLowerCase()],
+      );
+      return (res.rows ?? []).map((r: any) => r.source as DiscoverySource);
+    } catch {
+      return this.mirror.sourcesFor(chain, tokenAddress);
+    }
   }
 
   /** Whether the durable (Postgres) path is armed for this process. */
