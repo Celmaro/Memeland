@@ -42,6 +42,13 @@ export interface ObservationStore {
   recent(limit?: number): StoredObservation[];
   /** Approximate durable row count (for a [DURABLE] telemetry line). */
   size(): number;
+  /**
+   * Best-effort durable row count directly from Postgres (returns null when the
+   * store is not armed or the query fails). Used for [DURABLE] telemetry so the
+   * operator can see observation rows actually landing in the DB, not just the
+   * in-process mirror.
+   */
+  durableRowCount?(): Promise<number | null>;
   /** Best-effort startup connectivity probe (in-memory impls report armed=false). */
   probe?(): Promise<{ armed: boolean; ok: boolean; detail: string }>;
 }
@@ -150,6 +157,19 @@ export class PostgresObservationStore implements ObservationStore {
   /** Whether the durable (Postgres) path is armed for this process. */
   public durableArmed(): boolean {
     return Boolean(this.url);
+  }
+
+  /** Durable row count from Postgres; null when unarmed or the query fails. */
+  public async durableRowCount(): Promise<number | null> {
+    if (!this.url) return null;
+    try {
+      const pool = await this.ensurePool();
+      const res = await pool.query('SELECT COUNT(*) AS n FROM discovery_observations');
+      const n = Number(res.rows[0]?.n ?? 0);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

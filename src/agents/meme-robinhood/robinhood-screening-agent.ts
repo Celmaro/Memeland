@@ -188,6 +188,8 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
    *  operator can tell a $50k volume bar from a dead feed without reading
    *  every token's rejection line. Reset each pass; never gates anything. */
   private prefilterRejections = new Map<string, number>();
+  /** P2 telemetry — count of durable appends this process (throttles row log). */
+  private _observationAppends = 0;
 
   constructor(
     config?: Partial<RobinhoodScreeningConfig>,
@@ -973,6 +975,17 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
         for (const obs of observations) {
           globalCandidateRegistry.observe(obs);
           globalObservationStore.append(obs);
+        }
+        // P2 telemetry — periodically report durable rows landing in Postgres so
+        // the operator can see durable persistence actually accumulating (not
+        // just the in-process mirror). Fire-and-forget; null when unarmed.
+        if (globalObservationStore.durableRowCount && ++this._observationAppends % 25 === 0) {
+          void globalObservationStore
+            .durableRowCount()
+            .then((n) => {
+              console.log(`[DURABLE] discovery_observations rows=${n === null ? 'n/a (in-memory)' : n}`);
+            })
+            .catch(() => undefined);
         }
         // P3.1 empirical primary discovery source — the "measure, don't guess"
         // decision input (after weeks of data, this selects the discovery lead).
