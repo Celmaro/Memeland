@@ -51,6 +51,7 @@ import {
 } from '../../orchestrator/voters.js';
 import { globalReputationMemory } from '../../services/reputation-memory.js';
 import { globalDecisionCache } from '../../services/decision-cache.js';
+import { ResearchCoordinator } from '../../research/research-coordinator.js';
 
 export interface RobinhoodSignal {
   token: GMGNRawToken;
@@ -70,6 +71,7 @@ export interface RobinhoodScreeningConfig {
   minTotalFeeUsd: number;    // 500 — active fee gate: tokens without organic activity (unrecorded fee) rejected
   minFreshVolume1hUsd: number; // 3000 — fresh-pair lane floor (ankr/gecko raw pairs)
   passThreshold: number;     // 80
+  maxResearchPerPass: number; // P7 — per-pass research admission budget (expensive klines/Arkham jobs)
   signalTypes: number[];     // smart-money/KOL/CTO/price events (overlay boost)
   rankLimit: number;         // 100 (trending, 1h)
   trenchesLimit: number;     // 80 (completed only)
@@ -91,6 +93,9 @@ const DEFAULT_CONFIG: RobinhoodScreeningConfig = {
   minTotalFeeUsd: 500,
   minFreshVolume1hUsd: 3000,
   passThreshold: 80,
+  // P7 — bound per-pass expensive research. Raised via config to disable the
+  // bound; kept moderate so a pass with few finalists is unchanged.
+  maxResearchPerPass: 8,
   // 6 PriceUp, 7 PriceATH, 8 McpKeyLevel, 11 Cto, 12 SmartDegenBuy, 13/19 PlatformCall, 20 KOLBuy
   signalTypes: [6, 7, 8, 11, 12, 13, 19, 20],
   rankLimit: 100,
@@ -917,6 +922,17 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
         .map((s) => s.trim().toLowerCase())
         .filter((s): s is Chain => (['sol', 'bsc', 'base', 'eth', 'robinhood'] as string[]).includes(s));
 
+      // P7 — ResearchCoordinator owns the per-pass research admission budget.
+      // A fresh instance per pass (state never leaks across cycles) admits which
+      // finalists get the EXPENSIVE research jobs (GMGN klines + Arkham entity).
+      // The voter-swarm consensus path still runs for EVERY finalist, so emit and
+      // the gate are preserved — only the optional cost-bearing research is
+      // bounded by the coordinator. Fail-open: an admission error never blocks a
+      // finalist (swarm + emit continue unchanged).
+      const research = new ResearchCoordinator({ perCycle: this.config.maxResearchPerPass });
+      let researchAdmittedCount = 0;
+      let researchRefusedCount = 0;
+
       for (const chain of chains) {
         const nativeSymbol = chain === 'sol' ? 'SOL' : 'ETH';
         console.log(`[MEME AGENT] ── chain=${chain} ──`);
@@ -1242,9 +1258,24 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
             continue;
           }
 
-          // ML predictor input: 15m klines (only when the candidate is close to conviction — saves GMGN budget)
+          // P7 — ResearchCoordinator admission gates the EXPENSIVE research jobs
+          // (GMGN klines + Arkham entity) by the per-pass budget. A refused
+          // finalist STILL emits — the voter-swarm consensus path below runs for
+          // every finalist — it just skips the optional cost-bearing research.
+          // Fail-open: an admission error never blocks a finalist.
+          let researchAdmitted = true;
+          try {
+            const admission = research.admit([`${chain}:${t.address.toLowerCase()}`]).admissions[0];
+            researchAdmitted = admission.admitted;
+            if (researchAdmitted) researchAdmittedCount += 1;
+            else researchRefusedCount += 1;
+          } catch {
+            researchAdmitted = true;
+          }
+
+          // ML predictor input: 15m klines (admitted finalists only — saves GMGN budget)
           let klines: KlineCandle[] | null = null;
-          if (this.voterSwarm && det.confidence >= 60) {
+          if (this.voterSwarm && det.confidence >= 60 && researchAdmitted) {
             // GMGN-primary → GeckoTerminal fallback (pool resolved via token address).
             klines = await fetchKlinesWithGeckoFallback(
               () => this.gmgn.fetchTokenKlines(chain, t.address, '15m', 50),
@@ -1291,10 +1322,11 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
           // evidence in the voter-swarm block, so it captures post-audit truth.)
 
           // P1.4 Arkham ENTITY enrichment for this FINALIST (overlay, fail-open,
-          // never a gate). Resolves the DEPLOYER/creator wallet (falling back to
-          // the token address) to a labeled entity and logs it for the operator —
-          // entity/deployer/label is the valuable signal.
-          const entity = await this.enrichFinalistEntity(t);
+          // never a gate). Admitted finalists only — resolves the DEPLOYER/creator
+          // wallet (falling back to the token address) to a labeled entity and
+          // logs it for the operator — entity/deployer/label is the valuable
+          // signal. Refused (over research budget) finalists skip this cost.
+          const entity = researchAdmitted ? await this.enrichFinalistEntity(t) : undefined;
           if (entity && this.isVerbose()) {
             console.log(`[ARKHAM] ${t.symbol} deployer→ ${entity.displayName ?? entity.ownerType}${entity.tags && entity.tags.length ? ` [${entity.tags.slice(0, 3).join(',')}]` : ''}`);
           }
@@ -1544,6 +1576,10 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
       }
 
       console.log(`[MEME AGENT] Pass complete. ${reports.length} signals passed.`);
+      if (researchAdmittedCount > 0 || researchRefusedCount > 0) {
+        const researchView = research.view();
+        console.log(`[RESEARCH] pass admitted=${researchAdmittedCount} refused=${researchRefusedCount} budget=${researchView.cycleBudget}`);
+      }
       this.logPrefilterRejectionDistribution();
       this.lastFunnel = { scanned, prefiltered, emitted: reports.length };
       const funnelRoles = {

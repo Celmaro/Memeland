@@ -41,4 +41,12 @@ describe('P5 ResearchCoordinator', () => {
     rc.admit(['z']);
     expect(meter.get<number>('research:window-spent')).toBe(4);
   });
+
+  it('P7: admission state does not leak across cycles (fresh instance per pass)', () => {
+    const a = new ResearchCoordinator({ perCycle: 2 });
+    const b = new ResearchCoordinator({ perCycle: 2 });
+    expect(a.admit(['a', 'b', 'c']).admittedCount).toBe(2);
+    // A fresh coordinator (the agent/pass pattern) starts at a full budget again.
+    expect(b.admit(['a', 'b', 'c']).admittedCount).toBe(2);
+  });
 });
