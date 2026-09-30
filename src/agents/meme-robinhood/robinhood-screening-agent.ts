@@ -28,6 +28,7 @@ import { ArkhamEnrich, type ArkhamEntity } from '../../adapters/arkham-enrich.js
 import { globalPersistenceCohort } from '../../graph/persistence-cohort.js';
 import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
+import { globalCalibrationModel } from '../../features/calibration.js';
 import type { ScreeningAgent as ScreeningAgentContract, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
@@ -1538,12 +1539,16 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
 
           // #5 Calibrated decision: rawScore (the additive heuristic) and
           // calibratedProbability (real P(win)) are DISTINCT. We always expose
-          // the raw score; the probability stays null until a live calibration
-          // model is wired — a fabricated probability is worse than none.
+          // the raw score; the probability is emitted only when the live
+          // calibration model (P14, fit on durable paper-trade labels) has enough
+          // evidence for this score bucket — a fabricated probability is worse
+          // than none.
+          const calProb = globalCalibrationModel.probability(confidence);
           const cal = calibratedDecision({
             rawScore: confidence,
+            probability: calProb ?? undefined,
             horizon: '1h',
-            model: 'arch3-5slot',
+            model: calProb !== null ? 'arch3-binned' : undefined,
           });
           (payload as unknown as Record<string, unknown>).calibratedDecision = cal;
 
