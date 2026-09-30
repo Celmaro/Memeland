@@ -239,7 +239,7 @@ export function fileTraderRowIO(filePath: string = DEFAULT_TRADER_FILE): TraderR
 }
 
 /** Postgres-backed TraderRowIO — upsert by (handle, window) so the latest state wins. Fail-open, lazy pool. */
-export function pgTraderRowIO(url: string = traderPostgresUrl() ?? ''): TraderRowIO {
+export function pgTraderRowIO(url: string = traderPostgresUrl() ?? '', now: () => number = Date.now): TraderRowIO {
   const dbUrl = url || null;
   let pool: any = null;
   let ready = false;
@@ -262,7 +262,7 @@ export function pgTraderRowIO(url: string = traderPostgresUrl() ?? ''): TraderRo
           p?.query(
             `INSERT INTO trader_rows (handle, window, payload, updated_at) VALUES ($1, $2, $3, $4)
              ON CONFLICT (handle, window) DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at`,
-            [row.handle.toLowerCase(), row.window, JSON.stringify(row), row.fetchedAt ?? Date.now()],
+            [row.handle.toLowerCase(), row.window, JSON.stringify(row), row.fetchedAt ?? now()],
           ),
         )
         .catch(() => { /* fail-open */ });
