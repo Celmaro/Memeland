@@ -54,13 +54,18 @@ export function withScreeningTimeout<T>(
   promise: Promise<T>,
   domain: string,
   timeoutMs: number = DEFAULT_SCREENING_TIMEOUT_MS,
-  log: (msg: string) => void = (msg) => console.warn(msg)
+  log: (msg: string) => void = (msg) => console.warn(msg),
+  /** P2-1: optional AbortController aborted on timeout so upstream work that
+   *  honors the signal is actually cancelled, not just left running. Pass the
+   *  same controller's signal into the screening pass. */
+  controller?: AbortController
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       log(
         `[SCREENING TIMEOUT] ${domain.toUpperCase()} pass exceeded ${timeoutMs}ms — discarded, no signals emitted (fail-closed).`
       );
+      controller?.abort(); // P2-1: cancel underlying work honouring the signal
       resolve([] as unknown as T);
     }, timeoutMs);
     promise.then(

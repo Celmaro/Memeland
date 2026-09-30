@@ -76,7 +76,7 @@ export interface ApprovalOrder {
   suggestedSizeUsd: number;
   confidence: number;
   thesis: string;
-  status: 'PENDING' | 'APPROVED' | 'CONFIRMED_FILL' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'CONFIRMED_FILL' | 'REJECTED' | 'FAILED';
   createdAtIso: string;
   decidedAtIso?: string;
   decidedBy?: string;

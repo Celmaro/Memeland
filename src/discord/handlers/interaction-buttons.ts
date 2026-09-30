@@ -179,12 +179,14 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         // as the AUTO path — an operator cannot bypass honeypot/sell proof.
         sellability: sellabilityConfigured() ? gateSellability() : undefined,
       });
+      if (!res.success) approvalQueueService.recordFailed(approved.id); // P1-2: APPROVED -> FAILED
       await interaction.editReply(
         `✅ **APPROVED & EXECUTED** \`${approved.symbol}\` (\`${orderId}\`)\n` +
         `• Result: ${res.success ? (res.simulated ? '🟡 SIMULATED ok' : '🟢 LIVE ok') : '🔴 FAILED'}\n` +
         `• Output: \`${res.outputTokens}\`${res.error ? `\n• Error: \`${res.error}\`` : ''}`
       );
     } catch (err: any) {
+      approvalQueueService.recordFailed(approved.id); // P1-2: APPROVED -> FAILED on thrown fill error
       await interaction.editReply(`❌ **APPROVED FILL ERROR** \`${approved.symbol}\`: ${err.message}`);
     }
   } else if (customId.startsWith('CANCEL_')) {

@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { LifiExecutor } from '../src/adapters/lifi-executor.js';
 
-const { mockSendTransaction, mockCreateWalletClient } = vi.hoisted(() => {
+const { mockSendTransaction, mockCreateWalletClient, mockCreatePublicClient, mockGetTransactionReceipt } = vi.hoisted(() => {
   const mockSendTransaction = vi.fn();
   const mockCreateWalletClient = vi.fn(() => ({
     chain: { id: 0 },
     sendTransaction: mockSendTransaction,
   }));
-  return { mockSendTransaction, mockCreateWalletClient };
+  const mockGetTransactionReceipt = vi.fn();
+  const mockCreatePublicClient = vi.fn(() => ({
+    getTransactionReceipt: mockGetTransactionReceipt,
+  }));
+  return { mockSendTransaction, mockCreateWalletClient, mockCreatePublicClient, mockGetTransactionReceipt };
 });
 
 vi.mock('viem', async (importOriginal) => {
@@ -15,6 +19,7 @@ vi.mock('viem', async (importOriginal) => {
   return {
     ...actual,
     createWalletClient: mockCreateWalletClient,
+    createPublicClient: mockCreatePublicClient,
     http: () => ({}),
   };
 });
@@ -157,6 +162,35 @@ describe('LifiExecutor (LI.FI / Jumper — only execution layer)', () => {
     const res = await ex.submit({ chain: 'robinhood', token: '0xTOKEN', side: 'buy', amountUsd: 100 });
     expect(res.outcome).toBe('timed_out');
     expect(res.txHash).toBe('0xtxhash');
+  });
+
+  it('P0-1: reconciles on-chain when the status API times out but the receipt is confirmed', async () => {
+    const { fetchImpl } = mockLifiFetch({ quoteId: false }); // no route id -> status === null
+    const ex = makeExecutor({ dryRun: false, now: 1000, fetchImpl });
+
+    mockGetTransactionReceipt.mockReset();
+    mockGetTransactionReceipt.mockResolvedValue({ status: 'success' });
+
+    const res = await ex.submit({ chain: 'robinhood', token: '0xTOKEN', side: 'buy', amountUsd: 100 });
+
+    expect(res.outcome).toBe('confirmed'); // upgraded from timed_out by the receipt
+    expect(res.txHash).toBe('0xtxhash');
+    expect(res.reason).toMatch(/on-chain receipt: success/);
+    expect(mockGetTransactionReceipt).toHaveBeenCalledWith({ hash: '0xtxhash' });
+  });
+
+  it('P0-1: reconciles to failed when the on-chain receipt is reverted', async () => {
+    const { fetchImpl } = mockLifiFetch({ quoteId: false });
+    const ex = makeExecutor({ dryRun: false, now: 1000, fetchImpl });
+
+    mockGetTransactionReceipt.mockReset();
+    mockGetTransactionReceipt.mockResolvedValue({ status: 'reverted' });
+
+    const res = await ex.submit({ chain: 'robinhood', token: '0xTOKEN', side: 'buy', amountUsd: 100 });
+
+    expect(res.outcome).toBe('failed');
+    expect(res.reason).toMatch(/reverted/);
+    expect(mockGetTransactionReceipt).toHaveBeenCalledWith({ hash: '0xtxhash' });
   });
 
   it('fails closed for an unsupported side and an unknown chain', async () => {

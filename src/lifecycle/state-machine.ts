@@ -28,14 +28,15 @@ export class StateMachine<S extends string> {
   }
 }
 
-export const APPROVAL_ORDER_STATES = ['PENDING', 'APPROVED', 'CONFIRMED_FILL', 'REJECTED'] as const;
+export const APPROVAL_ORDER_STATES = ['PENDING', 'APPROVED', 'CONFIRMED_FILL', 'REJECTED', 'FAILED'] as const;
 export type ApprovalOrderState = (typeof APPROVAL_ORDER_STATES)[number];
 
 export const approvalOrderTransitions: StateTransitions<ApprovalOrderState> = {
   PENDING: ['APPROVED', 'REJECTED'],
-  APPROVED: ['CONFIRMED_FILL'], // only reached when the fill actually executes
+  APPROVED: ['CONFIRMED_FILL', 'FAILED'], // FAILED: an approved fill that failed execution
   CONFIRMED_FILL: [],
   REJECTED: [],
+  FAILED: [],
 };
 
 export class ApprovalOrderStateMachine extends StateMachine<ApprovalOrderState> {

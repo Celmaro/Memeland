@@ -178,6 +178,22 @@ export class ApprovalQueueService {
     }
   }
 
+  /** P1-2: record that an APPROVED fill failed to execute (APPROVED -> FAILED).
+   *  Only call when the fill definitively failed. No-op unless the order is
+   *  APPROVED; a terminal state is never downgraded. */
+  public recordFailed(id: string): void {
+    const store = this.requireStore();
+    const order = store.getApprovalOrder(id);
+    if (!order) return;
+    if (order.status === 'APPROVED') {
+      const sm = new ApprovalOrderStateMachine(order.status);
+      if (sm.canTransitionTo('FAILED')) {
+        order.status = sm.transitionTo('FAILED');
+        store.updateApprovalOrder(order);
+      }
+    }
+  }
+
   /**
    * Phase-3 AUTO gate: unlocked ONLY when approved fills reach the floor AND
    * the scorecard shows positive expectancy (win rate > 50% on closed entries)

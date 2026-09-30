@@ -168,6 +168,28 @@ describe('ApprovalQueueService', () => {
     expect(store.getFunnelStats()['meme-robinhood']?.executed).toBe(1);
   });
 
+  it('recordFailed transitions APPROVED -> FAILED (P1-2), leaving PENDING/REJECTED alone', () => {
+    const { svc } = newService();
+    // APPROVED -> FAILED when the fill fails.
+    const approved = svc.enqueue(input);
+    svc.approve(approved.id);
+    svc.recordFailed(approved.id);
+    expect(svc.getById(approved.id)?.status).toBe('FAILED');
+    // A FAILED order is terminal (cannot be confirmed or rejected afterward).
+    expect(svc.recordExecuted(approved.id)).toBeUndefined();
+    expect(svc.getById(approved.id)?.status).toBe('FAILED');
+    expect(svc.reject(approved.id)).toBeNull();
+    // A PENDING order that somehow gets recordFailed stays PENDING.
+    const pending = svc.enqueue(input);
+    svc.recordFailed(pending.id);
+    expect(svc.getById(pending.id)?.status).toBe('PENDING');
+    // A REJECTED order stays REJECTED (terminal, never downgraded).
+    const rej = svc.enqueue(input);
+    svc.reject(rej.id);
+    svc.recordFailed(rej.id);
+    expect(svc.getById(rej.id)?.status).toBe('REJECTED');
+  });
+
   it('orders persist across a StateStore reload', () => {
     const store = newStore();
     const svc = new ApprovalQueueService();

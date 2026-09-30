@@ -1019,7 +1019,10 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
   }
 
   /** Full pass: for each configured chain → collect → prefilter (audit GMGN) → detect → voters → report */
-    public async runScreeningPass(): Promise<AgentReport<RobinhoodSignal>[]> {
+    public async runScreeningPass(signal?: AbortSignal): Promise<AgentReport<RobinhoodSignal>[]> {
+      // P2-1: respect an abort signal (set by the screening-timeout primitive);
+      // an already-aborted pass yields immediately instead of doing wasted work.
+      if (signal?.aborted) return [];
       console.log('[MEME AGENT] Screening pass started (GMGN OpenAPI)...');
       const reports: AgentReport<RobinhoodSignal>[] = [];
       let scanned = 0;

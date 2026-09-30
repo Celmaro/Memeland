@@ -19,5 +19,15 @@ describe('state machine kernel', () => {
     expect(order.state).toBe('APPROVED');
     expect(order.canTransitionTo('REJECTED')).toBe(false);
     expect(() => order.transitionTo('REJECTED')).toThrow('Invalid APPROVED -> REJECTED transition');
+    // P1-2: an APPROVED order can fail (fill failed execution).
+    expect(order.canTransitionTo('FAILED')).toBe(true);
+    order.transitionTo('FAILED');
+    expect(order.state).toBe('FAILED');
+  });
+
+  it('PENDING cannot jump straight to FAILED (must approve first)', () => {
+    const order = new ApprovalOrderStateMachine();
+    expect(order.canTransitionTo('FAILED')).toBe(false);
+    expect(() => order.transitionTo('FAILED')).toThrow('Invalid PENDING -> FAILED transition');
   });
 });

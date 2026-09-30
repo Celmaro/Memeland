@@ -18,7 +18,7 @@
  *     a `timed_out` fill is reconciled via /v1/status before any retry.
  *   - Unknown chains / tokens fail closed — no silent chain-id default.
  */
-import { createWalletClient, http, isAddress, type Account, type Chain } from 'viem';
+import { createPublicClient, createWalletClient, http, isAddress, type Account, type Chain } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import base58 from 'bs58';
 import fs from 'fs';
@@ -421,6 +421,47 @@ export class LifiExecutor {
   }
 
   /**
+   * P0-1: reconcile a broadcast fill against the chain when the LI.FI /status
+   * API times out. `timed_out` from the status API with a txHash in hand is NOT
+   * proof of failure — the tx was already broadcast. Read the chain receipt
+   * directly and only fall back to `timed_out` when the receipt truly isn't
+   * visible within the reconcile window. Fail-open: any reconcile error returns
+   * `timed_out` (never fabricates a confirmation).
+   */
+  private async reconcileOnChain(
+    chainKey: ExecutionChainKey,
+    txHash: string,
+  ): Promise<{ outcome: 'confirmed' | 'failed' | 'timed_out'; reason: string }> {
+    try {
+      if (chainKey === 'sol') {
+        const solana = await import('@solana/web3.js');
+        const connection = new solana.Connection(resolveRpc('sol'));
+        const tx = await connection.getTransaction(txHash, { commitment: 'confirmed' });
+        const ok = !!tx && !tx.meta?.err;
+        return ok
+          ? { outcome: 'confirmed', reason: 'on-chain receipt: success' }
+          : { outcome: 'failed', reason: 'on-chain receipt: reverted or not found' };
+      }
+      const publicClient = createPublicClient({
+        chain: EVM_CHAIN_IDS[chainKey],
+        transport: http(resolveRpc(chainKey)),
+      });
+      let receipt;
+      try {
+        receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+      } catch {
+        return { outcome: 'timed_out', reason: 'no on-chain receipt in window' };
+      }
+      if (!receipt) return { outcome: 'timed_out', reason: 'no on-chain receipt in window' };
+      if (receipt.status === 'success') return { outcome: 'confirmed', reason: 'on-chain receipt: success' };
+      return { outcome: 'failed', reason: `on-chain receipt: ${receipt.status}` };
+    } catch (err) {
+      console.warn(`[LIFI] on-chain reconcile failed for ${txHash}: ${err instanceof Error ? err.message : String(err)}`);
+      return { outcome: 'timed_out', reason: 'status timeout; on-chain reconcile unavailable' };
+    }
+  }
+
+  /**
    * Widened Q09 execution seam. Side 'buy' is fully supported; 'sell' is
    * fail-closed for now (sells are handled by the position-manager's own path).
    */
@@ -449,7 +490,18 @@ export class LifiExecutor {
         fromAddress: addr,
         toAddress: addr,
       });
-      if (!quoted) return this.failed(`LI.FI quote failed for ${req.token} on ${chainKey}`);
+      if (!quoted) {
+        // P0-2: surface the funding leg so a USDG-funded Robinhood wallet with no
+        // USDG is diagnosed instead of silently failing. Fail-open — success path
+        // unchanged; the error names the resolved token + operator override.
+        const overrideVar = `EXECUTION_FUNDING_TOKEN_${chainKey.toUpperCase()}`;
+        const reason =
+          `LI.FI quote failed for ${req.token} on ${chainKey} — funding leg '${funding.symbol}' ` +
+          `(${funding.address}) from ${process.env[overrideVar] || 'default'}. Confirm the wallet holds ` +
+          `${funding.symbol}; override with ${overrideVar}.`;
+        console.warn(`[LIFI] ${reason}`);
+        return this.failed(reason);
+      }
 
       const built = await this.buildTransaction(quoted.route);
       if (!built) return this.failed(`LI.FI build-transaction failed for ${req.token} on ${chainKey}`);
@@ -474,8 +526,13 @@ export class LifiExecutor {
         return this.failed(`LI.FI status ${status.status}`, txHash, explorerUrl);
       }
       if (status === null) {
-        this.recordBroadcast(nonce, { outcome: 'timed_out', txHash }); // R3
-        return { outcome: 'timed_out', txHash, explorerUrl, reason: 'no status receipt in window', at: this.now() };
+        // P0-1: the status API timed out but the tx was already broadcast and we
+        // hold a txHash — reconcile on-chain before declaring timed_out. A
+        // confirmed receipt upgrades this to `confirmed`; a reverted one to
+        // `failed`; only a missing receipt stays `timed_out`.
+        const reconciled = await this.reconcileOnChain(chainKey, txHash);
+        this.recordBroadcast(nonce, { outcome: reconciled.outcome, txHash }); // R3
+        return { outcome: reconciled.outcome, txHash, explorerUrl, reason: reconciled.reason, at: this.now() };
       }
       this.recordBroadcast(nonce, { outcome: 'confirmed', txHash: status.txHash ?? txHash }); // R3
       return { outcome: 'confirmed', txHash: status.txHash ?? txHash, explorerUrl, at: this.now() };

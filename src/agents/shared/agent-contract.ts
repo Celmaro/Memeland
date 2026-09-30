@@ -96,5 +96,5 @@ export interface AgentReport<TSignal = unknown> {
 
 export interface ScreeningAgent<TSignal = unknown> {
   readonly domain: string;
-  runScreeningPass(): Promise<AgentReport<TSignal>[]>;
+  runScreeningPass(signal?: AbortSignal): Promise<AgentReport<TSignal>[]>;
 }

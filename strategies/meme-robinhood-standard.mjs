@@ -11,7 +11,7 @@ export default {
     'Agent prefilter seeded from params: 1h volume >= $50k, liquidity >= $10k, fees >= $500, ' +
     'rug <= 0.3, insider <= 0.3, top-10 holders <= 0.4.',
   params: {
-    passThreshold: 80,
+    passThreshold: 70,
     minVolume24hUsd: 50000,
     minLiquidityUsd: 10000,
     minAgeHours: 0,

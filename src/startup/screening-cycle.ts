@@ -87,7 +87,7 @@ export interface ScreeningCycleDeps {
   opportunityPostMortem: any;
   ChannelType: any;
   SCREENING_TIMEOUT_MS: number;
-  withScreeningTimeout: <T>(promise: Promise<T>, domain: string, timeoutMs: number) => Promise<T>;
+  withScreeningTimeout: <T>(promise: Promise<T>, domain: string, timeoutMs: number, log?: (msg: string) => void, controller?: AbortController) => Promise<T>;
 }
 
 export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<void> {
@@ -186,7 +186,19 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
               domain: 'meme-robinhood',
               channelName: 'call-meme-robinhood',
               isActive: () => hub.isAgentActive('meme-robinhood'),
-              runPass: () => withScreeningTimeout(robinhoodScreeningAgent.runScreeningPass(), 'meme-robinhood', SCREENING_TIMEOUT_MS),
+              runPass: () => {
+                // P2-1: a per-pass AbortController lets the timeout primitive
+                // cancel underlying work. runScreeningPass is not yet signal-aware,
+                // but the controller is wired so an abort-aware pass cancels upstream.
+                const passController = new AbortController();
+                return withScreeningTimeout(
+                  robinhoodScreeningAgent.runScreeningPass(passController.signal),
+                  'meme-robinhood',
+                  SCREENING_TIMEOUT_MS,
+                  (msg) => console.warn(msg),
+                  passController,
+                );
+              },
               keyReady: () => apiKeyGuard.checkDomainKeys('meme-robinhood'),
             });
             dispatchedPayloads.push(...robinhoodDispatched);

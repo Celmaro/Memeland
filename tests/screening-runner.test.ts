@@ -49,4 +49,21 @@ describe('KC6 / Kernel Q — withScreeningTimeout', () => {
     expect(Date.now() - start).toBeLessThan(2000);
     expect(out).toEqual([]);
   });
+
+  it('P2-1: aborts the supplied AbortController on timeout so upstream work is cancelled', async () => {
+    vi.useFakeTimers();
+    try {
+      const log = vi.fn();
+      const controller = new AbortController();
+      const never = new Promise<never[]>(() => {});
+      const promise = withScreeningTimeout(never, 'meme-robinhood', 100, log, controller);
+      const settled = promise.then((v) => v);
+      vi.advanceTimersByTime(200);
+      await settled;
+      expect(controller.signal.aborted).toBe(true);
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/SCREENING TIMEOUT/));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
