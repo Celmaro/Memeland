@@ -119,3 +119,36 @@ describe('walletNativeCohorts (Phase 4) — handle→wallet→canonical trader c
     expect(cohorts[0]!.collapsedTraders).toBe(1);
   });
 });
+
+describe('TraderPersistence P9 — durability (hydrate rebuilds the ledger)', () => {
+  it('hydrate rebuilds rows/observations so the strict persistence signal survives a restart', async () => {
+    const now = 1_700_000_000_000;
+    const file = require('path').join(require('os').tmpdir(), `memeland-tp-${Date.now()}.jsonl`);
+    try {
+      const { fileTraderRowIO, loadTraderRows } = await import('./trader-persistence.js');
+      const before = new TraderPersistence({ now: () => now }, fileTraderRowIO(file));
+      before.ingest({ handle: 'alice', window: '24h', pnlPct: 10, volumeUsd: 100, fetchedAt: now });
+      before.ingest({ handle: 'alice', window: '7d', pnlPct: 20, volumeUsd: 200, fetchedAt: now });
+      before.ingest({ handle: 'alice', window: '30d', pnlPct: 30, volumeUsd: 300, fetchedAt: now });
+
+      // "Restart": re-apply the durable rows into a fresh ledger.
+      const after = new TraderPersistence({ now: () => now });
+      after.hydrate(await loadTraderRows({ file }));
+      expect(after.stats().handles).toBe(1);
+      expect(after.stats().observations).toBe(3);
+      const strict = after.persistentTraders();
+      expect(strict).toHaveLength(1);
+      expect(strict[0]!.handle).toBe('alice');
+      expect(strict[0]!.strictPersistent).toBe(true);
+    } finally {
+      await require('fs').promises.rm(file, { force: true });
+    }
+  });
+
+  it('hydrate refuses to clobber a ledger that already recorded this process', () => {
+    const p = new TraderPersistence();
+    p.ingest({ handle: 'live', window: '24h', pnlPct: 1, volumeUsd: 1 });
+    p.hydrate([{ handle: 'ghost', window: '24h', pnlPct: 99, volumeUsd: 99 }]);
+    expect(p.handles()).toEqual(['live']);
+  });
+});

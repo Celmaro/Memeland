@@ -72,3 +72,39 @@ describe('WalletGraph', () => {
     expect(g.resolveTrader('nobody')).toBeUndefined();
   });
 });
+
+describe('WalletGraph P9 — identity-edge provenance + durability', () => {
+  it('records handle provenance on identity edges from registerHandle', () => {
+    const g = new WalletGraph();
+    g.registerHandle('alice', { wallets: ['0xSOL', '0xEVM'] });
+    expect(g.provenanceFor('0xsol', '0xevm')).toBe('handle:alice');
+    g.addEdge('0xsol', '0xOTHER', 'co-trade');
+    expect(g.provenanceFor('0xsol', '0xother')).toBe('co-trade');
+    // linkHandleWallets provenance
+    const h = new WalletGraph();
+    h.linkHandleWallets('W1', 'W2');
+    expect(h.provenanceFor('W1', 'W2')).toBe('identity-resolve');
+  });
+
+  it('hydrate replays edge + handle events (with provenance) and resolves clusters', () => {
+    const g = new WalletGraph();
+    g.hydrate([
+      { type: 'handle', handle: 'alice', chain: 'sol', provider: 'fomo', wallets: ['WA', 'WB'] },
+      { type: 'edge', a: 'WB', b: 'WC', provenance: 'co-trade' },
+    ]);
+    expect(g.provenanceFor('wa', 'wb')).toBe('handle:alice');
+    expect(g.provenanceFor('wb', 'wc')).toBe('co-trade');
+    expect(g.walletsOfHandle('alice')).toEqual(expect.arrayContaining(['wa', 'wb']));
+    const r = g.resolveTrader('alice');
+    expect(r?.wallets).toEqual(expect.arrayContaining(['wa', 'wb', 'wc'])); // WB bridges alice + co-trade edge
+    expect(g.neighbours('wa')).toContain('wb');
+  });
+
+  it('hydrate refuses to clobber a graph that already has data this process', () => {
+    const g = new WalletGraph();
+    g.addEdge('A', 'B');
+    g.hydrate([{ type: 'handle', handle: 'ghost', wallets: ['C', 'D'] }]);
+    expect(g.resolveTrader('ghost')).toBeUndefined(); // not applied
+    expect(g.neighbours('a')).toContain('b'); // live data intact
+  });
+});

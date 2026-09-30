@@ -14,6 +14,8 @@
  *   Inference (persistent trader, with the evidence behind it).
  */
 
+import fs from 'fs';
+import path from 'path';
 import { WalletGraph } from './wallet-graph.js';
 
 export type PnlWindow = '24h' | '7d' | '30d' | 'all';
@@ -82,13 +84,18 @@ export class TraderPersistence {
   private readonly freshnessMs: Record<PnlWindow, number>;
   private readonly now: () => number;
 
-  constructor(opts: TraderPersistenceOptions = {}) {
+  constructor(opts: TraderPersistenceOptions = {}, private readonly io?: TraderRowIO) {
     this.freshnessMs = { ...DEFAULT_FRESHNESS_MS, ...(opts.freshnessMs ?? {}) };
     this.now = opts.now ?? (() => Date.now());
   }
 
   /** Ingest one leaderboard observation for a window. */
   public ingest(row: TraderWindowRow): void {
+    if (this.applyIngest(row)) this.io?.append(row);
+  }
+
+  /** Ingest mutation only (no io append) — returns true when a row was kept. */
+  private applyIngest(row: TraderWindowRow): boolean {
     const fetchedAt = row.fetchedAt ?? this.now();
     const byWindow = this.rows.get(row.handle) ?? new Map<string, TraderWindowRow>();
     const key = row.window;
@@ -99,8 +106,21 @@ export class TraderPersistence {
     if (!prev || row.volumeUsd > prev.volumeUsd || fetchedAt > (prev.fetchedAt ?? 0)) {
       byWindow.set(key, { ...row, fetchedAt: row.fetchedAt ?? fetchedAt });
       this.observations += 1;
+    } else {
+      return false;
     }
     this.rows.set(row.handle, byWindow);
+    return true;
+  }
+
+  /**
+   * P9 — rebuild the persistence ledger from a durable row history after a
+   * restart (re-applies the richer/newer rule per handle+window). Applies only
+   * when the ledger is empty this process, so it never clobbers live divergence.
+   */
+  public hydrate(rows: TraderWindowRow[]): void {
+    if (this.rows.size > 0) return;
+    for (const r of rows) this.applyIngest(r);
   }
 
   /** Trader ids seen at least once. */
@@ -184,8 +204,116 @@ function pickFresh(rows: TraderWindowRow[], field: 'solWallet' | 'evmWallet'): s
   return undefined;
 }
 
-/** Process-wide persistence ledger for the screening cycle. */
-export const globalTraderPersistence = new TraderPersistence();
+/* ------------------------------------------------------------------ *
+ * P9 — durable trader persistence. The leaderboard ledger was          *
+ * process-local, so the 24h∩7d∩30d persistence signal (and the          *
+ * regime-coverage unlock) reset on restart. Mirror P7/P8: durable       *
+ * row sink + restart hydration.                                         *
+ * ------------------------------------------------------------------ */
+
+/** Durable sink for ingested leaderboard observations. */
+export interface TraderRowIO {
+  append(row: TraderWindowRow): void;
+}
+
+export const DEFAULT_TRADER_FILE = path.resolve('database', 'trader-persistence.jsonl');
+
+/** Resolve the Postgres connection string for the durable trader ledger. */
+function traderPostgresUrl(): string | null {
+  return process.env.DATABASE_URL ?? process.env.POSTGRES_URI ?? process.env.POSTGRES_CONNECTION_STRING ?? null;
+}
+
+/** File-backed TraderRowIO — one JSON line per ingested observation (JSONL). */
+export function fileTraderRowIO(filePath: string = DEFAULT_TRADER_FILE): TraderRowIO {
+  return {
+    append: (row: TraderWindowRow) => {
+      try {
+        const absolutePath = path.resolve(filePath);
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+        fs.appendFileSync(absolutePath, `${JSON.stringify(row)}\n`, 'utf-8');
+      } catch (error) {
+        console.warn(`[TRADER] failed to append ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  };
+}
+
+/** Postgres-backed TraderRowIO — upsert by (handle, window) so the latest state wins. Fail-open, lazy pool. */
+export function pgTraderRowIO(url: string = traderPostgresUrl() ?? ''): TraderRowIO {
+  const dbUrl = url || null;
+  let pool: any = null;
+  let ready = false;
+  const ensurePool = async (): Promise<any> => {
+    if (!dbUrl) return null;
+    if (!pool) {
+      const { default: Pg } = await import('pg');
+      pool = new Pg.Pool({ connectionString: dbUrl, max: 2 });
+    }
+    if (!ready) {
+      try { await pool.query('SELECT 1'); ready = true; } catch { /* retry on next append */ }
+    }
+    return ready ? pool : null;
+  };
+  return {
+    append: (row: TraderWindowRow) => {
+      if (!dbUrl) return;
+      void ensurePool()
+        .then((p) =>
+          p?.query(
+            `INSERT INTO trader_rows (handle, window, payload, updated_at) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (handle, window) DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at`,
+            [row.handle.toLowerCase(), row.window, JSON.stringify(row), row.fetchedAt ?? Date.now()],
+          ),
+        )
+        .catch(() => { /* fail-open */ });
+    },
+  };
+}
+
+/** Load durable trader observations as TraderWindowRow[]. Postgres when a URL is present, else JSONL. */
+export async function loadTraderRows(opts?: { url?: string; file?: string }): Promise<TraderWindowRow[]> {
+  const url = opts?.url ?? traderPostgresUrl();
+  const rows: TraderWindowRow[] = [];
+  if (url) {
+    try {
+      const { default: Pg } = await import('pg');
+      const pool = new Pg.Pool({ connectionString: url, max: 2 });
+      const { rows: dbRows } = await pool.query<{ payload: string }>('SELECT payload FROM trader_rows');
+      await pool.end();
+      for (const r of dbRows) {
+        try { rows.push(JSON.parse(r.payload) as TraderWindowRow); } catch { /* skip bad row */ }
+      }
+      return rows;
+    } catch (err) {
+      console.warn(`[TRADER] failed to load durable rows: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+  }
+  const filePath = path.resolve(opts?.file ?? DEFAULT_TRADER_FILE);
+  try {
+    const text = fs.readFileSync(filePath, 'utf-8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { rows.push(JSON.parse(line) as TraderWindowRow); } catch { /* skip bad line */ }
+    }
+  } catch { /* no file yet */ }
+  return rows;
+}
+
+/** Create the default persistence ledger: Postgres-backed (with hydration) when a DB URL is present, else file-backed. */
+export function createDefaultTraderPersistence(): TraderPersistence {
+  const url = traderPostgresUrl();
+  const tp = new TraderPersistence({}, url ? pgTraderRowIO(url) : fileTraderRowIO());
+  if (url) {
+    void loadTraderRows({ url })
+      .then((rs) => { if (rs.length > 0) tp.hydrate(rs); })
+      .catch(() => { /* hydration is best-effort */ });
+  }
+  return tp;
+}
+
+/** Process-wide persistence ledger for the screening cycle (durable when a DB URL is set). */
+export const globalTraderPersistence = createDefaultTraderPersistence();
 
 /**
  * Phase 4 — a wallet-native cohort: one connected wallet cluster (one economic
