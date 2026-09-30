@@ -28,6 +28,9 @@ export interface StoredObservation {
   source: DiscoverySource;
   at: number;
   costCredits?: number;
+  /** P4 — DEX pair/pool identity the feed reported (token vs pool separation). */
+  poolAddress?: string;
+  dexId?: string;
 }
 
 /** Read/write contract for the durable observation boundary. */
@@ -146,10 +149,10 @@ export class PostgresObservationStore implements ObservationStore {
       void this.ensurePool()
         .then((pool) =>
           pool.query(
-            `INSERT INTO discovery_observations (chain, token_address, source, at, cost_credits)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO discovery_observations (chain, token_address, source, at, cost_credits, pool_address, dex)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT DO NOTHING`,
-            [obs.chain, obs.tokenAddress.toLowerCase(), obs.source, obs.at, obs.costCredits ?? 0],
+            [obs.chain, obs.tokenAddress.toLowerCase(), obs.source, obs.at, obs.costCredits ?? 0, obs.poolAddress ?? null, obs.dexId ?? null],
           ),
         )
         .catch((err: unknown) => {

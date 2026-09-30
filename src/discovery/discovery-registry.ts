@@ -72,6 +72,14 @@ export interface DiscoveryObservation {
    * polling-schedule artifact (the local snapshot time).
    */
   providerEventTime?: number;
+  /**
+   * P4 — DEX pair/pool identity retained at the observation boundary so market
+   * evidence can be attributed to a SPECIFIC pool rather than the token alone
+   * (token vs pool separation). Populated from `GMGNRawToken.pairAddress` /
+   * `.dex`, which keyless feeds (ankr/dexscreener/dexpaprika/cmc) already carry.
+   */
+  poolAddress?: string;
+  dexId?: string;
 }
 
 /** Registry-level aggregate metrics (coverage / dup-rate / spend / first-seen). */

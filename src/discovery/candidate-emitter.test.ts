@@ -118,4 +118,27 @@ describe('DiscoveryCoordinator — priority merge + demotion + P5 observation si
     expect(byAddr['NO_TS']!.providerEventTime).toBeUndefined();
     expect(byAddr['ZERO_TS']!.providerEventTime).toBeUndefined();
   });
+
+  it('P4: carries DEX pair/pool identity (poolAddress + dexId) into observations', async () => {
+    const c = new DiscoveryCoordinator();
+    c.add(emitter('ankr', [tok('T', 'ankr', { pairAddress: '0xPAIR', dex: 'uniswap-v2' })]));
+    c.add(emitter('gecko', [tok('T', 'gecko', { pairAddress: '0xOTHER', dex: 'uniswap-v2' })]));
+    const { candidates, observations } = await c.discoverAll('sol');
+    // token/pool separation: both sources may observe the SAME token via
+    // DIFFERENT pools — the observation must retain each source's pool identity.
+    expect(candidates).toHaveLength(1); // merged to one token
+    expect(observations).toHaveLength(2); // both pool sightings kept
+    const ankr = observations.find((o) => o.source === 'ankr')!;
+    const gecko = observations.find((o) => o.source === 'gecko')!;
+    expect(ankr.poolAddress).toBe('0xPAIR');
+    expect(ankr.dexId).toBe('uniswap-v2');
+    expect(gecko.poolAddress).toBe('0xOTHER');
+    expect(gecko.dexId).toBe('uniswap-v2');
+    // absent when the token carries no pool identity
+    c.add(emitter('routescan', [tok('NOPOOL', 'routescan')]));
+    const { observations: obs2 } = await c.discoverAll('sol');
+    const np = obs2.find((o) => o.tokenAddress === 'NOPOOL')!;
+    expect(np.poolAddress).toBeUndefined();
+    expect(np.dexId).toBeUndefined();
+  });
 });

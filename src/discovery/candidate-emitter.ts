@@ -210,6 +210,10 @@ export class DiscoveryCoordinator {
           providerEventTime: typeof t.creationTimestamp === 'number' && t.creationTimestamp > 0
             ? t.creationTimestamp * 1000
             : undefined,
+          // P4 — carry the DEX pair/pool identity the feed reported, so market
+          // evidence can be attributed to a specific pool (token vs pool split).
+          poolAddress: t.pairAddress ?? undefined,
+          dexId: t.dex ?? undefined,
         });
       }
     }
