@@ -17,7 +17,6 @@ export type DiscoverySource =
   | 'routescan'
   | 'ankr'
   | 'cmc'
-  | 'birdeye'
   | 'fomo'
   | 'pons'
   | 'solanatracker'
@@ -111,6 +110,12 @@ export class CandidateRegistry {
   private fpBySource = new Map<DiscoverySource, number>();
   /** 6.3 — rolling availability probes per source (ok/total). */
   private availability = new Map<DiscoverySource, { ok: number; total: number }>();
+  /** Injectable clock for dead-pair TTL eviction tests. */
+  private readonly now: () => number;
+
+  constructor(opts?: { now?: () => number }) {
+    this.now = opts?.now ?? Date.now;
+  }
 
   private id(chain: string, tokenAddress: string): string {
     return `${chain}:${tokenAddress.toLowerCase()}`;
@@ -239,12 +244,38 @@ export class CandidateRegistry {
   public size(): number {
     return this.candidates.size;
   }
+
+  /**
+   * B#1 (audit §3.1) — dead-pair TTL eviction. Memecoin launches generate
+   * thousands of pairs that never cross the liquidity floor; a candidate still
+   * in `fresh` (never matured/eligible/dead) after `maxAgeMs` is a dead pair.
+   * Drop it to bound memory/Redis growth. Matured (eligible/revalidated/enriching)
+   * and explicitly-dead records are preserved — they feed latency/lifecycle and
+   * false-positive metrics. Returns the number evicted. Fail-open/hygiene only.
+   */
+  public pruneFresh(maxAgeMs: number): number {
+    const now = this.now();
+    let evicted = 0;
+    for (const [id, c] of this.candidates) {
+      if (c.lifecycle !== 'fresh') continue;
+      let earliest = Infinity;
+      for (const at of Object.values(c.firstSeen)) {
+        if (at < earliest) earliest = at;
+      }
+      if (!Number.isFinite(earliest)) continue; // no first-seen yet — treat as live
+      if (now - earliest > maxAgeMs) {
+        this.candidates.delete(id);
+        evicted += 1;
+      }
+    }
+    return evicted;
+  }
 }
 
 /** All known discovery sources (for ordering/proposal). */
 const ALL_SOURCES: DiscoverySource[] = [
   'rpc', 'dexpaprika', 'gecko', 'dexscreener', 'gmgn', 'routescan', 'ankr',
-  'cmc', 'birdeye', 'fomo', 'pons', 'solanatracker', 'pumpdev', 'solana-rpc',
+  'cmc', 'fomo', 'pons', 'solanatracker', 'pumpdev', 'solana-rpc',
   'tape', 'track', 'ws-tape',
 ];
 

@@ -1003,6 +1003,17 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
       let researchAdmittedCount = 0;
       let researchRefusedCount = 0;
 
+      // B#1 (audit §3.1) — dead-pair TTL eviction: fresh candidates that never
+      // mature within 15 min are thousands of never-listed meme mints; prune them
+      // each pass to bound CandidateRegistry growth. Fail-open hygiene only.
+      const DEAD_PAIR_TTL_MS = 15 * 60 * 1000;
+      try {
+        const pruned = globalCandidateRegistry.pruneFresh(DEAD_PAIR_TTL_MS);
+        if (pruned > 0) {
+          console.log(`[DISCOVERY] pruned ${pruned} dead fresh pair(s) (no maturity in ${DEAD_PAIR_TTL_MS / 60000} min)`);
+        }
+      } catch { /* never blocks a pass */ }
+
       for (const chain of chains) {
         const nativeSymbol = chain === 'sol' ? 'SOL' : 'ETH';
         console.log(`[MEME AGENT] ── chain=${chain} ──`);

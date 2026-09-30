@@ -72,6 +72,26 @@ describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
     expect(reg.get('base:0xabc')!.lifecycle).toBe('dead');
   });
 
+  it('B#1 — pruneFresh evicts dead fresh pairs but preserves matured/FP records', () => {
+    let now = 0;
+    const reg = new CandidateRegistry({ now: () => now });
+    // Dead fresh pair — observed 16 min ago, never matured.
+    reg.observe({ chain: 'base', tokenAddress: '0xdead', source: 'gecko', at: 0 });
+    // Matured candidate — revalidated, must survive even if old.
+    reg.observe({ chain: 'base', tokenAddress: '0xalive', source: 'gecko', at: 0 });
+    reg.markRevalidated('base:0xalive');
+    now = 16 * 60 * 1000; // advance 16 min (> 15 min TTL)
+    // A still-fresh but young candidate — must survive.
+    reg.observe({ chain: 'base', tokenAddress: '0xyoung', source: 'gecko', at: now });
+    const evicted = reg.pruneFresh(15 * 60 * 1000);
+    expect(evicted).toBe(1); // only 0xdead (stale fresh)
+    expect(reg.get('base:0xdead')).toBeUndefined();   // pruned
+    expect(reg.get('base:0xalive')).toBeDefined();    // preserved (matured)
+    expect(reg.get('base:0xyoung')).toBeDefined();    // preserved (young fresh)
+    // Second pass evicts nothing new — idempotent.
+    expect(reg.pruneFresh(15 * 60 * 1000)).toBe(0);
+  });
+
   it('tracks coverage, dup-rate, spend and false-positive attribution per source', () => {
     const reg = new CandidateRegistry();
     // solana-rpc first-sees three tokens; dexpaprika adds one new token and

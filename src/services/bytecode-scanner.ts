@@ -1,4 +1,5 @@
 import { globalRPCFailoverManager } from './rpc-failover.js';
+import { TtlCache } from '../cache/ttl-cache.js';
 
 /**
  * Kernel D / NERVE A11. Deterministic bytecode scanner that flags a curated
@@ -45,7 +46,47 @@ function normalize(bytecode: string): string {
   return /^[0-9a-f]*$/.test(hex) ? hex : '';
 }
 
+/**
+ * B#3 (audit) — ABI/bytecode "seen identical contract before, skip the call"
+ * cache. The audit recommended a `bytecodeHash -> ABI` cache so identical proxy
+ * contracts don't re-pay the explorer/RPC call every pass. This scanner does not
+ * fetch explorer ABIs, but it DOES re-fetch deployed code via `eth_getCode` for
+ * every screened token on every pass — the real cost-bearing call. So the cache
+ * keys on deployed-code bytes: the SAME address skips `eth_getCode` entirely
+ * within TTL (the core win), and DIFFERENT addresses whose deployed code hashes
+ * identically skip the redundant string-scan (share one result). Fail-open: a
+ * cache lookup never blocks a scan — a miss just falls through to a fetch.
+ */
+export interface BytecodeScannerOptions {
+  /** How long a fetched bytecode scan is reused. Default 15 min. */
+  cacheTtlMs?: number;
+  /** Optional LRU cap on cached addresses. Default 2000. */
+  maxCacheEntries?: number;
+  /** Injectable clock for tests. Default `Date.now`. */
+  now?: () => number;
+}
+
+/** Stable 32-bit FNV-1a over the normalized hex → string hash (deterministic). */
+function codeHashOf(hex: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < hex.length; i += 1) {
+    h ^= hex.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
 export class BytecodeScanner {
+  private readonly addressCache: TtlCache<{ codeHash: string; scan: ScanResult }>;
+  private readonly hashCache: TtlCache<ScanResult>;
+
+  constructor(opts: BytecodeScannerOptions = {}) {
+    const ttlMs = opts.cacheTtlMs ?? 15 * 60 * 1000;
+    const maxEntries = opts.maxCacheEntries ?? 2000;
+    this.addressCache = new TtlCache<{ codeHash: string; scan: ScanResult }>({ ttlMs, maxEntries, now: opts.now });
+    this.hashCache = new TtlCache<ScanResult>({ ttlMs, maxEntries, now: opts.now });
+  }
+
   scan(bytecode: string): ScanResult {
     const hex = normalize(bytecode);
     if (hex.length === 0) return { flagged: false, findings: [] };
@@ -56,15 +97,21 @@ export class BytecodeScanner {
   }
 
   /**
-   * Fetches deployed code through the RPC failover pool and scans it. Fail-soft:
-   * any fetch error returns an empty (unflagged) scan — the bytecode scan is an
-   * extra red-flag detector, not a gate; it must never fail-closed on transport.
+   * Fetches deployed code through the RPC failover pool and scans it, reusing a
+   * cached scan for the same address (skips `eth_getCode`) or the same deployed
+   * bytes (skips the redundant string-scan) within TTL. Fail-soft: any fetch
+   * error returns an empty (unflagged) scan — the bytecode scan is an extra
+   * red-flag detector, not a gate; it must never fail-closed on transport.
    */
   async scanContract(
     chain: string,
     address: string,
     fetcher?: (url: string) => Promise<string>,
   ): Promise<ScanResult> {
+    const addrKey = `${String(chain).toLowerCase()}:${address.toLowerCase()}`;
+    const cached = this.addressCache.get(addrKey);
+    if (cached) return cached.scan;
+
     const poolKey = CHAIN_TO_POOL[String(chain).toLowerCase()];
     if (!poolKey) return { flagged: false, findings: [] };
     const rpc = globalRPCFailoverManager;
@@ -83,7 +130,18 @@ export class BytecodeScanner {
     });
     try {
       const code = await getCode(url);
-      return this.scan(code);
+      const hex = normalize(code);
+      const codeHash = codeHashOf(hex);
+      // Identical deployed bytes already scanned for a DIFFERENT address → reuse.
+      const shared = this.hashCache.get(codeHash);
+      if (shared) {
+        this.addressCache.set(addrKey, { codeHash, scan: shared });
+        return shared;
+      }
+      const scan = this.scan(code);
+      this.addressCache.set(addrKey, { codeHash, scan });
+      this.hashCache.set(codeHash, scan);
+      return scan;
     } catch {
       return { flagged: false, findings: [] };
     }

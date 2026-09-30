@@ -12,7 +12,7 @@
  *   emitter    — recall-only candidate emitter (fomo): emits CandidateHints;
  *                 promotion still requires the on-chain verify gate.
  *   enricher   — recall/hydrate, NEVER promote (dexpaprika/gecko/dexscreener/
- *                 routescan/cmc). When DISCOVERY_INTRODUCERS is set they scope
+ *                 routescan). When DISCOVERY_INTRODUCERS is set they scope
  *                 to enrichment-only.
  *   regime     — DeFiLlama regime CONTEXT (not a token-score voter).
  *   entity     — Arkham entity/deployer resolution overlay.
@@ -58,7 +58,6 @@ export const PROVIDER_FEEDS: FeedSpec[] = [
   { id: 'gecko', role: 'enricher', gate: flag('GECKO_FEED_ENABLED') },
   { id: 'dexscreener', role: 'enricher', gate: flag('DEXSCREENER_FEED_ENABLED') },
   { id: 'routescan', role: 'enricher', gate: flag('ROUTESCAN_FEED_ENABLED') },
-  { id: 'cmc', role: 'enricher', gate: flag('CMC_DEX_FEED_ENABLED') },
   { id: 'solanatracker', role: 'enricher', chains: 'sol', gate: keyed('SOLANATRACKER_API_KEY')(flag('SOLANATRACKER_FEED_ENABLED')) },
   // Regime context + entity overlay.
   { id: 'defillama', role: 'regime', gate: flag('DEFILLAMA_FEED_ENABLED') },

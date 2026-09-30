@@ -21,7 +21,6 @@ import { GeckoDiscoveryFeed } from './adapters/gecko-discovery-feed.js';
 import { AnkrDiscoveryFeed } from './adapters/ankr-discovery-feed.js';
 import { RoutescanFeed } from './adapters/routescan-feed.js';
 import { BlockscoutFeed } from './adapters/blockscout-feed.js';
-import { CmcDexFeed } from './adapters/cmc-dex-feed.js';
 import { SolanaRpcDiscoveryFeed } from './adapters/solana-rpc-discovery-feed.js';
 import { FomoApiClient } from './adapters/fomo-api.js';
 import { FomoTokenBoardProvider } from './adapters/fomo-emitter.js';
@@ -246,11 +245,10 @@ const robinhoodScreeningAgent = new ScreeningAgent(
     ...(process.env.BLOCKSCOUT_FEED_ENABLED === 'true'
       ? { blockscout: new BlockscoutFeed({ ...(process.env.BLOCKSCOUT_API_KEY ? { apiKey: process.env.BLOCKSCOUT_API_KEY } : {}) }) }
       : {}),
-    // CMC keyless DEX stack: new-pair walking + holders + security detail.
-    // Inert unless CMC_DEX_FEED_ENABLED=true.
-    ...(process.env.CMC_DEX_FEED_ENABLED === 'true'
-      ? { cmcDex: new CmcDexFeed({ ...(process.env.CMC_API_KEY ? { apiKey: process.env.CMC_API_KEY } : {}) }) }
-      : {}),
+    // B#1 (audit) — CMC DEX stack severed from the live pipeline (10K/mo cap,
+    // delayed indexing, negative ROI on maintenance). `cmc-dex-feed.ts` + its
+    // unit test are retained as inert, but no provider is injected, so the
+    // agent's cmc collector short-circuits to [] even if CMC_DEX_FEED_ENABLED.
     // Solana RPC INTRODUCER (generic SPL-create walker over the failover pool's
     // active Sol RPC — Shyft/Chainstack/PublicNode sol). Inert unless
     // SOLANA_RPC_FEED_ENABLED=true AND a mainnet SOLANA_RPC_URL is set. The

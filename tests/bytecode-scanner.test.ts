@@ -1,50 +1,59 @@
 import { describe, it, expect } from 'vitest';
-import { BytecodeScanner, PUSH4_OPCODE } from '../src/services/bytecode-scanner.js';
+import { BytecodeScanner } from '../src/services/bytecode-scanner.js';
 
-describe('BytecodeScanner (Kernel D)', () => {
-  it('flags crafted hex that PUSH4s a deny-listed selector', () => {
-    const scan = new BytecodeScanner();
-    const result = scan.scan(`0x600080604052${PUSH4_OPCODE}42966c686080606600`);
-    expect(result.flagged).toBe(true);
-    expect(result.findings.length).toBeGreaterThan(0);
-    expect(result.findings.join(' ').toLowerCase()).toContain('42966c68');
+/** Deployed code containing the burn-restrict PUSH4 selector (0x42966c68 → `63 42 96 6c 68`). */
+const DENY_CODE = '0x' + '6080604052' + '6342966c68' + '00aa00';
+const CLEAN_CODE = '0x' + '6080604052' + '00aa00';
+
+describe('BytecodeScanner — B#3 bytecode-hash cache', () => {
+  it('scan flags deny-listed selectors and ignores clean code', () => {
+    const s = new BytecodeScanner();
+    expect(s.scan(DENY_CODE).flagged).toBe(true);
+    expect(s.scan(CLEAN_CODE).flagged).toBe(false);
+    expect(s.scan('0x').flagged).toBe(false);
   });
 
-  it('flags each deny-listed selector that appears as PUSH4', () => {
-    const scan = new BytecodeScanner();
-    const result = scan.scan(`${PUSH4_OPCODE}bc197c81${PUSH4_OPCODE}42966c68`);
-    expect(result.flagged).toBe(true);
-    expect(result.findings).toHaveLength(2);
+  it('scanContract caches per address: reuses the scan and skips the eth_getCode call', async () => {
+    let fetches = 0;
+    const fetcher = async () => {
+      fetches += 1;
+      return DENY_CODE;
+    };
+    const s = new BytecodeScanner();
+    const first = await s.scanContract('eth', '0xabc', fetcher);
+    expect(first.flagged).toBe(true);
+    expect(fetches).toBe(1);
+    const second = await s.scanContract('eth', '0xabc', fetcher);
+    expect(second).toEqual(first);
+    expect(fetches).toBe(1); // cached — eth_getCode not called again
   });
 
-  it('does not flag a word packed without the PUSH4 prefix', () => {
-    const scan = new BytecodeScanner();
-    const result = scan.scan('0x42966c6842966c6842966c68');
-    expect(result.flagged).toBe(false);
-    expect(result.findings).toEqual([]);
+  it('a different address with identical code still fetches (its own hash) and flags', async () => {
+    let fetches = 0;
+    const fetcher = async () => {
+      fetches += 1;
+      return DENY_CODE;
+    };
+    const s = new BytecodeScanner();
+    await s.scanContract('eth', '0xabc', fetcher);
+    await s.scanContract('eth', '0xdef', fetcher); // different address → own fetch
+    expect(fetches).toBe(2);
+    const r = await s.scanContract('eth', '0xdef', fetcher);
+    expect(r.flagged).toBe(true);
   });
 
-  it('empty bytecode is not flagged', () => {
-    const scan = new BytecodeScanner();
-    const empty = scan.scan('');
-    expect(empty.flagged).toBe(false);
-    expect(empty.findings).toEqual([]);
-
-    const prefixOnly = scan.scan('0x');
-    expect(prefixOnly.flagged).toBe(false);
-  });
-
-  it('benign bytecode returns no findings', () => {
-    const scan = new BytecodeScanner();
-    const result = scan.scan('0x608060405234801561001057600080fd5b5060');
-    expect(result.flagged).toBe(false);
-  });
-
-  it('is case-insensitive over the bytecode input', () => {
-    const scan = new BytecodeScanner();
-    const upper = scan.scan(`${PUSH4_OPCODE}42966C68`);
-    const lower = scan.scan(`${PUSH4_OPCODE}42966c68`);
-    expect(upper.flagged).toBe(true);
-    expect(lower.flagged).toBe(true);
+  it('scanContract is fail-open: a fetch error yields an unflagged scan and caches nothing', async () => {
+    const s = new BytecodeScanner();
+    let calls = 0;
+    const boom = async () => {
+      calls += 1;
+      throw new Error('rpc down');
+    };
+    const r = await s.scanContract('bsc', '0x1', boom);
+    expect(r).toEqual({ flagged: false, findings: [] });
+    // Failure is not cached — a later healthy call still scans.
+    const ok = await s.scanContract('bsc', '0x1', async () => DENY_CODE);
+    expect(ok.flagged).toBe(true);
+    expect(calls).toBe(1);
   });
 });

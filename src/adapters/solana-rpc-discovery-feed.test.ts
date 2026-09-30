@@ -53,4 +53,36 @@ describe('SolanaRpcDiscoveryFeed (Sol introducer)', () => {
     expect(extractCreateMint({ transaction: { message: { instructions: [] } } })).toBeNull();
     expect(extractCreateMint(null)).toBeNull();
   });
+
+  it('B#2 — resumes from a persisted cursor: asks for signatures AFTER the last seen one', async () => {
+    const calls: Array<{ method?: string; params?: unknown }> = [];
+    const routeFetch: SolFetchLike = (url, init) => {
+      const body = JSON.parse(init?.body ?? '{}') as { method?: string; params?: unknown };
+      calls.push(body);
+      if (body.method === 'getSignaturesForAddress') return Promise.resolve(okJson({ result: [{ signature: 'sig2' }] }));
+      if (body.method === 'getTransaction') return Promise.resolve(okJson({ result: CREATE_TX }));
+      return Promise.resolve(okJson({ result: null }));
+    };
+    const backend = { get: () => 'sig1', set: () => {} };
+    const f = new SolanaRpcDiscoveryFeed({ rpcUrl: RPC, fetch: routeFetch, cursorBackend: backend });
+    const out = await f.discover();
+    expect(out).toHaveLength(1);
+    const sigsCall = calls.find((c) => c.method === 'getSignaturesForAddress');
+    expect((sigsCall?.params as Array<unknown> | undefined)?.[1]).toMatchObject({ before: 'sig1' });
+  });
+
+  it('B#2 — persists the advanced cursor back to the backend', async () => {
+    let stored: string | undefined;
+    const backend = { get: () => undefined, set: (_p: string, sig: string) => { stored = sig; } };
+    const f = new SolanaRpcDiscoveryFeed({ rpcUrl: RPC, fetch: routeFetch, cursorBackend: backend });
+    await f.discover();
+    expect(stored).toBe('sig1'); // last enumerated signature advanced the cursor
+  });
+
+  it('B#2 — a throwing cursor backend is fail-soft: discovery still proceeds', async () => {
+    const bad = { get: () => { throw new Error('store down'); }, set: () => { throw new Error('store down'); } };
+    const f = new SolanaRpcDiscoveryFeed({ rpcUrl: RPC, fetch: routeFetch, cursorBackend: bad });
+    const out = await f.discover();
+    expect(out).toHaveLength(1);
+  });
 });

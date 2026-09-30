@@ -34,7 +34,23 @@ export interface SolanaRpcDiscoveryOptions extends MarketDiscoveryOptions {
   maxSignaturesPerProgram?: number;
   /** Explicit Sol RPC URL. Default: the failover manager's active Sol RPC. */
   rpcUrl?: string;
+  /**
+   * B#2 (audit) — persistent per-program signature cursor. The cursor is what
+   * bounds cost: each cycle only re-walks NEW signatures past it. Defaults to an
+   * in-memory Map (lost on restart, so a restart re-reads one bounded page). For
+   * pull-based SOL discovery against a paid RPC, inject a durable backend
+   * (Redis/JSONL) so a restart resumes from the last seen signature instead of
+   * re-decoding an already-seen page every boot. Fail-soft: a backend whose
+   * get/set throws is caught and treated as "no cursor" by the caller.
+   */
+  cursorBackend?: CursorBackend;
   fetch?: SolFetchLike;
+}
+
+/** Persistable cursor seam: maps a launch program to its last enumerated signature. */
+export interface CursorBackend {
+  get(program: string): string | undefined;
+  set(program: string, signature: string): void;
 }
 
 /** Default Solana launch program to watch (pump.fun canonical). */
@@ -73,8 +89,9 @@ export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
   private readonly launchPrograms: string[];
   private readonly maxSignaturesPerProgram: number;
   private readonly rpcUrl?: string;
-  /** Persisted per-program cursor: last enumerated signature (de-dupes cycles). */
-  private readonly cursor = new Map<string, string>();
+  /** Per-program cursor: last enumerated signature (de-dupes cycles). Backed by
+   *  the injectable `cursorBackend` when provided, else an in-memory Map. */
+  private readonly cursor: CursorBackend;
 
   constructor(opts: SolanaRpcDiscoveryOptions = {}) {
     const f = opts.fetch ?? ((globalThis as { fetch?: SolFetchLike }).fetch as SolFetchLike);
@@ -82,6 +99,7 @@ export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
     this.launchPrograms = (opts.launchPrograms ?? DEFAULT_LAUNCH_PROGRAMS).filter(isBase58PublicKey);
     this.maxSignaturesPerProgram = opts.maxSignaturesPerProgram ?? 10;
     this.rpcUrl = opts.rpcUrl;
+    this.cursor = opts.cursorBackend ?? new Map<string, string>();
   }
 
   /** Resolve the Sol RPC to talk to: explicit URL or the failover manager's active Sol RPC. */
@@ -103,7 +121,7 @@ export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
     let budget = options.maxSignaturesPerProgram ? this.maxSignaturesPerProgram * this.launchPrograms.length : Infinity;
     for (const program of this.launchPrograms) {
       if (budget <= 0) break;
-      const before = this.cursor.get(program);
+      const before = this.cursorGet(program);
       const sigs = await this.signatures(program, before, this.maxSignaturesPerProgram);
       if (sigs === null || sigs.length === 0) continue;
       budget -= sigs.length;
@@ -126,7 +144,7 @@ export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
       }
       // Advance the cursor to the OLDEST signature enumerated so the next cycle
       // only pays for signatures this cycle introduced.
-      this.cursor.set(program, sigs[sigs.length - 1]!.signature);
+      this.cursorSet(program, sigs[sigs.length - 1]!.signature);
     }
     return tokens;
   }
@@ -154,6 +172,22 @@ export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
     } catch {
       return null;
     }
+  }
+
+  /** Fail-soft cursor read: a throwing/absent backend is treated as no cursor. */
+  private cursorGet(program: string): string | undefined {
+    try {
+      return this.cursor.get(program);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Fail-soft cursor write: a throwing backend is skipped, discovery continues. */
+  private cursorSet(program: string, signature: string): void {
+    try {
+      this.cursor.set(program, signature);
+    } catch { /* persist failure never blocks discovery */ }
   }
 
   private rpc(method: string, params: unknown[]): Promise<unknown> {
