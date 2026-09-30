@@ -47,7 +47,7 @@ import { globalObservationStore } from './storage/durable-observation-store.js';
 import { globalReputationMemory } from './services/reputation-memory.js';
 import { ApiKeyGuardService } from './services/api-key-guard.js';
 import { WalletTracker } from './services/wallet-tracker.js';
-import { PaperTradingLedger } from './services/paper-trading.js';
+import { PaperTradingLedger, createDefaultPaperTradingLedger } from './services/paper-trading.js';
 import { executeMemeBuy } from './services/approval-execution.js';
 import { gateSafety, gateTxLock, gateSizer, gateFillSim, gateCostGate, gateGovernance, gateSellability } from './services/execution-gates.js';
 import { executableChainsFromEnv, normalizeExecutionChainKey } from './config/execution-registry.js';
@@ -298,9 +298,10 @@ walletService.attachStateStore(stateStore);
 approvalQueueService.attachStateStore(stateStore);
 
 // P6.2 paper trading: the mid-market paper ledger (DRY_RUN fills + regime-
-// coverage gate). In-memory per process; journal entries persist via the
-// attached trade journal.
-const paperTrading = new PaperTradingLedger(tradeJournalService);
+// coverage gate). Durable + hydrated at boot (P0.3): Postgres-backed when a DB
+// URL is set, else file/JSONL. This fixes the process-local regime-history bug
+// (B#1b) — the paper 3-regime unlock no longer resets on restart.
+const paperTrading = createDefaultPaperTradingLedger(tradeJournalService);
 const paperMinRegimes = Number(process.env.PAPER_MIN_REGIMES ?? 3) || 3;
 const paperMinPerRegime = Number(process.env.PAPER_MIN_PER_REGIME ?? 5) || 5;
 const paperMinExpectancyPct = Number(process.env.PAPER_MIN_EXPECTANCY_PCT ?? 0) || 0;

@@ -1,3 +1,5 @@
+import type { PositionRegime } from '../../position/position-manager.js';
+
 export type CallDomain = 'MEME_ROBINHOOD' | 'ALPHA_ROBINHOOD';
 
 /** Whale tracking: a single open position >= threshold belonging to one smart trader. */
@@ -74,6 +76,10 @@ export interface CallCardPayload {
   socialHypeScore: number;
   liquidityUsd: number;
   volume1hUsd: number;
+  /** P0.2 — actual detected regime (FAST_MOMENTUM/REVIVAL/CTO/SMART_MONEY). Populated
+   *  from the real detection path so paper trades record a true regime instead of
+   *  'UNKNOWN'; the 3-regime paper-unlock gate (B#1) depends on real regime coverage. */
+  regime?: PositionRegime;
   /** Arch-3 voter swarm scores (quant/ml/security/sentiment/whale/critic), when collected. */
   voterScores?: Partial<Record<string, number>>;
   whaleReport?: WhaleReport;

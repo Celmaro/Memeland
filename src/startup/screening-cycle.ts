@@ -276,6 +276,27 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     // (before the dispatch loop) so paper trading and the AUTO gate share one flag.
     const AUTO_EXECUTE_ENABLED = isAutoExecute() || process.env.AUTO_EXECUTE_ENABLED === 'true';
     const firedOpportunities: Array<{ id: string; confidence: number }> = [];
+    // P0.4 (B#instrument) — ONE consolidated end-to-end funnel counter per cycle.
+    // Every stage from discovery to execution is tallied in one place so "why are
+    // there no steady trades?" is answerable from a SINGLE log line instead of a
+    // seven-bucket checklist spread across five subsystems. Deliberately separate
+    // from the existing [FUNNEL] line, which stays the stable parse contract.
+    const e2e = {
+      discovered: memeStats.scanned,
+      prefilter: memeStats.prefiltered,
+      signalPass: memeStats.emitted,
+      consensusPass: postGateCount,
+      dedupSkip: 0,
+      fired: 0,
+      scorecard: 0,
+      paperOpen: 0,
+      approvalQueued: 0,
+      autoGateBlocked: 0,
+      autoDisabled: 0,
+      riskBlocked: 0,
+      execAttempted: 0,
+      execOk: 0,
+    };
     for (const item of dispatchedPayloads) {
       const dedupKey = `${item.channelName}:${item.payload.symbol}:${item.payload.contractAddress || 'N/A'}`;
       // Kernel F sticky TTL owns the in-memory dedup now (quick win): a hit
@@ -283,8 +304,10 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       const seenAt = await globalDecisionCache.getSticky<number>(dedupKey, () => now, { ttlMs: DEDUP_WINDOW_MS });
       if (seenAt !== null && seenAt !== now) {
         console.log(`[DEDUP] Skipping duplicate signal: ${dedupKey} (posted ${((now - seenAt) / 60000).toFixed(0)}m ago)`);
+        e2e.dedupSkip += 1;
         continue;
       }
+      e2e.fired += 1;
       stateStore.setDedupEntry(dedupKey, now);
       globalOperationalHealth.recordAlert(
         'CONSENSUS_PASS',
@@ -332,6 +355,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             opportunityId,
           });
           console.log(`[LINEAGE] ${item.payload.symbol}: opportunity=${opportunityId ?? 'n/a'} scorecard=${scorecardId} → decision chain linked`);
+          e2e.scorecard += 1;
       }
 
       // P6.2 paper trading: open a mid-market paper position for every fired
@@ -342,8 +366,10 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       // the regime-coverage gate (≥N regimes × positive expectancy) is what
       // later unlocks Phase-3 AUTO.
       if (paperTrading && !AUTO_EXECUTE_ENABLED && firedPrice > 0) {
-        const paperRegime = (item.payload as { regime?: string }).regime as
-          | 'FAST_MOMENTUM' | 'REVIVAL' | 'CTO' | 'SMART_MONEY' | undefined;
+        // P0.2 — regime is now a first-class, typed field on the call card
+        // (populated from the real detection path), so no cast is needed and a
+        // missing regime means "undetected" rather than an unchecked string.
+        const paperRegime = item.payload.regime;
         const paperBook = bookFromMid(firedPrice, item.payload.liquidityUsd, 10);
         if (paperBook === null) {
           console.log(`[PAPER] ${item.payload.symbol}: open refused — no proofable two-sided book (depth=${item.payload.liquidityUsd ?? 'unknown'})`);
@@ -363,6 +389,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
           });
           if (paperOpen.ok) {
             console.log(`[PAPER] opened ${paperOpen.trade!.id} ${item.payload.symbol} @ ${paperOpen.trade!.entryFillPriceUsd.toFixed(6)} (slip ${paperOpen.trade!.slipPct.toFixed(2)}%) regime=${paperRegime ?? 'none'}`);
+            e2e.paperOpen += 1;
           } else {
             console.log(`[PAPER] ${item.payload.symbol}: open refused — ${paperOpen.reason}`);
           }
@@ -397,6 +424,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
         );
         approvalOrderId = order.id;
         console.log(`[APPROVAL] Queued PENDING order ${order.id} for ${item.payload.symbol} (scorecard ${scorecardId || 'n/a'})`);
+        e2e.approvalQueued += 1;
         globalOperationalHealth.recordAlert('APPROVAL_REQUIRED', `Approval required: ${item.payload.symbol}`, `order ${order.id}`);
       }
 
@@ -418,6 +446,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
         const phaseGate = approvalQueueService.canAutoExecute(scorecardExpectancy(), paperGate);
         if (!phaseGate.allowed) {
           console.warn(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: BLOCKED by Phase-3 AUTO gate — ${phaseGate.reason}`);
+          e2e.autoGateBlocked += 1;
         } else {
           const autoExec = hub.isAutoExecuteEnabled(autoExecDomain);
           if (autoExec.enabled) {
@@ -439,9 +468,18 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
                     ? `🚨 **KILL-SWITCH ACTIVE** — auto-execute ${autoExecDomain} ${item.payload.symbol} blocked.`
                     : `🚫 **RISK GATE BLOCKED** auto-execute ${autoExecDomain} ${item.payload.symbol}: ${riskGate.reason}`,
                 );
-                break;
+                // P0.1 (B#5): a per-token risk rejection must NOT abort the whole
+                // batch. Only a global kill-switch stops the loop; any other risk
+                // block just skips ONWARD to the next candidate.
+                if (isKill) {
+                  e2e.riskBlocked += 1;
+                  break;
+                }
+                e2e.riskBlocked += 1;
+                continue;
               }
               if (autoExecDomain && item.payload.contractAddress) {
+                e2e.execAttempted += 1;
                 const execRes = await executeMemeBuy({
                   evm: evmTradeAdapter,
                   wallet: walletService,
@@ -467,8 +505,13 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
                   ledger: globalDecisionLedger,
                 });
                 console.log(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
+                if (execRes.success) e2e.execOk += 1;
               }
             } catch (err: any) { console.error(`[AUTO-EXECUTE] ${item.payload.symbol} error: ${err.message}`); }
+          } else {
+            // The Phase-3 gate OPENED but this domain's AUTO toggle is off — a
+            // distinct dead-end from autoGateBlocked, so it gets its own column.
+            e2e.autoDisabled += 1;
           }
         }
       }
@@ -520,6 +563,18 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
         console.warn(`[SWARM LEARNING] record failed: ${learnErr.message}`);
       }
     }
+
+    // P0.4 — the single end-to-end funnel line. Read left to right it IS the
+    // pipeline; the FIRST stage that collapses to 0 while later stages expect
+    // >0 is the bottleneck. `dedupSkip` and `fired` should sum to consensusPass.
+    console.log(
+      `[E2E FUNNEL] discovered=${e2e.discovered} prefilter=${e2e.prefilter} ` +
+      `signal80=${e2e.signalPass} consensus80=${e2e.consensusPass} ` +
+      `dedup=${e2e.dedupSkip} fired=${e2e.fired} scorecard=${e2e.scorecard} ` +
+      `paper=${e2e.paperOpen} approval=${e2e.approvalQueued} ` +
+      `autoGateBlock=${e2e.autoGateBlocked} autoOff=${e2e.autoDisabled} ` +
+      `riskBlock=${e2e.riskBlocked} execTry=${e2e.execAttempted} execOk=${e2e.execOk}`
+    );
 
     // Opportunity Strategist: record the real approval outcome for every fired
     // signal, then decide which opportunities need a re-score and why now.

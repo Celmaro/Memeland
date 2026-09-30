@@ -30,6 +30,7 @@ import { JevRouter, type JevClient } from '../../ai/jev-router.js';
 import { calibratedDecision } from '../../features/calibrated-decision.js';
 import { globalCalibrationModel } from '../../features/calibration.js';
 import type { ScreeningAgent as ScreeningAgentContract, AgentReport, CallCardPayload } from '../shared/agent-contract.js';
+import type { PositionRegime } from '../../position/position-manager.js';
 import { GoPlusSecurityService } from '../../services/goplus-security-service.js';
 import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
@@ -37,7 +38,7 @@ import { JsonRpcWsTape } from '../../adapters/jsonrpc-ws-tape.js';
 import { RpcVerify } from '../../services/onchain/rpc-verify.js';
 import { globalSourceQuota, classifyHttpFailure, statusOf } from '../../services/source-quota.js';
 import type { BuyEvent } from '../../services/flow-convergence.js';
-import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel } from '../shared/gmgn-meme-helpers.js';
+import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel, memeRegimeFor } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
 import { SentimentVoter } from '../shared/sentiment-voter.js';
@@ -843,7 +844,7 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
   }
 
   /** Build call-card payload from real data (or 'N/A') — chain-aware labels/URLs. */
-  public buildPayload(t: GMGNRawToken, confidence: number, thesis: string, trackLabel?: string, chain: Chain = 'robinhood'): CallCardPayload {
+  public buildPayload(t: GMGNRawToken, confidence: number, thesis: string, trackLabel?: string, chain: Chain = 'robinhood', regime?: PositionRegime): CallCardPayload {
     const ageHours = t.creationTimestamp !== null ? (Date.now()/1000 - t.creationTimestamp)/3600 : null;
     const total = t.buys + t.sells;
     const txRatio = total > 0 ? `Buy ${((t.buys/total)*100).toFixed(0)}% / Sell ${((t.sells/total)*100).toFixed(0)}%` : 'N/A';
@@ -891,6 +892,7 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
       socialHypeScore: confidence,
       liquidityUsd: t.liquidityUsd,
       volume1hUsd: t.volume1hUsd > 0 ? t.volume1hUsd : volume24hOf(t) / 24,
+      regime,
     };
   }
 
@@ -1317,7 +1319,12 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
           }
 
           const thesis = buildMemeThesis(t, det.type, confidence, det.reasons, strategyReason);
-          const payload = this.buildPayload(t, confidence, thesis, trackLabel, chain);
+          // P0.2 — populate payload.regime from the ACTUAL detection path (B#1)
+          // so paper trades record a real regime instead of UNKNOWN and the
+          // 3-regime unlock gate can reach coverage. Mapping is the shared,
+          // unit-tested helper; a smart-money cluster outranks the raw type.
+          const detectedRegime = memeRegimeFor(det.type, !!trackEntry && trackEntry.buyWalletCount >= 3);
+          const payload = this.buildPayload(t, confidence, thesis, trackLabel, chain, detectedRegime);
 
           // (Phase-7 final FeatureSnapshot is built BELOW, after the security/risk
           // evidence in the voter-swarm block, so it captures post-audit truth.)

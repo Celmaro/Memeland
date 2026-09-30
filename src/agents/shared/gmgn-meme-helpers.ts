@@ -6,6 +6,7 @@
  * ONE place. No scoring logic changes — this is pure de-duplication.
  */
 import type { GMGNRawToken, GMGNSecurityAudit, GMGNTrackTrade } from '../../adapters/gmgn-adapter.js';
+import type { PositionRegime } from '../../position/position-manager.js';
 
 export interface MemePreFilterConfig {
   /** Real 1-HOUR volume (GMGN rank/hot interval=1h, trenches volume_1h, DexScreener h1) — required. */
@@ -394,6 +395,34 @@ export function tokenSecurityLabel(t: GMGNRawToken): string {
   if (t.ratTraderAmountRate !== null) parts.push(`Insider ${(t.ratTraderAmountRate * 100).toFixed(1)}%`);
   if (t.bundlerRate !== null) parts.push(`Bundler ${(t.bundlerRate * 100).toFixed(1)}%`);
   return parts.length > 0 ? `✅ GMGN audited — ${parts.join(' • ')}` : '✅ GMGN audited';
+}
+
+/**
+ * P0.2 (B#1) — map a detected meme signal type onto the PositionRegime enum the
+ * paper ledger and position manager speak.
+ *
+ * The detection vocabulary (CTO/REVIVAL/MOMENTUM/NONE) and the execution
+ * vocabulary (FAST_MOMENTUM/REVIVAL/CTO/SMART_MONEY) are NOT the same set, so
+ * the mapping is explicit and total rather than a cast. `NONE` has no regime:
+ * returning `undefined` (not 'UNKNOWN') keeps an undetected token out of the
+ * regime-coverage histogram instead of inventing a bucket.
+ *
+ * A smart-money cluster (>= threshold wallets on the same fresh token) is the
+ * strongest live evidence available, so it OUTRANKS the raw signal type and is
+ * recorded as SMART_MONEY. This is what lets the 3-regime paper-unlock gate
+ * reach real coverage instead of stalling on a single regime.
+ */
+export function memeRegimeFor(
+  signalType: 'CTO' | 'REVIVAL' | 'MOMENTUM' | 'NONE',
+  smartMoneyCluster: boolean,
+): PositionRegime | undefined {
+  if (smartMoneyCluster) return 'SMART_MONEY';
+  switch (signalType) {
+    case 'CTO': return 'CTO';
+    case 'REVIVAL': return 'REVIVAL';
+    case 'MOMENTUM': return 'FAST_MOMENTUM';
+    case 'NONE': return undefined;
+  }
 }
 
 /** Detect signal type + deterministic confidence (0-100) */
