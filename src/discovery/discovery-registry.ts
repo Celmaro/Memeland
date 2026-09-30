@@ -241,5 +241,79 @@ export class CandidateRegistry {
   }
 }
 
+/** All known discovery sources (for ordering/proposal). */
+const ALL_SOURCES: DiscoverySource[] = [
+  'rpc', 'dexpaprika', 'gecko', 'dexscreener', 'gmgn', 'routescan', 'ankr',
+  'cmc', 'birdeye', 'fomo', 'pons', 'solanatracker', 'pumpdev', 'solana-rpc',
+  'tape', 'track', 'ws-tape',
+];
+
+export interface IntroducerProposal {
+  /** Highest-scoring measured source (empirical primary + availability). */
+  measuredPrimary: DiscoverySource | null;
+  /** All measured sources ranked by composite value, best first. */
+  measuredOrder: DiscoverySource[];
+  /** High-value sources NOT currently enabled → worth adding to the allowlist. */
+  promote: DiscoverySource[];
+  /** Low-value sources currently enabled → worth removing. */
+  demote: DiscoverySource[];
+  /** True when the currently-configured primary contradicts the measured primary. */
+  contradict: boolean;
+  /** The currently-configured primary (highest-value enabled source), if any. */
+  configuredPrimary: DiscoverySource | null;
+  /** Current DISCOVERY_INTRODUCERS tokens. */
+  enabledNow: string[];
+}
+
+/** Parse a DISCOVERY_INTRODUCERS allowlist into normalized source tokens. */
+export function introducerTokens(list?: string): string[] {
+  if (!list) return [];
+  return list.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * 6.7 — Self-writing DISCOVERY_INTRODUCERS proposal.
+ *
+ * Once discovery stats mature, propose an allowlist instead of hand-picking one:
+ * rank every measured source by a composite value (coverage + first-seen share +
+ * availability − false positives − spend), then `promote` the high performers not
+ * yet enabled and `demote` the low performers that are. Flag when the config
+ * contradicts the measured primary, closing the "measure, don't hand-pick" loop.
+ */
+export function proposeIntroducers(stats: DiscoveryStats, list?: string): IntroducerProposal {
+  const enabledNow = introducerTokens(list);
+  const enabledSet = new Set(ALL_SOURCES.filter((s) => isIntroducerEnabled(s, list)));
+
+  const value = (src: DiscoverySource): number => {
+    const coverage = stats.coverage[src] ?? 0;
+    const first = stats.firstSeenBySource[src] ?? 0;
+    const fp = stats.falsePositive[src] ?? 0;
+    const spend = stats.spend[src] ?? 0;
+    const a = stats.availability[src];
+    const avail = a && a.total > 0 ? a.score : 0.5; // unprobed → neutral
+    return coverage * 1 + first * 2 + avail * 8 - fp * 3 - spend * 0.05;
+  };
+
+  const measuredOrder = ALL_SOURCES
+    .filter((s) => (stats.coverage[s] ?? 0) > 0 || (stats.availability[s]?.total ?? 0) > 0)
+    .sort((a, b) => value(b) - value(a));
+
+  const measuredPrimary = measuredOrder.length > 0 ? measuredOrder[0]! : null;
+
+  const topK = new Set(measuredOrder.slice(0, Math.max(1, Math.ceil(measuredOrder.length / 3))));
+  // Promote: top performers that are currently disabled.
+  const promote = measuredOrder.filter((s) => topK.has(s) && !enabledSet.has(s));
+  // Demote: bottom performers that are currently enabled (and below the top tier).
+  const demote = measuredOrder.filter((s) => !topK.has(s) && enabledSet.has(s));
+
+  // Configured primary = highest-value source that is enabled.
+  const configuredPrimary = measuredOrder.find((s) => enabledSet.has(s)) ?? null;
+  // Contradict: an allowlist is set but excludes the measured primary → the config
+  // and the empirical leader disagree ("measure, don't hand-pick").
+  const contradict = !!measuredPrimary && !enabledSet.has(measuredPrimary);
+
+  return { measuredPrimary, measuredOrder, promote, demote, contradict, configuredPrimary, enabledNow };
+}
+
 /** Process-wide singleton for the screening cycle. */
 export const globalCandidateRegistry = new CandidateRegistry();

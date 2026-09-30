@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CandidateRegistry, isIntroducerEnabled } from '../src/discovery/discovery-registry.js';
+import { CandidateRegistry, isIntroducerEnabled, proposeIntroducers } from '../src/discovery/discovery-registry.js';
 
 describe('isIntroducerEnabled (DISCOVERY_INTRODUCERS gate)', () => {
   it('enables every feed when the env list is unset (back-compat)', () => {
@@ -112,5 +112,38 @@ describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
     expect(reg.availabilityOf('gecko' as any)).toBeNull(); // never probed
     const s = reg.stats();
     expect(s.availability['solana-rpc']).toEqual({ ok: 2, total: 3, score: 2 / 3 });
+  });
+
+  it('6.7 — proposes an allowlist from measured stats and flags contradiction', () => {
+    const reg = new CandidateRegistry();
+    // gecko is the measured star (high coverage + first-seen + healthy).
+    reg.observe({ chain: 'base', tokenAddress: '0xa', source: 'gecko', at: 1000 });
+    reg.observe({ chain: 'base', tokenAddress: '0xb', source: 'gecko', at: 1100 });
+    reg.observe({ chain: 'base', tokenAddress: '0xc', source: 'ankr', at: 1200 });
+    reg.observe({ chain: 'base', tokenAddress: '0xd', source: 'ankr', at: 1300 });
+    reg.recordAvailability('gecko', true);
+    reg.recordAvailability('gecko', true);
+    reg.recordAvailability('ankr', false);
+    // Config allows only cmc (measured nothing) — contradicts the measured primary.
+    const p = proposeIntroducers(reg.stats(), 'cmc');
+    expect(p.measuredPrimary).toBe('gecko');
+    expect(p.contradict).toBe(true);
+    expect(p.configuredPrimary).toBeNull(); // cmc measured nothing → not ranked/enabled
+    expect(p.enabledNow).toEqual(['cmc']);
+    // promote = high-value sources not enabled (only the top tier here).
+    expect(p.promote).toContain('gecko');
+    expect(p.demote).toEqual([]); // ankr (positive) isn't bottom-tier enough to demote and isn't enabled
+  });
+
+  it('6.7 — no contradiction when config matches the measured primary', () => {
+    const reg = new CandidateRegistry();
+    reg.observe({ chain: 'base', tokenAddress: '0xa', source: 'gecko', at: 1000 });
+    reg.observe({ chain: 'base', tokenAddress: '0xb', source: 'gecko', at: 1100 });
+    reg.recordAvailability('gecko', true);
+    const p = proposeIntroducers(reg.stats(), 'gecko');
+    expect(p.measuredPrimary).toBe('gecko');
+    expect(p.configuredPrimary).toBe('gecko');
+    expect(p.contradict).toBe(false);
+    expect(p.promote).not.toContain('gecko'); // already enabled
   });
 });
