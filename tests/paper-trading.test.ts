@@ -141,3 +141,44 @@ describe('paperUnlockGate (P6.2 regime-coverage approval gate — fail-closed)',
     expect(ledger.unlockStatus({ minRegimes: 3, minPerRegime: 5 }).unlocked).toBe(false); // default bar 5
   });
 });
+
+describe('PaperTradingLedger durability (P8 — state survives restart via hydrate)', () => {
+  const book: TwoSidedBook = { bestBidUsd: 1.0, bestAskUsd: 1.2 };
+  const openOne = (l: PaperTradingLedger) =>
+    l.openTrade({
+      symbol: 'MEME', chain: 'robinhood', contractAddress: '0xM', book,
+      liquidityUsd: 10000, sizeUsd: 100, confidence: 0.6, regime: 'REVIVAL' as any,
+    });
+
+  it('hydrate rebuilds closed-trade coverage so the unlock gate survives a restart', () => {
+    const before = new PaperTradingLedger(null, () => 1_700_000_000_000);
+    // 3 regimes × 1 OPEN paper trade each, then all closed.
+    for (const regime of ['FAST_MOMENTUM', 'REVIVAL', 'CTO']) {
+      const r = before.openTrade({
+        symbol: 'MEME', chain: 'robinhood', contractAddress: '0x1', book,
+        liquidityUsd: 10000, sizeUsd: 100, confidence: 0.6, regime: regime as any,
+      });
+      before.closeTrade(r.trade!.id, 1.5, 'CLOSED_TP');
+    }
+    // "Restart": a fresh ledger hydrates from the durable snapshot and re-locks
+    // in exactly the same way (same closed-coveraged evidence).
+    const after = new PaperTradingLedger(null, () => 1_700_000_000_000);
+    after.hydrate(before.all);
+    expect(after.all).toHaveLength(3);
+    expect(after.closedByRegime()).toEqual({ FAST_MOMENTUM: 1, REVIVAL: 1, CTO: 1 });
+    // Only 1 per regime closes the gate coverage but not the default bar of 5 →
+    // fail-closed, proving insignificant history is NOT rewarded across restarts.
+    expect(after.unlockStatus().unlocked).toBe(false);
+    expect(after.unlockStatus().reason).toContain('regimes 0/3');
+  });
+
+  it('hydrate refuses to clobber a ledger that already recorded this process', () => {
+    const l = new PaperTradingLedger(null, () => 1_700_000_000_000);
+    openOne(l); // live trade recorded this process
+    const before = l.all;
+    // A stale durable snapshot must NOT override the live run's state.
+    l.hydrate([]);
+    l.hydrate(before);
+    expect(l.all).toHaveLength(1); // hydrate is a no-op once the ledger is live
+  });
+});

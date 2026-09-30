@@ -16,6 +16,8 @@
  * Pure + deterministic; the only side effects are the injected journal writes.
  */
 
+import fs from 'fs';
+import path from 'path';
 import type { TradeJournalService } from './trade-journal-service.js';
 import { simulateFill, type PoolDepth } from './fill-simulation.js';
 import type { PositionRegime } from '../position/position-manager.js';
@@ -112,6 +114,119 @@ export interface PaperUnlockGateOptions {
   minExpectancyPct?: number;
 }
 
+export const DEFAULT_PAPER_FILE = path.resolve('database', 'paper-trades.jsonl');
+
+/** Durable sink for paper trades — appended on every state change (open + close). */
+export interface PaperTradeIO {
+  append(trade: PaperTrade): void;
+}
+
+/** Resolve the Postgres connection string for the durable paper ledger. */
+function paperPostgresUrl(): string | null {
+  return process.env.DATABASE_URL ?? process.env.POSTGRES_URI ?? process.env.POSTGRES_CONNECTION_STRING ?? null;
+}
+
+/** File-backed PaperTradeIO — one JSON line per state snapshot (JSONL, last-write-wins on load). */
+export function filePaperTradeIO(filePath: string = DEFAULT_PAPER_FILE): PaperTradeIO {
+  return {
+    append: (trade: PaperTrade) => {
+      try {
+        const absolutePath = path.resolve(filePath);
+        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+        fs.appendFileSync(absolutePath, `${JSON.stringify(trade)}\n`, 'utf-8');
+      } catch (error) {
+        console.warn(`[PAPER] failed to append ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  };
+}
+
+/**
+ * P8 — Postgres-backed PaperTradeIO. Upserts each trade by id so the LATEST state
+ * (open or closed) wins on reload. Fail-open: a paused DB never blocks a paper
+ * fill. Lazy pool — no connection until the first append.
+ */
+export function pgPaperTradeIO(url: string = paperPostgresUrl() ?? ''): PaperTradeIO {
+  const dbUrl = url || null;
+  let pool: any = null;
+  let ready = false;
+  const ensurePool = async (): Promise<any> => {
+    if (!dbUrl) return null;
+    if (!pool) {
+      const { default: Pg } = await import('pg');
+      pool = new Pg.Pool({ connectionString: dbUrl, max: 2 });
+    }
+    if (!ready) {
+      try { await pool.query('SELECT 1'); ready = true; } catch { /* retry on next append */ }
+    }
+    return ready ? pool : null;
+  };
+  return {
+    append: (trade: PaperTrade) => {
+      if (!dbUrl) return;
+      void ensurePool()
+        .then((p) =>
+          p?.query(
+            `INSERT INTO paper_trades (id, payload, updated_at) VALUES ($1, $2, $3)
+             ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at`,
+            [trade.id, JSON.stringify(trade), trade.entryTimestamp],
+          ),
+        )
+        .catch(() => { /* fail-open */ });
+    },
+  };
+}
+
+/**
+ * P8 — Load durable paper trades as PaperTrade[]. Reads the Postgres history when a
+ * URL is present, else the JSONL file. Duplicate ids collapse to their last state
+ * (a trade appears once, open→closed). Used to rebuild the ledger on restart.
+ */
+export async function loadPaperTrades(opts?: { url?: string; file?: string }): Promise<PaperTrade[]> {
+  const url = opts?.url ?? paperPostgresUrl();
+  const byId = new Map<string, PaperTrade>();
+  if (url) {
+    try {
+      const { default: Pg } = await import('pg');
+      const pool = new Pg.Pool({ connectionString: url, max: 2 });
+      const { rows } = await pool.query<{ payload: string }>('SELECT payload FROM paper_trades');
+      await pool.end();
+      for (const r of rows) {
+        try { const t = JSON.parse(r.payload) as PaperTrade; byId.set(t.id, t); } catch { /* skip bad row */ }
+      }
+      return [...byId.values()];
+    } catch (err) {
+      console.warn(`[PAPER] failed to load durable trades: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+  }
+  const filePath = path.resolve(opts?.file ?? DEFAULT_PAPER_FILE);
+  try {
+    const text = fs.readFileSync(filePath, 'utf-8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { const t = JSON.parse(line) as PaperTrade; byId.set(t.id, t); } catch { /* skip bad line */ }
+    }
+  } catch { /* no file yet */ }
+  return [...byId.values()];
+}
+
+/**
+ * Create a durable paper ledger: Postgres-backed (with best-effort hydration of the
+ * closed-trade history the unlock gate depends on) when a DB URL is present, else
+ * file/JSONL-backed with no hydration (current behavior).
+ */
+export function createDefaultPaperTradingLedger(journal: TradeJournalService | null): PaperTradingLedger {
+  const url = paperPostgresUrl();
+  const ledger = new PaperTradingLedger(journal, Date.now, url ? pgPaperTradeIO(url) : filePaperTradeIO());
+  if (url) {
+    void loadPaperTrades({ url })
+      .then((ts) => { if (ts.length > 0) ledger.hydrate(ts); })
+      .catch(() => { /* hydration is best-effort */ });
+  }
+  return ledger;
+}
+
 /** Paper ledger — records paper fills as journal entries and gates approval unlock. */
 export class PaperTradingLedger {
   private trades = new Map<string, PaperTrade>();
@@ -119,11 +234,22 @@ export class PaperTradingLedger {
   constructor(
     private readonly journal: TradeJournalService | null,
     private readonly now: () => number = Date.now,
+    private readonly io?: PaperTradeIO,
   ) {}
 
   /** All paper trades (open + closed), in insertion order. */
   get all(): PaperTrade[] {
     return [...this.trades.values()];
+  }
+
+  /**
+   * P8 — rebuild the ledger from a durable trade history after a restart. Applies
+   * only when the ledger is empty this process (no live divergence), so it never
+   * clobbers trades recorded in the current run.
+   */
+  hydrate(trades: PaperTrade[]): void {
+    if (this.trades.size > 0) return;
+    for (const t of trades) this.trades.set(t.id, t);
   }
 
   /**
@@ -158,6 +284,7 @@ export class PaperTradingLedger {
       status: 'OPEN',
     };
     this.trades.set(trade.id, trade);
+    this.io?.append(trade);
 
     try {
       this.journal?.recordTradeEntry({
@@ -198,6 +325,7 @@ export class PaperTradingLedger {
     t.exitPriceUsd = price;
     t.status = status;
     t.realizedPnlPct = ((price - t.entryFillPriceUsd) / t.entryFillPriceUsd) * 100;
+    this.io?.append({ ...t });
 
     try {
       this.journal?.closeTrade(id, price, status, `paper ${status} exit`);
