@@ -1,4 +1,5 @@
 import { normalizeExecutionChainKey, resolveFundingToken } from './execution-registry.js';
+import { validateProviderConfig } from './provider-config.js';
 
 export interface StartupConfigError {
   key: string;
@@ -120,6 +121,13 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): Sta
   }
   if (env.API_ALLOWED_ORIGINS?.split(',').some((origin) => !origin.trim())) {
     errors.push({ key: 'API_ALLOWED_ORIGINS', message: 'cannot contain empty origins' });
+  }
+
+  // 6.9 — provider-config schema: an enabled provider with missing credentials must
+  // fail startup loudly instead of silently yielding no candidates.
+  const provider = validateProviderConfig(env);
+  for (const pe of provider.errors) {
+    if (!errors.some((e) => e.key === pe.key)) errors.push(pe);
   }
 
   return { ok: errors.length === 0, errors };
