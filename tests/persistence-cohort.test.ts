@@ -52,3 +52,36 @@ describe('PersistenceCohort (P5.1 persistent-trader filter)', () => {
     expect(none).toBeNull();
   });
 });
+
+describe('PersistenceCohort 6.8 — recorded surface', () => {
+  const row = (handle: string, source: 'gmgn' | 'fomo' | 'pump', rank: number) => ({
+    handle, source, rank24h: rank, rank7d: rank, rank30d: rank,
+  });
+
+  it('tracks tier-C count and cohort size', () => {
+    const c = new PersistenceCohort();
+    for (const src of ['gmgn', 'fomo', 'pump'] as const) {
+      c.observe(row('tierC', src, 10)); // persistent in all 3 → tier C
+    }
+    c.observe(row('tierA', 'gmgn', 10)); // persistent in 1 → tier A
+    c.observe(row('oneDay', 'gmgn', 10)); // present but only observe once? still tier A
+    const s = c.stats();
+    expect(s.cohortSize).toBe(3);
+    expect(s.tierC).toBe(1);
+    expect(c.tierCounts()).toEqual({ A: 2, B: 0, C: 1 });
+  });
+
+  it('records COHORT_CONVERGENCE event count', () => {
+    const c = new PersistenceCohort();
+    for (const src of ['gmgn', 'fomo', 'pump'] as const) c.observe(row('w1', src, 10));
+    for (const src of ['gmgn', 'fomo', 'pump'] as const) c.observe(row('w2', src, 10));
+    for (const src of ['gmgn', 'fomo', 'pump'] as const) c.observe(row('w3', src, 10));
+    expect(c.stats().convergenceEvents).toBe(0);
+    c.checkConvergence('T', [
+      { handle: 'w1', at: 1000 },
+      { handle: 'w2', at: 1100 },
+      { handle: 'w3', at: 1200 },
+    ], 5 * 60 * 1000);
+    expect(c.stats().convergenceEvents).toBe(1);
+  });
+});

@@ -40,6 +40,8 @@ export class PersistenceCohort {
   private traders = new Map<string, TraderState>();
   /** Recent per-token wallet buys for convergence detection. */
   private tokenBuys = new Map<string, Array<{ handle: string; at: number }>>();
+  /** 6.8 — cumulative COHORT_CONVERGENCE events fired. */
+  private convergenceEvents = 0;
 
   /** Record a leaderboard observation. Present = rank <= 100 in that window. */
   public observe(row: LeaderboardRow): void {
@@ -109,6 +111,7 @@ export class PersistenceCohort {
         const window = sorted.slice(i, j + 1);
         const handles = new Set(window.map((b) => b.handle));
         if (handles.size >= 3 && window.every((b) => this.isPersistent(b.handle))) {
+          this.convergenceEvents += 1; // 6.8 — record the event count
           return { token, wallets: window, at: window[window.length - 1]!.at };
         }
       }
@@ -118,6 +121,25 @@ export class PersistenceCohort {
 
   public size(): number {
     return this.traders.size;
+  }
+
+  /** 6.8 — recorded surface so the trader-intelligence layer's value is measurable. */
+  public stats(): { cohortSize: number; tierC: number; convergenceEvents: number } {
+    let tierC = 0;
+    for (const handle of this.traders.keys()) {
+      if (this.tier(handle) === 'C') tierC += 1;
+    }
+    return { cohortSize: this.traders.size, tierC, convergenceEvents: this.convergenceEvents };
+  }
+
+  /** 6.8 — count of traders per persistence tier (A/B/C). */
+  public tierCounts(): { A: number; B: number; C: number } {
+    const counts = { A: 0, B: 0, C: 0 };
+    for (const handle of this.traders.keys()) {
+      const t = this.tier(handle);
+      if (t === 'A' || t === 'B' || t === 'C') counts[t] += 1;
+    }
+    return counts;
   }
 }
 
