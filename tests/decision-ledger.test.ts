@@ -117,3 +117,57 @@ describe('DecisionLedger grok fail-closed helpers', () => {
     expect(dl.pessimisticFallback('llm-a', false)).toBe('BUY');
   });
 });
+
+describe('DecisionLedger.hydrate (P7 — rebuild state from durable history)', () => {
+  it('rebuilds seq, audit, and send/reconcile outcomes from a replayed event log', () => {
+    const dl = new DecisionLedger();
+    // A past process recorded: a send settled 'confirmed' (seq 5) and another
+    // 'failed' then flipped to 'replaced' (seq 7/8).
+    dl.hydrate([
+      { kind: 'proposed', seq: 1, nonce: 'a' },
+      { kind: 'send', seq: 5, nonce: 'n1', outcome: 'confirmed' },
+      { kind: 'send', seq: 7, nonce: 'n2', outcome: 'failed' },
+      { kind: 'replaced', seq: 8, nonce: 'n2' },
+    ]);
+    expect(dl.audit).toHaveLength(4);
+    expect(dl.reconcileByNonce('n1')).toBe('confirmed');
+    expect(dl.reconcileByNonce('n2')).toBe('replaced');
+    // Next append continues from the replayed seq.
+    const seq = dl.recordProposed(baseProposal);
+    expect(seq).toBe(9);
+  });
+
+  it('a settled nonce from durable history still refuses a different later outcome', () => {
+    const dl = new DecisionLedger();
+    dl.hydrate([{ kind: 'send', seq: 2, nonce: 'n', outcome: 'confirmed' }]);
+    const r = dl.recordSend('n', 'failed');
+    expect(r.recorded).toBe(false);
+    expect(r.state).toBe('replaced');
+    expect(dl.reconcileByNonce('n')).toBe('replaced');
+  });
+
+  it('refuses to clobber a ledger that already recorded events this process', () => {
+    const dl = new DecisionLedger();
+    dl.recordProposed(baseProposal); // live event
+    dl.hydrate([{ kind: 'send', seq: 99, nonce: 'n', outcome: 'confirmed' }]);
+    expect(dl.reconcileByNonce('n')).toBe('unknown'); // not applied
+  });
+
+  it('loadDecisionEvents parses JSONL back into ordered LedgerEvents (file fallback)', async () => {
+    const { loadDecisionEvents } = await import('../src/services/decision-ledger.js');
+    const file = require('path').join(
+      require('os').tmpdir(),
+      `memeland-dl-${Date.now()}.jsonl`,
+    );
+    const { fileDecisionLedgerIO, DecisionLedger } = await import('../src/services/decision-ledger.js');
+    const dl = new DecisionLedger({ io: fileDecisionLedgerIO(file) });
+    dl.recordProposed(baseProposal);
+    dl.recordSend('k', 'confirmed');
+    const evs = await loadDecisionEvents({ file });
+    expect(evs.length).toBeGreaterThanOrEqual(2);
+    expect(evs.every((e) => typeof e.seq === 'number')).toBe(true);
+    const sorted = evs.map((e) => e.seq);
+    expect([...sorted].sort((a, b) => a - b)).toEqual(sorted); // ascending seq
+    await require('fs').promises.rm(file, { force: true });
+  });
+});

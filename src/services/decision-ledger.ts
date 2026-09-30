@@ -222,6 +222,26 @@ export class DecisionLedger {
     return this.sends.get(nonce) ?? 'unknown';
   }
 
+  /**
+   * P7 — rebuild operational state from a durable event history after a restart.
+   * Replays send/replaced outcomes into the `sends` map (so reconcileByNonce is
+   * correct across restarts) and advances seq past the highest replayed event.
+   * Refuses to apply once the process has already recorded events, so it never
+   * clobbers live divergence.
+   */
+  hydrate(events: LedgerEvent[]): void {
+    if (this.events.length > 0 || this.seq > 0) return;
+    const ordered = [...events].sort((a, b) => a.seq - b.seq);
+    let maxSeq = 0;
+    for (const ev of ordered) {
+      if (ev.seq > maxSeq) maxSeq = ev.seq;
+      if (ev.kind === 'send' && ev.nonce) this.sends.set(ev.nonce, ev.outcome as ReconcileState);
+      else if (ev.kind === 'replaced' && ev.nonce) this.sends.set(ev.nonce, 'replaced');
+    }
+    this.seq = maxSeq;
+    if (ordered.length > 0) this.events = ordered.slice();
+  }
+
   /** FLYWHEEL six-checks gate. All pass -> weight = confidence; any fail -> fail-closed 0. */
   resultingWeight(proposal: TradeProposal): WeightResult {
     const chainOk = this.checks.chainSet.includes(proposal.chain);
@@ -308,5 +328,97 @@ export function fileDecisionLedgerIO(filePath: string = DEFAULT_LEDGER_FILE): De
   };
 }
 
-/** Live-process audit ledger used by the shared execution/AUTO path (file-backed JSONL). */
-export const globalDecisionLedger = new DecisionLedger({ io: fileDecisionLedgerIO() });
+/** Resolve a Postgres connection string for the durable decision history. */
+function postgresUrl(): string | null {
+  return process.env.DATABASE_URL ?? process.env.POSTGRES_URI ?? process.env.POSTGRES_CONNECTION_STRING ?? null;
+}
+
+/**
+ * P7 — Postgres-backed DecisionLedgerIO. Appends each event as one JSONB row.
+ * Fail-open: a DB failure degrades silently (the in-process audit still holds)
+ * so a paused Postgres never blocks a decision. Lazy pool, like the observation
+ * store — no connection is opened until the first append.
+ */
+export function pgDecisionLedgerIO(url: string = postgresUrl() ?? ''): DecisionLedgerIO {
+  const dbUrl = url || null;
+  let pool: any = null;
+  let ready = false;
+  const ensurePool = async (): Promise<any> => {
+    if (!dbUrl) return null;
+    if (!pool) {
+      const { default: Pg } = await import('pg');
+      pool = new Pg.Pool({ connectionString: dbUrl, max: 2 });
+    }
+    if (!ready) {
+      try { await pool.query('SELECT 1'); ready = true; } catch { /* leave unready, retry on next append */ }
+    }
+    return ready ? pool : null;
+  };
+  return {
+    append: (line: string) => {
+      if (!dbUrl) return;
+      void ensurePool()
+        .then((p) =>
+          p?.query('INSERT INTO decision_events (payload, created_at) VALUES ($1, $2)', [line, Date.now()]),
+        )
+        .catch(() => { /* fail-open */ });
+    },
+  };
+}
+
+/**
+ * P7 — Load durable decision events as LedgerEvent[], ordered by the ledger's own
+ * monotonically-increasing seq. Reads the Postgres history when a URL is present,
+ * else falls back to the JSONL file. Used to rebuild operational state on restart.
+ */
+export async function loadDecisionEvents(opts?: { url?: string; file?: string }): Promise<LedgerEvent[]> {
+  const url = opts?.url ?? postgresUrl();
+  const events: LedgerEvent[] = [];
+  if (url) {
+    try {
+      const { default: Pg } = await import('pg');
+      const pool = new Pg.Pool({ connectionString: url, max: 2 });
+      const { rows } = await pool.query<{ payload: string }>(
+        'SELECT payload FROM decision_events',
+      );
+      await pool.end();
+      for (const r of rows) {
+        try { events.push(JSON.parse(r.payload) as LedgerEvent); } catch { /* skip malformed row */ }
+      }
+      events.sort((a, b) => a.seq - b.seq);
+      return events;
+    } catch (err) {
+      console.warn(`[DECISION LEDGER] failed to load durable events: ${err instanceof Error ? err.message : String(err)}`);
+      return events;
+    }
+  }
+  const filePath = path.resolve(opts?.file ?? DEFAULT_LEDGER_FILE);
+  try {
+    const text = fs.readFileSync(filePath, 'utf-8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { events.push(JSON.parse(line) as LedgerEvent); } catch { /* skip malformed line */ }
+    }
+  } catch { /* no file yet */ }
+  events.sort((a, b) => a.seq - b.seq);
+  return events;
+}
+
+/**
+ * Create the default global ledger: Postgres-backed when a DB URL is present (and
+ * best-effort rebuilds operational state from durable history on restart), else
+ * file/JSONL-backed with no hydration (current behavior).
+ */
+export function createGlobalDecisionLedger(): DecisionLedger {
+  const url = postgresUrl();
+  const ledger = new DecisionLedger({ io: url ? pgDecisionLedgerIO(url) : fileDecisionLedgerIO() });
+  if (url) {
+    void loadDecisionEvents({ url })
+      .then((evs) => { if (evs.length > 0) ledger.hydrate(evs); })
+      .catch(() => { /* hydration is best-effort */ });
+  }
+  return ledger;
+}
+
+/** Live-process audit ledger used by the shared execution/AUTO path. */
+export const globalDecisionLedger = createGlobalDecisionLedger();
