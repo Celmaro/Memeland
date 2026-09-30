@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { canonicalEntityKey } from '../discovery/canonical-key.js';
 import { atomicWriteJsonSync } from '../storage/atomic-file-store.js';
 import { StateMachine, type StateTransitions } from '../lifecycle/state-machine.js';
 
@@ -201,11 +202,9 @@ const CURRENT_VERSION = 1;
 const MAX_EVENTS = 10000;
 const MAX_OBSERVATIONS = 10000;
 
-/** Canonical identity key — chain + address lowercased, whitespace-trimmed. */
+/** Canonical identity key — chain + address, normalized (lowercased/trimmed). */
 export function opportunityIdFor(chain: string, contractAddress: string): string {
-  const c = String(chain || '').trim().toLowerCase();
-  const a = String(contractAddress || '').trim().toLowerCase();
-  return `${c}:${a}`;
+  return canonicalEntityKey(chain, contractAddress);
 }
 
 export class OpportunityLedger {
