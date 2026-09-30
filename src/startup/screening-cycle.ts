@@ -20,6 +20,7 @@ import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { sellabilityConfigured } from '../services/execution-gates.js';
 import type { PaperTradingLedger } from '../services/paper-trading.js';
 import { bookFromMid } from '../services/paper-trading.js';
+import { globalPassReceiptLedger, type PassReceipt } from '../services/pass-receipt.js';
 
 /** Cycle cadence (default 5 min) — used by the stale-gate hours calculation. */
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
@@ -193,6 +194,27 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
     // if memeStats.prefiltered=0, every reader of the log can see "prefilter
     // is the upstream dead end" without running the 7-bucket checklist in their head.
     console.log(`[FUNNEL] cycle: agents=${hub.getActiveDomains().join('+')} meme.scan=${memeStats.scanned} meme.prefilter=${memeStats.prefiltered} meme.emit=${memeStats.emitted} beforeGate=${preGateCount} afterGate=${postGateCount} (cumulative: ${JSON.stringify(stateStore.getFunnelStats()['meme-robinhood'] || {})})`);
+
+    // 6.1 — immutable per-pass audit receipt: "did the bot fire" becomes a
+    // queryable record, not a log-grep. Fail-open (the sink never throws).
+    try {
+      const receipt: PassReceipt = {
+        at: new Date().toISOString(),
+        domains: hub.getActiveDomains(),
+        chains: memeChains,
+        candidateCountBySource: { discovery: memeStats.scanned },
+        candidatesNormalized: memeStats.prefiltered,
+        gate: {
+          beforeGate: preGateCount,
+          afterGate: postGateCount,
+          rejectedByGate: Math.max(0, preGateCount - postGateCount),
+          fired: dispatchedPayloads.map((d) => d.channelName),
+        },
+      };
+      globalPassReceiptLedger.record(receipt);
+    } catch (receiptErr: any) {
+      console.warn(`[PASS RECEIPT] write failed (non-fatal): ${receiptErr.message}`);
+    }
 
     // #6 stale-gate detector: sustained afterGate=0 is the "fired=0 across
     // deploys ⇒ diagnostic report, not another patch" norm automated. Logs on
