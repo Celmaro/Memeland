@@ -101,4 +101,16 @@ describe('CandidateRegistry (P3.1 per-source firstSeen + latency)', () => {
     reg.markDead('sol:0xb');
     expect(reg.stats().falsePositive['solana-rpc']).toBe(2);
   });
+
+  it('6.3 — records source availability and reflects it in stats', () => {
+    const reg = new CandidateRegistry();
+    expect(reg.availabilityOf('solana-rpc' as any)).toBeNull();
+    reg.recordAvailability('solana-rpc' as any, true);
+    reg.recordAvailability('solana-rpc' as any, true);
+    reg.recordAvailability('solana-rpc' as any, false);
+    expect(reg.availabilityOf('solana-rpc' as any)).toBeCloseTo(2 / 3);
+    expect(reg.availabilityOf('gecko' as any)).toBeNull(); // never probed
+    const s = reg.stats();
+    expect(s.availability['solana-rpc']).toEqual({ ok: 2, total: 3, score: 2 / 3 });
+  });
 });

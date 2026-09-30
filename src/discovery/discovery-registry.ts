@@ -95,6 +95,8 @@ export interface DiscoveryStats {
   spend: Partial<Record<DiscoverySource, number>>;
   /** Candidates later marked dead whose firstSource was this source. */
   falsePositive: Partial<Record<DiscoverySource, number>>;
+  /** 6.3 — source-health availability: ok/total probes and a rolling 0..1 score. */
+  availability: Partial<Record<DiscoverySource, { ok: number; total: number; score: number }>>;
 }
 
 export class CandidateRegistry {
@@ -107,6 +109,8 @@ export class CandidateRegistry {
   private spendBySource = new Map<DiscoverySource, number>();
   /** Candidates marked dead whose firstSource was this source. */
   private fpBySource = new Map<DiscoverySource, number>();
+  /** 6.3 — rolling availability probes per source (ok/total). */
+  private availability = new Map<DiscoverySource, { ok: number; total: number }>();
 
   private id(chain: string, tokenAddress: string): string {
     return `${chain}:${tokenAddress.toLowerCase()}`;
@@ -176,12 +180,13 @@ export class CandidateRegistry {
     }
     const sources = new Set<DiscoverySource>([
       ...this.coverage.keys(), ...this.sightings.keys(), ...this.spendBySource.keys(),
-      ...this.fpBySource.keys(), ...Object.keys(firstSeenBySource) as DiscoverySource[],
+      ...this.fpBySource.keys(), ...this.availability.keys(), ...Object.keys(firstSeenBySource) as DiscoverySource[],
     ]);
     const coverage: Partial<Record<DiscoverySource, number>> = {};
     const dupRate: Partial<Record<DiscoverySource, number>> = {};
     const spend: Partial<Record<DiscoverySource, number>> = {};
     const falsePositive: Partial<Record<DiscoverySource, number>> = {};
+    const availability: Partial<Record<DiscoverySource, { ok: number; total: number; score: number }>> = {};
     for (const src of sources) {
       const cov = this.coverage.get(src) ?? 0;
       const sig = this.sightings.get(src) ?? 0;
@@ -189,8 +194,32 @@ export class CandidateRegistry {
       dupRate[src] = sig > 0 ? (sig - cov) / sig : 0;
       spend[src] = this.spendBySource.get(src) ?? 0;
       falsePositive[src] = this.fpBySource.get(src) ?? 0;
+      const a = this.availability.get(src);
+      availability[src] = a
+        ? { ok: a.ok, total: a.total, score: a.total > 0 ? a.ok / a.total : 0 }
+        : { ok: 0, total: 0, score: 0 };
     }
-    return { totalCandidates, firstSeenBySource, coverage, dupRate, spend, falsePositive };
+    return { totalCandidates, firstSeenBySource, coverage, dupRate, spend, falsePositive, availability };
+  }
+
+  /**
+   * 6.3 — record one source-health probe. `ok=true` for an endpoint that
+   * responded, false for a failure/degradation. Rolls into the availability score
+   * so promote/demote is robust to "source was down this week," not only
+   * "source was first-seen early."
+   */
+  public recordAvailability(source: DiscoverySource, ok: boolean): void {
+    const a = this.availability.get(source) ?? { ok: 0, total: 0 };
+    a.total += 1;
+    if (ok) a.ok += 1;
+    this.availability.set(source, a);
+  }
+
+  /** 6.3 — rolling availability score 0..1 for a source, or null when no probes yet. */
+  public availabilityOf(source: DiscoverySource): number | null {
+    const a = this.availability.get(source);
+    if (!a || a.total === 0) return null;
+    return a.ok / a.total;
   }
 
   /** Empirical primary discovery source across all candidates (first-seen counts). */
