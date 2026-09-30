@@ -35,6 +35,7 @@ import { GoPlusSecurityService } from '../../services/goplus-security-service.js
 import { CoinStatsRiskService } from '../../services/coinstats-risk.js';
 import { BlockscoutFeed, blockscoutFeedEnabled } from '../../adapters/blockscout-feed.js';
 import { JsonRpcWsTape } from '../../adapters/jsonrpc-ws-tape.js';
+import { PumpDevTape } from '../../adapters/pumpdev-tape.js';
 import { RpcVerify } from '../../services/onchain/rpc-verify.js';
 import { globalSourceQuota, classifyHttpFailure, statusOf } from '../../services/source-quota.js';
 import type { BuyEvent } from '../../services/flow-convergence.js';
@@ -220,6 +221,12 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
    */
   private jsonRpcWsTapes: JsonRpcWsTape[];
   /**
+   * PumpDev Sol pre-graduation WS tape (launch + whale-trade recall). Wired after
+   * construction (index.ts). Drains recentLaunches() as a Sol introducer — the
+   * paid counterpart to the free own-tape `jsonRpcWsTapes` pump.fun mints.
+   */
+  private pumpDevTape: PumpDevTape | null = null;
+  /**
    * Phase 3 — DiscoveryCoordinator: owns candidate-merge priority, allowlist +
    * cooldown, and fail-soft across all discovery emitters so the agent stops
    * knowing how each provider works. Built in the constructor from this agent's
@@ -351,6 +358,8 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
     reg('fomo', (ch) => this.collectFomoCandidates(ch));
     // WS-tape pump.fun mints promote under the solana-rpc introducer.
     reg('ws-tape', (ch) => this.collectJsonRpcWsTapeCandidates(ch), 'solana-rpc');
+    // PumpDev Sol pre-graduation tape promotes under the pumpdev introducer.
+    reg('pumpdev', (ch) => this.collectPumpDevCandidates(ch), 'pumpdev');
     return c;
   }
 
@@ -507,6 +516,45 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
    */
   public injectJsonRpcWsTapes(tapes: JsonRpcWsTape[]): void {
     this.jsonRpcWsTapes = tapes;
+  }
+
+  /** PumpDev tape injection (wired after construction, like the JsonRpcWsTape). */
+  public injectPumpDevTape(tape: PumpDevTape | null): void {
+    this.pumpDevTape = tape;
+  }
+
+  /**
+   * Drain the injected PumpDev WS tape's `recentLaunches()` as a Sol
+   * pre-graduation introducer (mint pubkeys). Guarded by PUMPDEV_FEED_ENABLED=true
+   * + DISCOVERY_INTRODUCERS allowlist + an injected tape. Fail-open: empty.
+   * The ring buffer dedupes; duplicate mints across drains collapse downstream.
+   */
+  public async collectPumpDevCandidates(chain: Chain = 'robinhood'): Promise<GMGNRawToken[]> {
+    if (chain !== 'sol') return [];
+    if (process.env.PUMPDEV_FEED_ENABLED !== 'true') return [];
+    if (!isIntroducerEnabled('pumpdev', process.env.DISCOVERY_INTRODUCERS)) return [];
+    if (!this.pumpDevTape) return [];
+    try {
+      const seen = new Set<string>();
+      const out: GMGNRawToken[] = [];
+      for (const evt of this.pumpDevTape.recentLaunches(200)) {
+        const mint = evt.mint;
+        if (!mint || seen.has(mint)) continue;
+        seen.add(mint);
+        out.push(
+          normalizeDexToken(
+            chain,
+            { address: mint, chainId: 0, symbol: evt.symbol ?? '', priceUsd: 0, liquidityUsd: 0, volume24hUsd: 0 },
+            'pumpdev',
+          ),
+        );
+      }
+      if (out.length > 0) console.log(`[MEME AGENT] pumpdev discovery: ${out.length} pre-graduation launches from pumpdev WS.`);
+      return out;
+    } catch (err: any) {
+      console.warn(`[MEME AGENT] pumpdev candidates failed (skipped): ${err.message}`);
+      return [];
+    }
   }
 
   /**

@@ -462,6 +462,11 @@ const pumpDevTape =
     : null;
 pumpDevTape?.start();
 
+// Strategic move — own-tape discovery: hand the PumpDev Sol pre-graduation WS
+// tape to the screening agent so `recentLaunches()` mints feed the funnel (the
+// paid counterpart to the own WS tape's pump.fun mints).
+robinhoodScreeningAgent.injectPumpDevTape(pumpDevTape);
+
 // Generic JSON-RPC WS realtime tape housing (ZAN / OnFinality / PublicNode / dRPC
 // WS). Reads `JSONRPC_WS_TAPES` = base64 of `{ chain: [wsUrl, ...] }` (base64 keeps
 // the CLI `-k` flag safe — no embedded quotes/commas). Each host gets its own
