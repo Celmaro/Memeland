@@ -190,15 +190,31 @@ export class SolanaRpcDiscoveryFeed implements MarketDataProvider {
     } catch { /* persist failure never blocks discovery */ }
   }
 
-  private rpc(method: string, params: unknown[]): Promise<unknown> {
-    const url = this.url();
-    return this.fetch(url, {
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    }).then(async (res) => {
-      if (!res.ok) throw new Error(`solana-rpc ${method} HTTP ${res.status}`);
-      const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
-      if (data.error) throw new Error(`solana-rpc ${method}: ${data.error.message}`);
-      return data.result;
-    });
+  private async rpc(method: string, params: unknown[]): Promise<unknown> {
+    // RPC failover: when riding the failover POOL (no explicit rpcUrl) a failing
+    // host is demoted via reportRPCFailure and retried ONCE, so a dead Sol RPC
+    // rotates to another host in the pool MID-CYCLE — not just at the next 5-min
+    // probe. Explicit rpcUrl = single host, one attempt. Bounded + fail-soft:
+    // callers catch and return [] (never blocks discovery).
+    const attempts = this.rpcUrl ? 1 : 2;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const url = this.url();
+      if (!url) break;
+      try {
+        const res = await this.fetch(url, {
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        });
+        if (!res.ok) throw new Error(`solana-rpc ${method} HTTP ${res.status}`);
+        const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
+        if (data.error) throw new Error(`solana-rpc ${method}: ${data.error.message}`);
+        return data.result;
+      } catch (err) {
+        lastErr = err;
+        // Demote this host so the next this.url() resolves to a DIFFERENT Sol RPC.
+        globalRPCFailoverManager.reportRPCFailure('sol', url);
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(`solana-rpc ${method} failed`);
   }
 }

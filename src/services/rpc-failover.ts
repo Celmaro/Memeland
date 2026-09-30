@@ -177,12 +177,22 @@ export class RPCFailoverManager {
               return;
             }
             globalRateLimiter.recordSuccess(s.url);
-            // Even a 2xx can be a JSON-RPC error (e.g. "method unsupported"); treat those as unhealthy.
+            // Even a 2xx can be a JSON-RPC error (e.g. "method unsupported" or a
+            // host answering on a different chain's API); treat those as unhealthy.
+            // EVM chains validate eth_chainId; SOL validates a real getVersion.
             let healthy = res.ok;
-            if (healthy && CHAIN_RPC_SPEC[chain].chainId) {
+            if (healthy) {
               try {
-                const json = (await res.json()) as { result?: string; error?: { code?: number } };
-                healthy = json.result === CHAIN_RPC_SPEC[chain].chainId;
+                const json = (await res.json()) as { result?: unknown; error?: { code?: number } };
+                const spec = CHAIN_RPC_SPEC[chain];
+                if (spec.chainId) {
+                  healthy = json.result === spec.chainId;
+                } else if (chain === 'sol') {
+                  const r = json.result as { 'solana-core'?: unknown } | null | undefined;
+                  healthy = !!r && typeof r['solana-core'] === 'string' && (r['solana-core'] as string).length > 0;
+                } else {
+                  healthy = false; // unknown chain with no chainId spec → unusable
+                }
               } catch {
                 healthy = false;
               }
