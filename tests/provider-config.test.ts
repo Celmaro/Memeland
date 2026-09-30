@@ -41,7 +41,11 @@ describe('validateProviderConfig (6.9 — typed provider schema with boot valida
   });
 
   it('assertProviderConfig throws with the failing keys', () => {
-    expect(() => assertProviderConfig({ ROUTESCAN_FEED_ENABLED: 'true' })).toThrow(/ROUTESCAN_API_KEY/);
+    // Routescan is keyless-capable: enabling it WITHOUT a key is valid (the adapter
+    // falls back to the free tier). Only genuinely keyed providers fail fast.
+    expect(() => assertProviderConfig({ ROUTESCAN_FEED_ENABLED: 'true' })).not.toThrow();
     expect(() => assertProviderConfig({})).not.toThrow();
+    // A truly keyed provider (FOMO) still fails fast when enabled without its key.
+    expect(() => assertProviderConfig({ FOMO_FEED_ENABLED: 'true' })).toThrow(/FOMO_API_KEY/);
   });
 });

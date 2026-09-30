@@ -44,7 +44,9 @@ export const PROVIDER_SCHEMA: Record<string, ProviderSpec> = {
   routescan: {
     label: 'Routescan (on-chain token/tx)',
     enableEnv: 'ROUTESCAN_FEED_ENABLED',
-    requiredKeys: ['ROUTESCAN_API_KEY'],
+    // Keyless-capable (live-verified 2026-09-27: free tier needs no key; a set
+    // ROUTESCAN_API_KEY only raises the RPS quota). So enabling must NOT hard-fail
+    // boot without a key — the adapter falls back to the keyless tier.
   },
   cmcDex: {
     label: 'CoinMarketCap / Dex filter feed',
