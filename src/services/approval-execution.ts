@@ -27,7 +27,11 @@ export interface ExecuteMemeBuyOptions {
    *  the synthetic liquidity over/under-stated real pool depth and made the
    *  impact proof meaningless). When absent, the fill-sim fails closed. */
   liquidityUsd?: number;
-  amountEth: number;
+  /** CANONICAL order size in USD notional (NOT an ETH amount). This is the one
+   *  quantity used by risk, sizer, fill-sim, cost, governance, LI.FI and the
+   *  journal. Native-coin amount is derived only at the raw-EVM adapter edge.
+   *  (Audit fix: previously `amountEth * entryPriceUsd` produced fake USD.) */
+  amountUsd: number;
   confidence: number;
   thesis: string;
   /** Journal strategy label — AUTO gate vs one-click operator approve differ. */
@@ -86,8 +90,10 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     symbol: opts.symbol,
     chain,
     side: 'BUY',
-    sizeEth: opts.amountEth,
-    maxSizeEth: opts.amountEth,
+    sizeEth: opts.amountUsd,
+    maxSizeEth: opts.amountUsd,
+    sizeUsd: opts.amountUsd,
+    maxSizeUsd: opts.amountUsd,
     confidence: confidenceToFraction(opts.confidence || 0),
   };
   opts.ledger?.recordProposed(proposal);
@@ -103,9 +109,9 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     chain,
     side: 'BUY',
     tokenAddress: opts.contractAddress || '',
-    amountUsd: opts.amountEth * (opts.entryPriceUsd || 0),
-    maxAmountUsd: opts.amountEth * (opts.entryPriceUsd || 0),
-    quoteUsd: opts.entryPriceUsd * (opts.amountEth || 0),
+    amountUsd: opts.amountUsd,
+    maxAmountUsd: opts.amountUsd,
+    quoteUsd: opts.amountUsd,
     slippageTolerancePct: 1.5,
     confidence: proposal.confidence,
     timestamp: new Date().toISOString(),
@@ -138,13 +144,16 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   }
 
   // ── Q07 multi-constraint sizing (USD notional clamp) ────────────────────
-  const desiredUsd = opts.amountEth * (opts.entryPriceUsd || 0);
-  let effectiveAmountEth = opts.amountEth;
-  if (opts.sizer) {
-    const s = opts.sizer.clamp(desiredUsd);
-    if (!s.allowed) return reject('rejected', `sizing gate refused: ${s.reason}`);
-    if (s.amountUsd > 0 && opts.entryPriceUsd > 0) effectiveAmountEth = s.amountUsd / opts.entryPriceUsd;
-  }
+  // Canonical USD notional. The sizer's output (NOT the input) is what the
+  // fill-sim / cost / governance / LI.FI / journal all consume downstream —
+  // otherwise the gates wouldn't guard the amount actually submitted.
+  const desiredUsd = opts.amountUsd;
+  const sized = opts.sizer ? opts.sizer.clamp(desiredUsd) : { allowed: true, amountUsd: desiredUsd };
+  if (!sized.allowed) return reject('rejected', `sizing gate refused: ${sized.reason}`);
+  const effectiveUsd = sized.amountUsd > 0 ? sized.amountUsd : desiredUsd;
+  // Legacy raw-EVM branch only: derive the adapter's input units from the sized
+  // notional at the token price. LI.FI never sees this — it gets effectiveUsd.
+  const effectiveAmountEth = opts.entryPriceUsd > 0 ? effectiveUsd / opts.entryPriceUsd : effectiveUsd;
 
   // ── Q08 fill simulation (impact / liquidity proof, fail-closed) ─────────
   lifecycle('approved'); // non-sim approval gates passed (safety/sellability/sizer)
@@ -155,20 +164,20 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
     if (opts.liquidityUsd === undefined || opts.liquidityUsd <= 0) {
       return reject('rejected', `fill-sim gate refused: unknown pool liquidity (fail-closed).`);
     }
-    const s = opts.fillSim.check({ amountUsd: desiredUsd, midPriceUsd: opts.entryPriceUsd, liquidityUsd: opts.liquidityUsd });
+    const s = opts.fillSim.check({ amountUsd: effectiveUsd, midPriceUsd: opts.entryPriceUsd, liquidityUsd: opts.liquidityUsd });
     if (!s.allowed) return reject('rejected', `fill-sim gate refused: ${s.reason} (impact ${s.impactPct.toFixed(1)}%)`);
   }
   lifecycle('simulated');
 
   // ── Q13 cost gate (cumulative fill-cost budget) ─────────────────────────
   if (opts.costGate) {
-    const c = opts.costGate.trySpend(desiredUsd);
+    const c = opts.costGate.trySpend(effectiveUsd);
     if (!c.allowed) return reject('rejected', `cost gate refused: ${c.reason}`);
   }
 
   // ── Q11 execution governance (idempotent reservation + hash-locked receipt) ──
   if (opts.governance) {
-    const payload = JSON.stringify({ chain, token: opts.contractAddress, amountUsd: desiredUsd });
+    const payload = JSON.stringify({ chain, token: opts.contractAddress, amountUsd: effectiveUsd });
     const reserved = opts.governance.reserve({ nonce, payload });
     if (!reserved.reserved) return reject('rejected', `governance reservation refused: ${reserved.reason}`);
     const receipt = opts.governance.issue({ nonce, payload });
@@ -187,7 +196,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
             chain,
             token: opts.contractAddress,
             side: 'buy',
-            amountUsd: desiredUsd,
+            amountUsd: effectiveUsd,
             timeoutMs: 15_000,
           });
           return {
@@ -219,7 +228,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
       chain,
       entryTimestamp: new Date().toISOString(),
       entryPriceUsdOrEth: opts.entryPriceUsd,
-      positionSizeUsd: effectiveAmountEth * (opts.entryPriceUsd || 1),
+      positionSizeUsd: effectiveUsd,
       swarmScore: opts.confidence,
       strategyUsed: opts.strategyUsed || 'approval-approved',
       aiThesisSummary: (opts.thesis || '').slice(0, 200),
@@ -227,7 +236,7 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
       nonce,
       lifecycle: finalState,
       txHash: (execRes as { txHash?: string }).txHash,
-      quoteUsd: desiredUsd,
+      quoteUsd: effectiveUsd,
       expectedOutTokens: undefined,
       failureReason: execRes.error,
     });

@@ -50,14 +50,14 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
       symbol: 'TEST',
       contractAddress: '0xabc',
       entryPriceUsd: 0.5,
-      amountEth: 0.1,
+      amountUsd: 0.1,
       confidence: 85,
       thesis: 'approved by operator',
     });
 
     expect(evm.executeBuyToken).toHaveBeenCalledTimes(1);
     expect(evm.executeBuyToken).toHaveBeenCalledWith(
-      expect.objectContaining({ chain: 'robinhood', tokenAddress: '0xabc', amountEth: 0.1, slippagePercentage: 1.5 }),
+      expect.objectContaining({ chain: 'robinhood', tokenAddress: '0xabc', amountEth: 0.2, slippagePercentage: 1.5 }),
       wallet
     );
     expect(res.success).toBe(true);
@@ -70,7 +70,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
     expect(entry.chain).toBe('robinhood');
     expect(entry.status).toBe('OPEN');
     expect(entry.strategyUsed).toBe('approval-approved');
-    expect(entry.positionSizeUsd).toBeCloseTo(0.05); // 0.1 ETH * $0.5
+    expect(entry.positionSizeUsd).toBeCloseTo(0.1); // canonical USD notional (P0)
   });
 
   it('records proposed and confirmed send events on the decision ledger', async () => {
@@ -85,7 +85,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
       symbol: 'TEST',
       contractAddress: '0xabc',
       entryPriceUsd: 0.5,
-      amountEth: 0.1,
+      amountUsd: 0.1,
       confidence: 85,
       thesis: '',
     });
@@ -114,7 +114,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
       symbol: 'TEST',
       contractAddress: '0xabc',
       entryPriceUsd: 0.5,
-      amountEth: 0.1,
+      amountUsd: 0.1,
       confidence: 85,
       thesis: '',
     });
@@ -141,7 +141,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
       symbol: 'TOKEN',
       contractAddress: '0x/abc-not-an-evm-address',
       entryPriceUsd: 1,
-      amountEth: 0.1,
+      amountUsd: 0.1,
       confidence: 80,
       thesis: 'cross-chain signal',
     });
@@ -167,7 +167,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
       symbol: 'TEST',
       contractAddress: '0xabc',
       entryPriceUsd: 0.5,
-      amountEth: 0.1,
+      amountUsd: 0.1,
       confidence: 85,
       thesis: 'robinhood label',
     });
@@ -187,7 +187,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const onExecuted = vi.fn();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted,
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           safety: { isSafe: () => ({ safe: false, reason: 'no safe-config — fail-closed' }) },
         });
         expect(res.success).toBe(false);
@@ -202,7 +202,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           safety: { isSafe: () => ({ safe: true, reason: 'safe v1' }) },
         });
         expect(res.success).toBe(true);
@@ -214,7 +214,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const onExecuted = vi.fn();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted,
-          symbol: 'TEST', contractAddress: '0xhnypot', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xhnypot', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           sellability: { check: async () => ({ sellable: false, reason: 'cannot sell — fail-closed' }) },
         });
         expect(res.success).toBe(false);
@@ -227,7 +227,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           sellability: { check: async () => ({ sellable: true, reason: 'quote ok' }) },
         });
         expect(res.success).toBe(true);
@@ -245,7 +245,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         };
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           txLock,
         });
         expect(res.success).toBe(true);
@@ -262,7 +262,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const txLock = { acquire: vi.fn(async () => () => { released += 1; }) };
         await expect(executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           txLock,
         })).rejects.toThrow('rpc down');
         expect(released).toBe(1);
@@ -274,7 +274,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           sizer: { clamp: () => ({ allowed: false, amountUsd: 0, reason: 'below floor' }) },
         });
         expect(res.success).toBe(false);
@@ -286,7 +286,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           sizer: { clamp: () => ({ allowed: true, amountUsd: 0.25 }) }, // 0.25 USD → 0.5 ETH
         });
         expect(evm.executeBuyToken).toHaveBeenCalledWith(
@@ -299,7 +299,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           fillSim: { check: () => ({ allowed: false, impactPct: 999, reason: 'zero/illiquid depth' }) },
         });
         expect(res.success).toBe(false);
@@ -314,7 +314,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const check = vi.fn(() => ({ allowed: true, impactPct: 1, reason: 'ok' }));
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           fillSim: { check },
           // NOTE: no liquidityUsd provided
         });
@@ -329,7 +329,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const check = vi.fn(() => ({ allowed: true, impactPct: 1, reason: 'ok' }));
         await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           fillSim: { check },
           liquidityUsd: 25000, // real pool depth from the candidate
         });
@@ -342,7 +342,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           costGate: { trySpend: () => ({ allowed: false, reason: 'budget exhausted' }) },
         });
         expect(res.success).toBe(false);
@@ -354,7 +354,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           governance: { reserve: () => ({ reserved: false, reason: 'nonce already reserved' }), issue: () => ({ valid: true }) },
         });
         expect(res.success).toBe(false);
@@ -366,7 +366,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const { journal, evm, wallet } = makeDeps();
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           governance: { reserve: () => ({ reserved: true }), issue: () => ({ valid: false, reason: 'payload hash mismatch' }) },
         });
         expect(res.success).toBe(false);
@@ -379,7 +379,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const submit = vi.fn().mockResolvedValue({ outcome: 'confirmed', txHash: '0xhash', at: Date.now() });
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           executor: { submit },
         });
         expect(res.success).toBe(true);
@@ -393,7 +393,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
           chain: 'Solana',
-          symbol: 'SOLTOKEN', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'SOLTOKEN', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           executor: { submit },
         });
         expect(res.success).toBe(true);
@@ -407,7 +407,7 @@ describe('executeMemeBuy (shared approve / AUTO fill path)', () => {
         const submit = vi.fn().mockResolvedValue({ outcome: 'timed_out', reason: 'no receipt in window', at: Date.now() });
         const res = await executeMemeBuy({
           evm, wallet, journal, onExecuted: () => {},
-          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountEth: 0.1, confidence: 85, thesis: '',
+          symbol: 'TEST', contractAddress: '0xabc', entryPriceUsd: 0.5, amountUsd: 0.1, confidence: 85, thesis: '',
           executor: { submit },
         });
         expect(res.success).toBe(false);

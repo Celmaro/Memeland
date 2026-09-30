@@ -145,8 +145,8 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
     // Fail-closed: even an operator-approved fill stays behind the risk gate
     // (drawdown cap / kill-switch). Nothing executes if risk says no.
     const autoExec = hub.isAutoExecuteEnabled('meme-robinhood');
-    const amountEth = autoExec.maxTradeAmount || 0.1;
-    const riskCheck = hub.getRiskManager().isTradeAllowed(amountEth);
+    const amountUsd = autoExec.maxTradeAmount || 0.1; // USD notional (canonical)
+    const riskCheck = hub.getRiskManager().isTradeAllowed(amountUsd);
     if (!riskCheck.allowed || globalRiskEngineV2.checkKillSwitchStatus()) {
       await interaction.editReply(
         `🚫 **RISK GATE BLOCKED** approval for \`${approved.symbol}\` — ${riskCheck.allowed ? 'emergency kill-switch active' : riskCheck.reason}`
@@ -166,7 +166,7 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
         contractAddress: approved.contractAddress,
         entryPriceUsd: approved.entryPriceUsd,
         liquidityUsd: approved.liquidityUsd,
-        amountEth,
+        amountUsd,
         confidence: approved.confidence,
         thesis: approved.thesis,
         safety: { isSafe: gateSafety },

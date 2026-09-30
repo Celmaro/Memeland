@@ -430,7 +430,8 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             chain: signalChainKey,
             entryPriceUsd: queuedPrice,
             liquidityUsd: item.payload.liquidityUsd,
-            suggestedSizeUsd: (hub.isAutoExecuteEnabled(autoExecDomain || 'meme-robinhood').maxTradeAmount || 0.1) * (queuedPrice || 1),
+            // P0: maxTradeAmount is USD notional — do NOT scale by token price.
+            suggestedSizeUsd: hub.isAutoExecuteEnabled(autoExecDomain || 'meme-robinhood').maxTradeAmount || 0.1,
             confidence: Number(item.payload.confidenceScore) || 0,
             thesis: (item.rawReason || item.payload.aiThesis || '').slice(0, 300),
           },
@@ -505,7 +506,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
                   contractAddress: item.payload.contractAddress,
                   entryPriceUsd: parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0,
                   liquidityUsd: item.payload.liquidityUsd,
-                  amountEth: autoExec.maxTradeAmount || 0.1,
+                  amountUsd: autoExec.maxTradeAmount || 0.1,
                   confidence: Number(item.payload.confidenceScore) || 0,
                   thesis: item.rawReason || item.payload.aiThesis || '',
                   strategyUsed: 'auto-execute',
@@ -624,7 +625,8 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             chain: chainKey,
             entryPriceUsd: price,
             liquidityUsd: undefined,
-            suggestedSizeUsd: (hub.isAutoExecuteEnabled(`meme-${chainKey}`).maxTradeAmount || 0.1) * (price || 1),
+            // P0: maxTradeAmount is USD notional — do NOT scale by token price.
+            suggestedSizeUsd: hub.isAutoExecuteEnabled(`meme-${chainKey}`).maxTradeAmount || 0.1,
             confidence: 0,
             thesis: `Strategist escalation ${id} -> READY_SMALL_BET`,
           });

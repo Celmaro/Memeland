@@ -135,6 +135,8 @@ export class ApprovalQueueService {
       side: 'BUY',
       sizeEth: price > 0 ? order.suggestedSizeUsd / price : 0,
       maxSizeEth: price > 0 ? order.suggestedSizeUsd / price : 0,
+      sizeUsd: order.suggestedSizeUsd,
+      maxSizeUsd: order.suggestedSizeUsd,
       confidence: confidenceToFraction(order.confidence || 0),
     };
     this.ledger.recordProposed(proposal);

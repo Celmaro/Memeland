@@ -71,8 +71,12 @@ export interface TradeProposal {
   symbol: string;
   chain: string;
   side: 'BUY' | 'SELL';
+  /** Legacy generic size slot (historically ETH-or-token-quantity). Superseded by sizeUsd. */
   sizeEth: number;
   maxSizeEth: number;
+  /** CANONICAL order size in USD notional. Preferred by the size gate when present. */
+  sizeUsd?: number;
+  maxSizeUsd?: number;
   confidence: number;
   liquidityUsd?: number;
 }
@@ -251,9 +255,9 @@ export class DecisionLedger {
       {
         id: 'size',
         label: 'order size within max',
-        passed: proposal.sizeEth <= proposal.maxSizeEth,
-        observed: proposal.sizeEth,
-        limit: proposal.maxSizeEth,
+        passed: (proposal.sizeUsd ?? proposal.sizeEth) <= (proposal.maxSizeUsd ?? proposal.maxSizeEth),
+        observed: proposal.sizeUsd ?? proposal.sizeEth,
+        limit: proposal.maxSizeUsd ?? proposal.maxSizeEth,
       },
       {
         id: 'confidence',
