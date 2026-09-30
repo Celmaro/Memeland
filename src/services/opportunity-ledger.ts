@@ -226,6 +226,16 @@ export class OpportunityLedger {
     }
     this.dbFilePath = filePath || path.join(dbDir, 'opportunity_ledger.json');
     this.loadFromDisk();
+    // P6 — co-locate the ledger's snapshot in Postgres (same durable layer as the
+    // other ledgers). When a DB URL is set, hydrate state from Postgres if the
+    // in-process ledger is still empty, and mirror each save to Postgres.
+    const pgUrl = this.postgresUrl();
+    if (pgUrl) {
+      void this.hydrateFromPostgres()
+        .catch((err: unknown) => {
+          console.warn(`[OPPORTUNITY LEDGER] Postgres hydrate failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
   }
 
   /** Idempotent — returns the existing identity or creates a FIRST_SEEN one. */
@@ -439,6 +449,47 @@ export class OpportunityLedger {
       } as OpportunityLedgerState);
     } catch (err: any) {
       console.error(`[OPPORTUNITY LEDGER ERROR] Failed saving ledger: ${err.message}`);
+    }
+    // P6 — mirror the snapshot to Postgres (fire-and-forget, fail-open).
+    const url = this.postgresUrl();
+    if (url) void this.writeToPostgres(url).catch(() => { /* fail-open */ });
+  }
+
+  private postgresUrl(): string | null {
+    return process.env.DATABASE_URL ?? process.env.POSTGRES_URI ?? process.env.POSTGRES_CONNECTION_STRING ?? null;
+  }
+
+  /** Upsert the full ledger snapshot into Postgres (one row). */
+  private async writeToPostgres(url: string): Promise<void> {
+    const { default: Pg } = await import('pg');
+    const pool = new Pg.Pool({ connectionString: url, max: 2 });
+    await pool.query(
+      `INSERT INTO opportunity_ledger_state (id, payload, updated_at) VALUES ('snapshot', $1, $2)
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at`,
+      [JSON.stringify({ identities: this.identities, observations: this.observations, events: this.events, version: CURRENT_VERSION }), Date.now()],
+    );
+    await pool.end();
+  }
+
+  /** P6 — hydrate the ledger from the Postgres snapshot on boot (ignored once live). */
+  private async hydrateFromPostgres(): Promise<void> {
+    if (Object.keys(this.identities).length > 0) return; // already live
+    const url = this.postgresUrl();
+    if (!url) return;
+    const { default: Pg } = await import('pg');
+    const pool = new Pg.Pool({ connectionString: url, max: 2 });
+    try {
+      const { rows } = await pool.query<{ payload: string }>(
+        `SELECT payload FROM opportunity_ledger_state WHERE id = 'snapshot'`,
+      );
+      if (rows.length > 0 && Object.keys(this.identities).length === 0) {
+        const state = JSON.parse(rows[0]!.payload) as Partial<OpportunityLedgerState>;
+        this.identities = state.identities || {};
+        this.observations = state.observations || [];
+        this.events = state.events || [];
+      }
+    } finally {
+      await pool.end();
     }
   }
 
