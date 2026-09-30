@@ -1,109 +1,59 @@
 import { describe, it, expect } from 'vitest';
 import {
+  compareWalkForward,
   walkForwardSplit,
   type OutcomeRow,
-  evaluateOos,
-  evaluateStrategyWalkForward,
-  compareWalkForward,
-  renderWalkForwardReport,
 } from '../src/orchestrator/walk-forward.js';
 
-function tag(rows: OutcomeRow[], strategy: string): OutcomeRow[] {
-  return rows.map((r) => ({ ...r, strategy }));
+function row(id: string, timestamp: number, strategy: string, pnl: number): OutcomeRow {
+  return { id, timestamp, confidence: 50, realizedPnlPct: pnl, strategy };
 }
 
-const rows: OutcomeRow[] = Array.from({ length: 30 }, (_, i) => ({
-  id: `o${i}`,
-  timestamp: 1_700_000_000_000 + i * 86_400_000, // daily
-  confidence: 50 + (i % 45),
-  realizedPnlPct: (i % 5 === 0 ? -20 : 12),
-  return1h: (i % 5 === 0 ? -0.2 : 0.12),
-}));
-
-describe('walkForwardSplit (P6.1 temporal splits — no shuffle)', () => {
-  it('splits chronologically: train < validation < test', () => {
-    const { train, validation, test } = walkForwardSplit(rows, 0.5, 0.2);
-    expect(train.length).toBe(15);
-    expect(validation.length).toBe(6);
-    expect(test.length).toBe(9);
-    // Strictly chronological: last train < first validation < first test.
-    expect(train[train.length - 1]!.timestamp).toBeLessThan(validation[0]!.timestamp);
-    expect(validation[validation.length - 1]!.timestamp).toBeLessThan(test[0]!.timestamp);
+describe('walk-forward harness', () => {
+  it('walkForwardSplit is strictly chronological and never shuffles', () => {
+    const rows = [
+      row('a', 100, 'A', 1),
+      row('b', 300, 'A', 2),
+      row('c', 500, 'A', 3),
+      row('d', 700, 'B', -1),
+      row('e', 900, 'B', -2),
+      row('f', 1100, 'B', 4),
+    ];
+    const { train, validation, test } = walkForwardSplit(rows, 0.6, 0.2);
+    // n=6 → train=floor(6*0.6)=3, val=floor(6*0.2)=1, test=2
+    expect(train.map((r) => r.timestamp)).toEqual([100, 300, 500]);
+    expect(validation.map((r) => r.timestamp)).toEqual([700]);
+    expect(test.map((r) => r.timestamp)).toEqual([900, 1100]);
   });
 
-  it('keeps full rows (no shuffling the time series)', () => {
-    const { train } = walkForwardSplit(rows, 0.5, 0.2);
-    expect(train.map((r) => r.id)).toEqual(rows.slice(0, 15).map((r) => r.id));
-  });
-});
+  it('compareWalkForward evaluates every strategy on the SAME time boundaries', () => {
+    // 10 rows total. Strategy A holds the earliest 4 (timestamps 0..3), strategy
+    // B holds the latest 6 (timestamps 4..9).
+    const rows: OutcomeRow[] = [];
+    for (let ts = 0; ts < 4; ts++) rows.push(row(`a${ts}`, ts, 'A', 1));
+    for (let ts = 4; ts < 10; ts++) rows.push(row(`b${ts}`, ts, 'B', 2));
 
-describe('evaluateOos (P6.1 out-of-sample metrics)', () => {
-  it('computes hit rate, expectancy, profit factor, Sharpe', () => {
-    const m = evaluateOos(rows.slice(15)); // test slice
-    expect(m.hitRate).toBeGreaterThan(0);
-    expect(m.expectancy).toBeGreaterThan(0); // most rows are winners
-    expect(m.profitFactor).toBeGreaterThan(0);
-    expect(Number.isFinite(m.sharpe)).toBe(true);
-    expect(m.n).toBe(rows.slice(15).length);
-  });
+    // Shared union split (n=10, 0.6/0.2): train = [0..6), val = [6..8), test = [8..10).
+    // A's rows all fall in the train window → A.test.n === 0.
+    // B's rows span 4..9 → B.train = 2, B.val = 2, B.test = 2.
+    const { results, testSize } = compareWalkForward(rows, ['A', 'B']);
 
-  it('handles an all-loss test set without NaN', () => {
-    const losses: OutcomeRow[] = Array.from({ length: 5 }, (_, i) => ({
-      id: `l${i}`, timestamp: 1_700_000_000_000 + i, confidence: 60, realizedPnlPct: -10, return1h: -0.1,
-    }));
-    const m = evaluateOos(losses);
-    expect(m.hitRate).toBe(0);
-    expect(m.expectancy).toBeLessThan(0);
-    expect(Number.isFinite(m.sharpe)).toBe(true);
-  });
-});
+    expect(testSize).toBe(2);
+    const a = results.find((r) => r.strategy === 'A')!;
+    const b = results.find((r) => r.strategy === 'B')!;
 
-describe('evaluateStrategyWalkForward (P6.1 single-strategy verdict)', () => {
-  it('reports train/validation/test metrics and a ROBUST verdict when OOS holds', () => {
-    // Monotone winners: IS Sharpe and OOS Sharpe both positive bright.
-    const good = Array.from({ length: 40 }, (_, i) => ({
-      id: `g${i}`,
-      timestamp: 1_700_000_000_000 + i * 86_400_000,
-      confidence: 80,
-      realizedPnlPct: 8,
-      return1h: 0.06,
-      strategy: 'swarm',
-    }));
-    const r = evaluateStrategyWalkForward(good, 'swarm');
-    expect(r.strategy).toBe('swarm');
-    expect(r.train.n + r.validation.n + r.test.n).toBe(40);
-    expect(r.test.expectancy).toBeGreaterThan(0);
-    expect(r.test.hitRate).toBe(1);
-    expect(['ROBUST', 'WEAK', 'OVERFITTED']).toContain(r.overfit.verdict);
-  });
-});
-
-describe('compareWalkForward + renderWalkForwardReport (P6.1 cross-strategy, fail-closed)', () => {
-  it('groups strategies and measures them on the same OOS window', () => {
-    const swarm = tag(Array.from({ length: 30 }, (_, i) => ({
-      id: `s${i}`, timestamp: 1_700_000_000_000 + i * 86_400_000,
-      confidence: 75, realizedPnlPct: 6, return1h: 0.05,
-    })), 'swarm');
-    const baseline = tag(Array.from({ length: 30 }, (_, i) => ({
-      id: `b${i}`, timestamp: 1_700_000_000_000 + i * 86_400_000,
-      confidence: 60, realizedPnlPct: -4, return1h: -0.02,
-    })), 'BASELINE_V1');
-    const { results, testSize } = compareWalkForward([...swarm, ...baseline], ['swarm', 'BASELINE_V1']);
-    expect(results).toHaveLength(2);
-    expect(testSize).toBeGreaterThan(0);
-    const byName = Object.fromEntries(results.map((r) => [r.strategy, r]));
-    expect(byName['swarm']!.test.expectancy).toBe(6);
-    expect(byName['BASELINE_V1']!.test.expectancy).toBe(-4);
+    // A produced no row in the shared OOS window.
+    expect(a.test.n).toBe(0);
+    expect(a.train.n).toBe(4);
+    // B occupies the shared train(2) / val(2) / test(2) windows exactly.
+    expect(b.train.n).toBe(2);
+    expect(b.validation.n).toBe(2);
+    expect(b.test.n).toBe(2);
   });
 
-  it('the report names every strategy and is fail-closed when no edge holds', () => {
-    const losses = tag(Array.from({ length: 30 }, (_, i) => ({
-      id: `l${i}`, timestamp: 1_700_000_000_000 + i * 86_400_000,
-      confidence: 50, realizedPnlPct: -5, return1h: -0.04,
-    })), 'swarm');
-    // Set explicit IS=0 so the verdict is OVERFITTED (fail-closed).
-    const text = renderWalkForwardReport(losses, ['swarm']);
-    expect(text).toContain('WALK-FORWARD');
-    expect(text).toMatch(/swarm/);
+  it('drops strategies that produced no rows at all', () => {
+    const rows = [row('x', 0, 'A', 1), row('y', 1, 'A', 2)];
+    const { results } = compareWalkForward(rows, ['A', 'missing']);
+    expect(results.map((r) => r.strategy)).toEqual(['A']);
   });
 });

@@ -171,15 +171,29 @@ export function compareWalkForward(
   trainFrac = 0.6,
   valFrac = 0.2,
 ): { results: WalkForwardStrategyResult[]; testSize: number } {
-  const results = strategyNames
-    .map((name) => {
-      const group = rows.filter((r) => r.strategy === name);
-      return evaluateStrategyWalkForward(group, name, trainFrac, valFrac);
-    })
-    .filter((r) => r.train.n + r.validation.n + r.test.n > 0);
-  // All strategies share the same split sizes; report the OOS window size.
-  const testSize = results.length > 0 ? results[0]!.test.n : 0;
-  return { results, testSize };
+  // ONE chronological split over ALL rows, so every strategy is measured on the
+  // SAME train/val/test time boundaries (the documented "apples-to-apples"
+  // intent). Each window is then partitioned by strategy tag. A strategy that
+  // produced no row inside a window evaluates to a degenerate (0) window rather
+  // than re-splitting on its own subset — which would give it DIFFERENT cut
+  // points and a different (usually smaller, non-comparable) OOS window.
+  const { train, validation, test } = walkForwardSplit(rows, trainFrac, valFrac);
+  const results: WalkForwardStrategyResult[] = [];
+  for (const name of strategyNames) {
+    const trainM = evaluateOos(train.filter((r) => r.strategy === name));
+    const valM = evaluateOos(validation.filter((r) => r.strategy === name));
+    const testM = evaluateOos(test.filter((r) => r.strategy === name));
+    if (trainM.n + valM.n + testM.n === 0) continue; // no rows anywhere
+    results.push({
+      strategy: name,
+      train: trainM,
+      validation: valM,
+      test: testM,
+      overfit: walkForwardVerdict(trainM.sharpe, testM.sharpe),
+    });
+  }
+  // Shared OOS window size — identical for every strategy.
+  return { results, testSize: test.length };
 }
 
 /** Render the walk-forward OOS report — the artifact that precedes any activation. */
