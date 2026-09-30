@@ -34,6 +34,7 @@ import {
   resolveFundingToken,
   type ExecutionChainKey,
 } from '../config/execution-registry.js';
+import { assessToken2022Mint } from '../solana/token2022-guard.js';
 
 const LIFI_API_BASE = 'https://li.quest/v1';
 const DEFAULT_INTEGRATOR = 'memeland';
@@ -357,6 +358,24 @@ export class LifiExecutor {
     return privateKeyToAccount(formatted as `0x${string}`);
   }
 
+  /**
+   * P2-3: best-effort, fail-open Token-2022 pre-quote guard for Solana buys.
+   * Returns null on any RPC/parse error (never blocks the fill); a mint with
+   * transfer-fee/transfer-hook extensions is refused by the caller.
+   */
+  private async assessSolMintFailOpen(mint: string): Promise<{ hasPricedExtensions: boolean } | null> {
+    try {
+      const solana = await import('@solana/web3.js');
+      const connection = new solana.Connection(resolveRpc('sol'));
+      const info = await connection.getAccountInfo(new solana.PublicKey(mint));
+      if (!info) return null; // unknown mint — let LI.FI decide
+      return assessToken2022Mint(info.owner, new Uint8Array(info.data));
+    } catch (err) {
+      console.warn(`[LIFI] Token-2022 guard unavailable for ${mint}: ${err instanceof Error ? err.message : String(err)}`);
+      return null; // fail-open
+    }
+  }
+
   private async broadcastEVM(chainKey: Exclude<ExecutionChainKey, 'sol'>, tx: Record<string, unknown>, nonce: string): Promise<string> {
     if (this.broadcastNonces.has(nonce)) throw new Error(`nonce ${nonce} already broadcast — idempotent guard`);
     this.broadcastNonces.add(nonce);
@@ -481,6 +500,14 @@ export class LifiExecutor {
       const funding = resolveFundingToken(chainKey, process.env[`EXECUTION_FUNDING_TOKEN_${chainKey.toUpperCase()}`]);
       const fromAmount = BigInt(Math.round(req.amountUsd * 10 ** funding.decimals)).toString();
       const addr = this.addressOf(chainKey);
+      // P2-3: refuse Token-2022 mints with transfer fee/hook on Solana before
+      // quoting (fail-open: RPC/parse errors let the fill proceed).
+      if (chainKey === 'sol') {
+        const t2022 = await this.assessSolMintFailOpen(req.token);
+        if (t2022?.hasPricedExtensions) {
+          return this.failed(`Token-2022 mint ${req.token} carries a transfer fee/hook — refusing (P2-3)`);
+        }
+      }
       const quoted = await this.quoteRoute({
         fromChain: cfg.lifiChainId,
         toChain: cfg.lifiChainId,
