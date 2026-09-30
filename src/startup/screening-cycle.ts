@@ -586,10 +586,48 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       const strategyCycle = opportunityStrategist.decide();
       const tally = new Map<string, number>();
       for (const d of strategyCycle.decisions) tally.set(d.action, (tally.get(d.action) || 0) + 1);
+
+      // P1.3 — RE-FEED the strategist's enqueueCandidates into the real approval
+      // ladder. They were previously computed every cycle and then DISCARDED
+      // (counted in a log line only), so every opportunity the strategist
+      // escalated to READY_SMALL_BET sat there forever — a whole escalation
+      // ladder that could never produce an actionable order. Each is resolved
+      // back to (chain, contract, price) and enqueued exactly like a freshly
+      // fired signal, then marked ENQUEUE in the ledger so it cannot double-fire.
+      let strategistEnqueued = 0;
+      let strategistUnresolvable = 0;
+      for (const id of strategyCycle.enqueueCandidates) {
+        try {
+          const resolved = opportunityStrategist.resolveForEnqueue(id);
+          if (!resolved) { strategistUnresolvable += 1; continue; }
+          const chainKey = normalizeExecutionChainKey(resolved.chain) ?? 'robinhood';
+          if (!executableChainsFromEnv().has(chainKey)) { strategistUnresolvable += 1; continue; }
+          const price = Number(resolved.priceUsd) || 0;
+          const order = approvalQueueService.enqueue({
+            domain: `meme-${chainKey}`,
+            symbol: resolved.symbol || 'TOKEN',
+            contractAddress: resolved.contractAddress,
+            chain: chainKey,
+            entryPriceUsd: price,
+            liquidityUsd: undefined,
+            suggestedSizeUsd: (hub.isAutoExecuteEnabled(`meme-${chainKey}`).maxTradeAmount || 0.1) * (price || 1),
+            confidence: 0,
+            thesis: `Strategist escalation ${id} -> READY_SMALL_BET`,
+          });
+          if (opportunityStrategist.enqueue(id)) {
+            strategistEnqueued += 1;
+            console.log(`[STRATEGIST] re-fed ${id} ${resolved.symbol || ''} into approval as ${order.id} (chain=${chainKey})`);
+          }
+        } catch (refeedErr: any) {
+          console.warn(`[STRATEGIST] re-feed failed for ${id}: ${refeedErr.message}`);
+        }
+      }
+
       if (tally.size > 0) {
         console.log(
           `[STRATEGIST] decisions=${JSON.stringify(Object.fromEntries(tally))} ` +
-          `candidatesToScore=${strategyCycle.nextCandidates.length} readyToEnqueue=${strategyCycle.enqueueCandidates.length}`
+          `candidatesToScore=${strategyCycle.nextCandidates.length} readyToEnqueue=${strategyCycle.enqueueCandidates.length} ` +
+          `reFed=${strategistEnqueued} unresolvable=${strategistUnresolvable}`
         );
       }
       opportunityLedger.flushToDisk();

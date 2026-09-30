@@ -225,6 +225,33 @@ export class OpportunityStrategist {
   }
 
   /**
+   * P1.3 — resolve a READY_SMALL_BET opportunity back into the fields the
+   * approval ladder needs (chain/contract/symbol/price), so the cycle can
+   * actually re-feed `enqueueCandidates` into the real approval queue instead
+   * of only logging the count. Returns null when the opportunity is unknown or
+   * has no usable identity — the caller then fails closed (never enqueues).
+   */
+  public resolveForEnqueue(opportunityId: string): {
+    chain: string;
+    contractAddress: string;
+    symbol?: string;
+    priceUsd?: number;
+  } | null {
+    const identity = this.ledger.get(opportunityId);
+    if (!identity) return null;
+    if (identity.currentState !== 'READY_SMALL_BET') return null;
+    const contractAddress = identity.contractAddress || '';
+    if (!contractAddress) return null; // fail-closed: an unaddressed token can never be enqueued
+    const latest = this.latestObservation(opportunityId);
+    return {
+      chain: identity.chain || 'robinhood',
+      contractAddress,
+      symbol: identity.symbol,
+      priceUsd: latest?.priceUsd,
+    };
+  }
+
+  /**
    * Record a gate-passed (+ enqueued) signal that actually fired this cycle.
    * Walks the opportunity to APPROVAL_PENDING along valid edges when the swarm
    * consensus passed (>= threshold), mirroring the real approval ladder so the

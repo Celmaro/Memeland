@@ -11,7 +11,7 @@ const STRATEGY_RULES = `
 You are writing an OpenCatzStrategy .mjs module for the Opencatz screening engine.
 Export a default object: { id, name, version, description, params, evaluate(ctx) }.
 - id MUST be '<domain>-custom'.
-- params MUST include passThreshold (keep 80).
+- params MUST include passThreshold (keep 70 — the candidate prefilter; the authoritative trade gate is the swarm CONSENSUS_FLOOR of 80).
 - evaluate(ctx) MUST return { confidence: 0-100, recommendedAction: 'BUY'|'SELL'|'HOLD'|'SKIP', reason: string }.
 - Rules: fail-closed (missing data -> SKIP with confidence 0, never fake-pass); quality floor >= 80;
   honor the user's prompt as hard gates and scoring; deterministic, no LLM calls inside evaluate.

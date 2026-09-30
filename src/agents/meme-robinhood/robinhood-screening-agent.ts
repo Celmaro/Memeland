@@ -9,7 +9,7 @@ import { globalFreshPairWatchlist } from '../../services/fresh-pair-watchlist.js
 import { BytecodeScanner } from '../../services/bytecode-scanner.js';
 import { SellabilitySimulator } from '../../services/sellability/sellability-simulator.js';
 import { StrategyEngine } from '../../orchestrator/strategy-engine.js';
-import { capSignalConfidence } from '../../orchestrator/swarm-guards.js';
+import { capSignalConfidence, CONSENSUS_FLOOR } from '../../orchestrator/swarm-guards.js';
 import { assessSolanaTimeOnCurve } from '../../services/copy-trade-hesitation.js';
 import type { TimeOnCurveAssessOptions } from '../../services/time-on-curve.js';
 import { buildFeatureSnapshot } from '../../features/feature-snapshot.js';
@@ -72,7 +72,19 @@ export interface RobinhoodScreeningConfig {
   maxTop10HolderRate: number;// 0.4
   minTotalFeeUsd: number;    // 500 — active fee gate: tokens without organic activity (unrecorded fee) rejected
   minFreshVolume1hUsd: number; // 3000 — fresh-pair lane floor (ankr/gecko raw pairs)
-  passThreshold: number;     // 80
+  /**
+   * P1.1 — CANDIDATE PREFILTER, deliberately BELOW the swarm's 80 floor.
+   *
+   * This admits plausible candidates into the (expensive) per-voter consensus
+   * swarm. It is NOT the trade gate. When voterScores are attached, gateSignal
+   * RE-DERIVES confidence from the weighted voter average and applies the
+   * authoritative CONSENSUS_FLOOR (80). Requiring the agent's independent
+   * heuristic to ALSO reach 80 double-gates two different scales, so the joint
+   * pass rate collapses and a token the swarm would happily accept is refused
+   * upstream. The swarm — which has real per-voter evidence — is the single
+   * authoritative gate; this threshold only decides who gets evaluated.
+   */
+  passThreshold: number;     // 70 — prefilter (authoritative trade gate is CONSENSUS_FLOOR=80)
   maxResearchPerPass: number; // P7 — per-pass research admission budget (expensive klines/Arkham jobs)
   signalTypes: number[];     // smart-money/KOL/CTO/price events (overlay boost)
   rankLimit: number;         // 100 (trending, 1h)
@@ -94,7 +106,7 @@ const DEFAULT_CONFIG: RobinhoodScreeningConfig = {
   maxTop10HolderRate: 0.4,
   minTotalFeeUsd: 500,
   minFreshVolume1hUsd: 3000,
-  passThreshold: 80,
+  passThreshold: 70,
   // P7 — bound per-pass expensive research. Raised via config to disable the
   // bound; kept moderate so a pass with few finalists is unchanged.
   maxResearchPerPass: 8,
@@ -108,6 +120,53 @@ const DEFAULT_CONFIG: RobinhoodScreeningConfig = {
   minTrackBuyUsd: 10000,
   trackFreshMinutes: 30,
 };
+
+/**
+ * P1.4 — env overrides for the floors that actually bind the funnel.
+ *
+ * Which floor is the live bottleneck is an EMPIRICAL question answered by the
+ * [PREFILTER REJECTS] distribution, and the answer changes with market regime
+ * (a $50k/1h volume floor is fine in a hot market and fatal in a cold one).
+ * Hard-coding a "tuned" number blind would just move the bottleneck, so the
+ * floors stay operator-tunable with no redeploy:
+ *
+ *   MEME_MIN_VOLUME_1H_USD      (default 50000)
+ *   MEME_MIN_FRESH_VOLUME_1H_USD (default 3000)
+ *   MEME_MIN_LIQUIDITY_USD      (default 10000)
+ *   MEME_MIN_MARKET_CAP_USD     (default 100000)
+ *   MEME_MIN_TOTAL_FEE_USD      (default 500; 0 disables the fee gate)
+ *   MEME_PASS_THRESHOLD         (default 70 — the candidate prefilter)
+ *
+ * Only finite, non-negative numbers are honoured; anything else is ignored with
+ * a warning rather than silently becoming NaN and fail-closing every candidate.
+ * The log line is the point: it makes the ACTIVE floor greppable in the Zeabur
+ * log, so a reader never has to guess which value is live.
+ */
+function envFloorOverrides(env: NodeJS.ProcessEnv = process.env): Partial<RobinhoodScreeningConfig> {
+  const MAP: Array<[keyof RobinhoodScreeningConfig, string]> = [
+    ['minVolume1hUsd', 'MEME_MIN_VOLUME_1H_USD'],
+    ['minFreshVolume1hUsd', 'MEME_MIN_FRESH_VOLUME_1H_USD'],
+    ['minLiquidityUsd', 'MEME_MIN_LIQUIDITY_USD'],
+    ['minMarketCapUsd', 'MEME_MIN_MARKET_CAP_USD'],
+    ['minTotalFeeUsd', 'MEME_MIN_TOTAL_FEE_USD'],
+    ['passThreshold', 'MEME_PASS_THRESHOLD'],
+  ];
+  const out: Record<string, number> = {};
+  for (const [key, envName] of MAP) {
+    const raw = env[envName];
+    if (raw === undefined || String(raw).trim() === '') continue;
+    const num = Number(raw);
+    if (!Number.isFinite(num) || num < 0) {
+      console.warn(`[MEME AGENT] ignoring invalid ${envName}="${raw}" (need a finite number >= 0)`);
+      continue;
+    }
+    out[key as string] = num;
+  }
+  if (Object.keys(out).length > 0) {
+    console.log(`[MEME AGENT] env floor overrides active: ${JSON.stringify(out)}`);
+  }
+  return out as Partial<RobinhoodScreeningConfig>;
+}
 
 export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
   // Memeland fork: the agent class is still named after its origin (Robinhood) but it now
@@ -228,7 +287,11 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
   ) {
     this.gmgn = new GMGNAdapter();
     this.strategyEngine = new StrategyEngine();
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    // P1.4 — precedence: constructor config (persisted runtime state) > env
+    // override > compiled default. The persisted state keeps winning so a chat
+    // set_screening_config call is never silently reverted by a redeploy, and env
+    // is the operator's no-redeploy lever for the floors that actually bind.
+    this.config = { ...DEFAULT_CONFIG, ...envFloorOverrides(), ...config };
     this.strategyParams = strategyParams;
     this.voterSwarm = opts.voterSwarm ?? process.env.VOTER_SWARM_ENABLED === 'true';
     this.criticVoter = opts.critic ?? null;
@@ -311,7 +374,11 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
           },
         }
       : undefined;
-    return new JevRouter({ swarmConfidence: this.config.passThreshold ?? 80, client });
+    // P1.1 — the Jev fallback confidence IS a swarm trade-decision confidence,
+    // so it must be the authoritative CONSENSUS_FLOOR (80), not the candidate
+    // prefilter. Feeding it passThreshold (now 70) would understate the swarm's
+    // real gate in the Jev shadow decision and in its verbose log line.
+    return new JevRouter({ swarmConfidence: Math.round(CONSENSUS_FLOOR * 100), client });
   }
 
   /**
