@@ -21,6 +21,7 @@ import { sellabilityConfigured } from '../services/execution-gates.js';
 import type { PaperTradingLedger } from '../services/paper-trading.js';
 import { bookFromMid } from '../services/paper-trading.js';
 import { globalPassReceiptLedger, type PassReceipt } from '../services/pass-receipt.js';
+import { PassTracer } from '../telemetry/trace-log.js';
 
 /** Cycle cadence (default 5 min) — used by the stale-gate hours calculation. */
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
@@ -109,7 +110,7 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
   let prevPortfolioEquityUsd: number | null = null;
 
   return async () => {
-
+  const tracer = new PassTracer();
   const cycleOperationalFunnel = createOperationalFunnel();
   globalOperationalHealth.setSchedulerStatus({ name: 'screening', running: true, lastStartedAt: Date.now() });
   globalOperationalHealth.recordProviderRequest('screening-pass', true);
@@ -197,6 +198,15 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
 
     // 6.1 — immutable per-pass audit receipt: "did the bot fire" becomes a
     // queryable record, not a log-grep. Fail-open (the sink never throws).
+    tracer.info('pass.end', {
+      domains: hub.getActiveDomains(),
+      chains: memeChains,
+      scanned: memeStats.scanned,
+      prefiltered: memeStats.prefiltered,
+      beforeGate: preGateCount,
+      afterGate: postGateCount,
+      fired: dispatchedPayloads.length,
+    });
     try {
       const receipt: PassReceipt = {
         at: new Date().toISOString(),
