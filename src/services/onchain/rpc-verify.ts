@@ -88,6 +88,8 @@ export class RpcVerify {
         logs: Array.isArray(receipt.logs) ? receipt.logs : [],
       };
     } catch {
+      // R1: demote this host so the next call uses a different RPC.
+      globalRPCFailoverManager.reportRPCFailure(POOL_KEY[chain], rpc);
       return null;
     }
   }
@@ -137,6 +139,8 @@ async function rpcPost(
     if (!res.ok) return null;
     return await res.json();
   } catch {
+    // R1: demote this host so the next call uses a different RPC.
+    globalRPCFailoverManager.reportRPCFailure(chainKey, rpc);
     return null;
   }
 }

@@ -97,22 +97,25 @@ const SELLABILITY_QUOTER_RPC_URL = () => process.env.SELLABILITY_QUOTER_RPC_URL?
  * attempt gets the next-healthiest host — request-level failover, not just the
  * 5-min probe.
  */
-function quoterTransportFor(chain: string): { url: string; chainId: number } | null {
+function quoterTransportFor(chain: string): { hosts: string[]; chainId: number } | null {
   const chainId = chainIdFor(chain) ?? 4663;
   const pinned = SELLABILITY_QUOTER_RPC_URL();
-  if (pinned.length > 0) return { url: pinned, chainId };
-  const url = globalRPCFailoverManager.getActiveRPC(chain === 'robinhood' || chain === 'rh' ? 'rh' : chain);
-  if (!url) return null;
-  return { url, chainId };
+  if (pinned.length > 0) return { hosts: [pinned], chainId };
+  // R3: carry the whole healthy pool so EvmAdapter rotates internally AND shares
+  // the failover manager's live health view instead of a divergent single host.
+  const poolKey = chain === 'robinhood' || chain === 'rh' ? 'rh' : chain;
+  const hosts = globalRPCFailoverManager.getHealthyRPCs(poolKey);
+  if (hosts.length === 0) return null;
+  return { hosts, chainId };
 }
 
 async function quoterCallOnce(
-  url: string,
+  hosts: string[],
   chainId: number,
   quoterAddress: string,
   tokenAddress: string,
 ): Promise<{ sellable: boolean; reason: string }> {
-  const adapter = new EvmAdapter({ hosts: [{ url }] });
+  const adapter = new EvmAdapter({ hosts: hosts.map((url) => ({ url })), cooldownMs: 30_000 });
   const call = evmAdapterToQuoterCall(adapter, { to: quoterAddress, chain: chainId });
   return assessSellability(call, quoteSinglePayload(tokenAddress));
 }
@@ -136,19 +139,20 @@ export function gateSellability() {
           if (!transport) {
             return { sellable: false, reason: `sellability check not configured — fail-closed (token ${tokenAddress}). Set SELLABILITY_QUOTER_ADDRESS.` };
           }
+          const first = transport.hosts[0]!;
           let lastReason = 'unknown';
           try {
-            const res = await quoterCallOnce(transport.url, transport.chainId, quoterAddress, tokenAddress);
+            const res = await quoterCallOnce(transport.hosts, transport.chainId, quoterAddress, tokenAddress);
             if (res.sellable) return res;
             lastReason = res.reason;
           } catch (e) {
             // Transport-level failure: mark this host dead for the cycle and retry
             // once on the next-healthiest host before failing closed.
-            globalRPCFailoverManager.reportRPCFailure(chain, transport.url);
+            globalRPCFailoverManager.reportRPCFailure(chain, first);
             const next = quoterTransportFor(chain);
-            if (next && next.url !== transport.url) {
+            if (next && next.hosts[0] !== first) {
               try {
-                return await quoterCallOnce(next.url, next.chainId, quoterAddress, tokenAddress);
+                return await quoterCallOnce(next.hosts, next.chainId, quoterAddress, tokenAddress);
               } catch (e2) {
                 lastReason = e2 instanceof Error ? e2.message : 'quoter call failed on retry';
               }

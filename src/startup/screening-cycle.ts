@@ -17,6 +17,7 @@ import { globalRiskEngineV2 } from '../orchestrator/risk-engine-v2.js';
 import { globalDecisionCache } from '../services/decision-cache.js';
 import { globalWalletGraph } from '../graph/wallet-graph.js';
 import { globalRPCFailoverManager } from '../services/rpc-failover.js';
+import { globalProviderGovernor } from '../services/provider-governor.js';
 import { sellabilityConfigured } from '../services/execution-gates.js';
 import type { PaperTradingLedger } from '../services/paper-trading.js';
 import { bookFromMid } from '../services/paper-trading.js';
@@ -137,6 +138,19 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
   } catch (err: any) {
     console.warn(`[RPC FAILOVER] probe scheduling failed: ${err.message}`);
   }
+  // D1/D2 — aggregate discovery spend surface: per-provider governor budget, so
+  // the operator sees fabric-wide paid-feed spend (and any hard-freeze) at a
+  // glance. Single control surface across solanatracker/fomo/arkham.
+  try {
+    const spend = globalProviderGovernor.stats();
+    const ids = Object.keys(spend);
+    if (ids.length > 0) {
+      const line = ids
+        .map((id) => `${id}=${spend[id].spent}${spend[id].frozenMs > 0 ? `(frozen ${Math.round(spend[id].frozenMs / 60000)}m)` : ''}`)
+        .join(' ');
+      console.log(`[DISCOVERY SPEND] ${line}`);
+    }
+  } catch { /* spend telemetry never blocks a cycle */ }
   // Memeland fork: print the actual chain list being scanned this cycle so the
   // operator can confirm the env override (MULTICHAIN_CHAINS) is in effect.
   const memeChains = (robinhoodScreeningAgent as unknown as { chains?: string[] }).chains ?? [];

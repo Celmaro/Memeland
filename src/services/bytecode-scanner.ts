@@ -64,6 +64,8 @@ export interface BytecodeScannerOptions {
   maxCacheEntries?: number;
   /** Injectable clock for tests. Default `Date.now`. */
   now?: () => number;
+  /** Injectable failure reporter (tests / alternate transport). Default: the RPC failover manager. */
+  report?: (chain: string, url: string) => void;
 }
 
 /** Stable 32-bit FNV-1a over the normalized hex → string hash (deterministic). */
@@ -79,12 +81,14 @@ function codeHashOf(hex: string): string {
 export class BytecodeScanner {
   private readonly addressCache: TtlCache<{ codeHash: string; scan: ScanResult }>;
   private readonly hashCache: TtlCache<ScanResult>;
+  private readonly report: (chain: string, url: string) => void;
 
   constructor(opts: BytecodeScannerOptions = {}) {
     const ttlMs = opts.cacheTtlMs ?? 15 * 60 * 1000;
     const maxEntries = opts.maxCacheEntries ?? 2000;
     this.addressCache = new TtlCache<{ codeHash: string; scan: ScanResult }>({ ttlMs, maxEntries, now: opts.now });
     this.hashCache = new TtlCache<ScanResult>({ ttlMs, maxEntries, now: opts.now });
+    this.report = opts.report ?? ((c, u) => globalRPCFailoverManager.reportRPCFailure(c, u));
   }
 
   scan(bytecode: string): ScanResult {
@@ -143,6 +147,8 @@ export class BytecodeScanner {
       this.hashCache.set(codeHash, scan);
       return scan;
     } catch {
+      // R1: demote this host so the next scanContract uses a different RPC.
+      this.report(poolKey, url);
       return { flagged: false, findings: [] };
     }
   }

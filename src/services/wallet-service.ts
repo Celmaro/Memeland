@@ -156,6 +156,10 @@ export class WalletService {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[WALLET] EVM balance query failed on chain ${chainId}: ${message}`);
+      // R1: demote the host that just failed so the next read rotates.
+      const rpcKey = chainConfig?.rpcKey ?? 'rh';
+      const failedUrl = globalRPCFailoverManager.getActiveRPC(rpcKey) || process.env[chainConfig?.rpcEnvKey ?? ''] || 'https://rpc.mainnet.chain.robinhood.com';
+      globalRPCFailoverManager.reportRPCFailure(rpcKey, failedUrl);
       return null;
     }
   }

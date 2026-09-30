@@ -111,12 +111,14 @@ export class MulticallBalanceReader {
     try {
       const body = JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: address, data: '0x82ad56cb00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000' }, 'latest'], id: 1 });
       const res = await this.fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
-      if (!res.ok) return undefined;
+      if (!res.ok) { globalRPCFailoverManager.reportRPCFailure(key, rpc); return undefined; }
       const data = await res.json();
       if (data.error) return undefined;
       this.capable.add(key);
       return address;
     } catch {
+      // R1: demote this host so subsequent reads use a different RPC.
+      globalRPCFailoverManager.reportRPCFailure(key, rpc);
       return undefined;
     }
   }
@@ -163,6 +165,8 @@ export class MulticallBalanceReader {
             out.set(`${chain}:${r.token.toLowerCase()}:${r.owner.toLowerCase()}`, value === null ? null : value);
           });
         } catch {
+          // R1: demote this host so the fallback/next pass uses a different RPC.
+          globalRPCFailoverManager.reportRPCFailure(chain, rpc);
           // Multicall failed → individual fallback for this chain.
           for (const r of list) out.set(`${chain}:${r.token.toLowerCase()}:${r.owner.toLowerCase()}`, await fallbackRead(r.chain, r.token, r.owner));
         }

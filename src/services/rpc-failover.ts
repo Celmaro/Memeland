@@ -215,14 +215,33 @@ export class RPCFailoverManager {
   public getActiveRPC(chain: string): string {
     const key = resolveChainKey(chain);
     const healthy = this.status[key]
-      .filter((s) => s.healthy)
+      // R2: skip hosts whose 429 circuit is open (rate-limit backoff) so a
+      // hammered host isn't selected between probes — not just at the next probe.
+      .filter((s) => s.healthy && !globalRateLimiter.isOpen(s.url))
       .sort((a, b) => a.latencyMs - b.latencyMs);
     if (healthy[0]) return healthy[0].url;
-    // No healthy host: prefer a default that has NOT been reported failed
-    // since the last probe, so reportRPCFailure → retry actually moves to a
-    // different host instead of reselecting the one just marked bad.
-    const fallback = this.endpoints[key].find((url) => !this.failedUrls.has(url));
+    // No healthy host: prefer a default that has NOT been reported failed since
+    // the last probe AND is not in rate-limit backoff, so reportRPCFailure →
+    // retry actually moves to a different host instead of reselecting the one
+    // just marked bad.
+    const fallback = this.endpoints[key].find(
+      (url) => !this.failedUrls.has(url) && !globalRateLimiter.isOpen(url),
+    );
     return fallback ?? this.endpoints[key][0] ?? '';
+  }
+
+  /**
+   * R3 — all currently-healthy hosts for a chain (fastest first), excluding
+   * hosts whose 429 circuit is open. Lets multi-host consumers (e.g. EvmAdapter)
+   * carry the whole pool so they rotate internally AND share the failover
+   * manager's live health view instead of a divergent private list.
+   */
+  public getHealthyRPCs(chain: string): string[] {
+    const key = resolveChainKey(chain);
+    return this.status[key]
+      .filter((s) => s.healthy && !globalRateLimiter.isOpen(s.url))
+      .sort((a, b) => a.latencyMs - b.latencyMs)
+      .map((s) => s.url);
   }
 
   public getLastProbeAt(): number {
@@ -238,3 +257,92 @@ export class RPCFailoverManager {
 }
 
 export const globalRPCFailoverManager = new RPCFailoverManager();
+
+/** R4 — hosts whose eth_chainId has already been verified this process. */
+const chainIdVerifiedHosts = new Set<string>();
+
+export interface FailoverCallOptions {
+  /** Injectable fetcher (tests / alternate transport). Default: global fetch. */
+  fetcher?: (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<Pick<Response, 'ok' | 'json'>>;
+  /** Injectable failure reporter. Default: globalRPCFailoverManager.reportRPCFailure. */
+  report?: (chain: string, url: string) => void;
+  /** Injectable host selector (tests / DI consumers). Default: the failover manager. */
+  getActiveRPC?: (chain: string) => string;
+  /**
+   * R4 — optional expected eth_chainId. When set, the first call to a NEW host
+   * is verified against it (cached per host), so a misrouted host that answers a
+   * different chain is demoted and retried on a correct one.
+   */
+  expectedChainId?: string;
+}
+
+export interface FailoverCallResult {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+/**
+ * R1 — one failover-aware JSON-RPC POST against the per-chain pool. On failure
+ * the host is demoted (reportRPCFailure) and the call retried once against the
+ * next host, so a dead RPC rotates MID-CYCLE instead of waiting for the 5-min
+ * probe. Optionally verifies eth_chainId (R4). Always fail-soft: returns
+ * `{ ok:false, error }` (never throws) when both attempts fail or no host exists.
+ */
+export async function rpcCallWithFailover(
+  chain: string,
+  method: string,
+  params: unknown[],
+  opts: FailoverCallOptions = {},
+): Promise<FailoverCallResult> {
+  const key = resolveChainKey(chain);
+  const report = opts.report ?? ((c, u) => globalRPCFailoverManager.reportRPCFailure(c, u));
+  const getActive = opts.getActiveRPC ?? ((c: string) => globalRPCFailoverManager.getActiveRPC(c));
+  const fetcher =
+    opts.fetcher ??
+    ((url: string, init: { method: string; headers: Record<string, string>; body: string }) =>
+      (globalThis as { fetch: typeof fetch }).fetch(url, init));
+  let lastErr: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const url = getActive(key);
+    if (!url) break;
+    // R4: verify chain id once per host (opt-in).
+    if (opts.expectedChainId && !chainIdVerifiedHosts.has(url)) {
+      try {
+        const ci = await fetcher(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_chainId', params: [], id: 1 }),
+        });
+        if (!ci.ok) throw new Error('chainId http');
+        const ciJson = (await ci.json()) as { result?: string };
+        if (ciJson.result !== opts.expectedChainId) {
+          throw new Error(`chainId mismatch (got ${ciJson.result}, want ${opts.expectedChainId})`);
+        }
+        chainIdVerifiedHosts.add(url);
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+        report(key, url);
+        continue;
+      }
+    }
+    try {
+      const res = await fetcher(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
+      });
+      if (!res.ok) throw new Error('HTTP error');
+      const data = (await res.json()) as { result?: unknown; error?: { message?: string } | string };
+      if (data.error) {
+        const m = typeof data.error === 'string' ? data.error : data.error?.message;
+        throw new Error(m ?? 'json-rpc error');
+      }
+      return { ok: true, result: data.result };
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+      report(key, url);
+    }
+  }
+  return { ok: false, error: lastErr ?? 'no active RPC host' };
+}

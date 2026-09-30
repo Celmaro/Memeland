@@ -43,7 +43,7 @@ describe('BytecodeScanner — B#3 bytecode-hash cache', () => {
   });
 
   it('scanContract is fail-open: a fetch error yields an unflagged scan and caches nothing', async () => {
-    const s = new BytecodeScanner();
+    const s = new BytecodeScanner({ report: () => {} });
     let calls = 0;
     const boom = async () => {
       calls += 1;

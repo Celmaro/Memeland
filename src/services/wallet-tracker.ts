@@ -94,11 +94,11 @@ export class WalletTracker {
   }
 
   private defaultEvmBalanceReader: EvmBalanceReader = async (chain, token, owner) => {
+    // Per-chain failover pool (env pin wins, then fastest healthy host).
+    const poolKey = chain === 'robinhood' || chain === 'rh' ? 'rh' : chain;
+    const envPin = process.env.EVM_ROBINHOOD_RPC_URL || process.env[`RPC_FAILOVER_${String(poolKey).toUpperCase()}_URL`];
+    const rpc = envPin || globalRPCFailoverManager.getActiveRPC(poolKey);
     try {
-      // Per-chain failover pool (env pin wins, then fastest healthy host).
-      const poolKey = chain === 'robinhood' || chain === 'rh' ? 'rh' : chain;
-      const envPin = process.env.EVM_ROBINHOOD_RPC_URL || process.env[`RPC_FAILOVER_${String(poolKey).toUpperCase()}_URL`];
-      const rpc = envPin || globalRPCFailoverManager.getActiveRPC(poolKey);
       if (!rpc) return null;
       // Match the viem chain to the actual chain so chain-id checks and
       // signing/read contexts are right — not hardcoded robinhood.
@@ -111,6 +111,8 @@ export class WalletTracker {
         args: [owner as `0x${string}`],
       });
     } catch {
+      // R1: demote this host so the next balance read rotates.
+      globalRPCFailoverManager.reportRPCFailure(poolKey, rpc);
       return null;
     }
   };

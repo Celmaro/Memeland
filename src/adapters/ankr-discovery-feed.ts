@@ -130,7 +130,7 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
       let chunks = 0;
       let done = false;
       try {
-        const headHex = (await this.rpcCall(rpc, 'eth_blockNumber', [])) as string;
+        const headHex = (await this.rpcCall(poolKey, rpc, 'eth_blockNumber', [])) as string;
         let to = BigInt(headHex) - BigInt(confirmations);
         if (to < 1n) continue;
         let from = to - BigInt(lookback);
@@ -144,7 +144,7 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
           const chunkEndExcl = from + chunk;
           const toBlock = chunkEndExcl > to ? to : chunkEndExcl;
           try {
-            const logs = await this.fetchPairCreated(rpc, factory, from, toBlock);
+            const logs = await this.fetchPairCreated(poolKey, rpc, factory, from, toBlock);
             for (const log of logs) {
               const decoded = decodePairCreated(log);
               if (!decoded) continue;
@@ -181,26 +181,32 @@ export class AnkrDiscoveryFeed implements MarketDataProvider {
   }
 
   /** eth_getLogs for PairCreated on the factory over [fromBlock, toBlock] (chunk). */
-  private async fetchPairCreated(rpc: string, factory: string, fromBlock: bigint, toBlock: bigint): Promise<PairCreatedLog[]> {
+  private async fetchPairCreated(poolKey: string, rpc: string, factory: string, fromBlock: bigint, toBlock: bigint): Promise<PairCreatedLog[]> {
     const payload = {
       fromBlock: `0x${fromBlock.toString(16)}`,
       toBlock: `0x${toBlock.toString(16)}`,
       address: factory,
       topics: [PAIR_CREATED_TOPIC0],
     };
-    const res = await this.rpcCall(rpc, 'eth_getLogs', [payload]);
+    const res = await this.rpcCall(poolKey, rpc, 'eth_getLogs', [payload]);
     return (res ?? []) as PairCreatedLog[];
   }
 
-  private async rpcCall(rpc: string, method: string, params: unknown[]): Promise<unknown> {
-    const res = await fetch(rpc, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
-    });
-    if (!res.ok) throw new Error(`${method} HTTP ${res.status}`);
-    const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
-    if (data.error) throw new Error(`${method}: ${data.error.message}`);
-    return data.result;
+  private async rpcCall(poolKey: string, rpc: string, method: string, params: unknown[]): Promise<unknown> {
+    try {
+      const res = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
+      });
+      if (!res.ok) throw new Error(`${method} HTTP ${res.status}`);
+      const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
+      if (data.error) throw new Error(`${method}: ${data.error.message}`);
+      return data.result;
+    } catch (err) {
+      // R1: demote this host so the next chunk walks a different RPC.
+      globalRPCFailoverManager.reportRPCFailure(poolKey, rpc);
+      throw err;
+    }
   }
 }
