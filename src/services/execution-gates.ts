@@ -237,8 +237,10 @@ export function gateFillSim() {
   };
 }
 
-/** Q13 cumulative cost gate — a fill must stay within the config cost budget. Opt-in:
- *  only enforced when COST_CAP_USD is set (so wiring never silently bricks a running bot). */
+/** Q13 cumulative notional cap — a fill stays within the config cap. NOTE: the
+ *  unit spent here is TRADE NOTIONAL (`effectiveUsd`), so `COST_CAP_USD` acts as
+ *  a cumulative-executed-notional cap, NOT a fee budget. Opt-in: only enforced
+ *  when COST_CAP_USD is set (so wiring never silently bricks a running bot). */
 let costGateSingleton: CostGate | null = null;
 let costGateEnabled = false;
 export function gateCostGate() {
@@ -246,13 +248,13 @@ export function gateCostGate() {
     const raw = process.env.COST_CAP_USD;
     costGateEnabled = raw !== undefined && raw !== '';
     costGateSingleton = new CostGate(costGateEnabled ? envNum('COST_CAP_USD', 50) : Number.MAX_SAFE_INTEGER);
-    if (!costGateEnabled) console.warn('[EXEC] COST_CAP_USD not set — cost gate not enforced');
+    if (!costGateEnabled) console.warn('[EXEC] COST_CAP_USD not set — cumulative-notional gate not enforced');
   }
   return {
     trySpend(costUsd: number): { allowed: boolean; reason?: string } {
       if (!costGateEnabled) return { allowed: true };
       if (!costGateSingleton!.canSubmit(costUsd)) {
-        return { allowed: false, reason: `cumulative cost budget exhausted (spent $${costGateSingleton!.spentUsd.toFixed(2)})` };
+        return { allowed: false, reason: `cumulative notional cap exhausted (submitted $${costGateSingleton!.spentUsd.toFixed(2)})` };
       }
       costGateSingleton!.recordFill(costUsd);
       return { allowed: true };

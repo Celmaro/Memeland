@@ -42,11 +42,13 @@ export interface ExecuteMemeBuyOptions {
   sellability?: { check(tokenAddress: string): Promise<{ sellable: boolean; reason: string }> };
   /** Per-token tx serializer (rh-execution-core TxLock). When provided, only one in-flight tx per token. */
   txLock?: { acquire(tokenAddress: string): Promise<() => void> };
-  /** Q07 multi-constraint sizer. When provided, clamps the notional to the binding constraint; refuses on refusal. */
-  sizer?: { clamp(desiredUsd: number): { allowed: boolean; amountUsd: number; reason?: string } };
+  /** Q07 multi-constraint sizer. When provided, clamps the notional to the binding
+   *  constraint using confidence + real pooled liquidity; refuses on refusal. */
+  sizer?: { clamp(desiredUsd: number, ctx?: { confidence?: number; liquidityUsd?: number }): { allowed: boolean; amountUsd: number; reason?: string } };
   /** Q08 fill simulation. When provided, refuses fills whose impact is refused / over a cap. */
   fillSim?: { check(input: { amountUsd: number; midPriceUsd: number; liquidityUsd?: number }): { allowed: boolean; impactPct: number; reason?: string } };
-  /** Q13 cost gate. When provided, a fill must be within the cumulative cost budget. */
+  /** Q13 cost/notional gate. When provided, a fill must be within the cumulative
+   *  notional cap. NOTE: it is charged the executed notional (`effectiveUsd`). */
   costGate?: { trySpend(costUsd: number): { allowed: boolean; reason?: string } };
   /** Q11 execution governance. When provided, the order is reserved + receipt-locked before the fill. */
   governance?: { reserve(order: { nonce: string; payload: string }): { reserved: boolean; reason?: string }; issue(order: { nonce: string; payload: string }): { valid: boolean; reason?: string } };
@@ -148,7 +150,12 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   // fill-sim / cost / governance / LI.FI / journal all consume downstream —
   // otherwise the gates wouldn't guard the amount actually submitted.
   const desiredUsd = opts.amountUsd;
-  const sized = opts.sizer ? opts.sizer.clamp(desiredUsd) : { allowed: true, amountUsd: desiredUsd };
+  // P1-4: feed the sizer the confidence + liquidity context it needs. Before this,
+  // the Q07 gateSizer defaulted confidence/liquidity to 0, producing a 0.5×0.5
+  // scale and silently sizing to ~25% of the requested notional.
+  const sized = opts.sizer
+    ? opts.sizer.clamp(desiredUsd, { confidence: opts.confidence, liquidityUsd: opts.liquidityUsd })
+    : { allowed: true, amountUsd: desiredUsd };
   if (!sized.allowed) return reject('rejected', `sizing gate refused: ${sized.reason}`);
   const effectiveUsd = sized.amountUsd > 0 ? sized.amountUsd : desiredUsd;
   // Legacy raw-EVM branch only: derive the adapter's input units from the sized
@@ -169,7 +176,8 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   }
   lifecycle('simulated');
 
-  // ── Q13 cost gate (cumulative fill-cost budget) ─────────────────────────
+  // ── Q13 cost/notional gate (charged the EXECUTED notional, i.e. effectiveUsd,
+  //    NOT an estimated fee — see cost-gating.ts for the semantics) ──────────
   if (opts.costGate) {
     const c = opts.costGate.trySpend(effectiveUsd);
     if (!c.allowed) return reject('rejected', `cost gate refused: ${c.reason}`);

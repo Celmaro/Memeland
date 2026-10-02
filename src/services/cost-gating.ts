@@ -1,8 +1,11 @@
 /**
  * Q13 - Cost-gated throttling + cross-market sizing (SRC-262 grok-trading-desk
- * fail-closed vetoes + cost gating, SRC-261 propose-vs-decide). A fee/cost
- * budget throttles auto-execution past a config cap; correlated exposures sum
- * against a shared cap. Reset is explicit (risk-layer convention).
+ * fail-closed vetoes + cost gating, SRC-261 propose-vs-decide). IMPORTANT: the
+ * underlying `COST_CAP_USD` accounts against TRADE NOTIONAL (the `trySpend`
+ * unit is the executed USD size), so it behaves as a *cumulative executed
+ * notional cap*, NOT a fee/cost budget. It throttles further fills once the
+ * sum of submitted notional crosses the cap. Correlated exposures sum against a
+ * shared cap. Reset is explicit (risk-layer convention).
  */
 
 export class CostGate {

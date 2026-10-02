@@ -441,6 +441,14 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       const signalChainKey = normalizeExecutionChainKey(String(item.payload.network || 'robinhood')) ?? 'robinhood';
       const signalExecutable = executableChainsFromEnv().has(signalChainKey);
       const autoExecDomain = signalExecutable ? `meme-${signalChainKey}` : undefined;
+      // P1-6: will THIS signal be handled by the AUTO path? If so it must NOT be
+      // advertised as a human-pending approval (no misleading APPROVAL_REQUIRED,
+      // and its order is reconciled to executed/failed rather than left PENDING).
+      const domainAutoOn =
+        AUTO_EXECUTE_ENABLED &&
+        !isSignalOnly() &&
+        !!autoExecDomain &&
+        hub.isAutoExecuteEnabled(autoExecDomain).enabled;
       if (signalExecutable && item.payload.contractAddress) {
         const queuedPrice = parseFloat(String(item.payload.priceUsd || '0').replace(/[^0-9.]/g, '')) || 0;
         const order = approvalQueueService.enqueue(
@@ -461,7 +469,9 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
         approvalOrderId = order.id;
         console.log(`[APPROVAL] Queued PENDING order ${order.id} for ${item.payload.symbol} (scorecard ${scorecardId || 'n/a'})`);
         e2e.approvalQueued += 1;
-        globalOperationalHealth.recordAlert('APPROVAL_REQUIRED', `Approval required: ${item.payload.symbol}`, `order ${order.id}`);
+        if (!domainAutoOn) {
+          globalOperationalHealth.recordAlert('APPROVAL_REQUIRED', `Approval required: ${item.payload.symbol}`, `order ${order.id}`);
+        }
       }
 
       // Execution Mode check: AUTO_EXECUTE executes live trades, DRY_RUN simulates with real market quotes, SIGNAL_ONLY skips trade execution.
@@ -542,8 +552,18 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
                 });
                 console.log(`[AUTO-EXECUTE] ${autoExecDomain} ${item.payload.symbol}: ${execRes.success ? (execRes.simulated ? 'SIMULATED ' : '') + 'ok' : 'FAILED'} ${execRes.error || ''} (out=${execRes.outputTokens})`);
                 if (execRes.success) e2e.execOk += 1;
+                // P1-6: an auto-executed order must NOT linger as human-pending. Mark
+                // it executed/failed so the approval queue and APP approval counts stay
+                // truthful instead of accumulating stale PENDING rows.
+                if (approvalOrderId) {
+                  if (execRes.success) approvalQueueService.recordExecuted(approvalOrderId);
+                  else approvalQueueService.recordFailed(approvalOrderId);
+                }
               }
-            } catch (err: any) { console.error(`[AUTO-EXECUTE] ${item.payload.symbol} error: ${err.message}`); }
+            } catch (err: any) {
+              console.error(`[AUTO-EXECUTE] ${item.payload.symbol} error: ${err.message}`);
+              if (approvalOrderId) approvalQueueService.recordFailed(approvalOrderId);
+            }
           } else {
             // The Phase-3 gate OPENED but this domain's AUTO toggle is off — a
             // distinct dead-end from autoGateBlocked, so it gets its own column.

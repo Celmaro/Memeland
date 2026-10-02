@@ -455,11 +455,18 @@ export class LifiExecutor {
       if (chainKey === 'sol') {
         const solana = await import('@solana/web3.js');
         const connection = new solana.Connection(resolveRpc('sol'));
+        // P0-3: A broadcast Solana tx may not be visible at `confirmed` yet (RPC
+        // lag). A missing receipt is NOT a failure — classify it `timed_out` so the
+        // caller only retries when the original tx truly wasn't seen. Only an
+        // explicit on-chain error (tx found with meta.err) is a real `failed`.
         const tx = await connection.getTransaction(txHash, { commitment: 'confirmed' });
-        const ok = !!tx && !tx.meta?.err;
-        return ok
-          ? { outcome: 'confirmed', reason: 'on-chain receipt: success' }
-          : { outcome: 'failed', reason: 'on-chain receipt: reverted or not found' };
+        if (!tx) {
+          return { outcome: 'timed_out', reason: 'on-chain receipt: transaction not visible yet (RPC lag)' };
+        }
+        if (tx.meta?.err) {
+          return { outcome: 'failed', reason: 'on-chain receipt: reverted' };
+        }
+        return { outcome: 'confirmed', reason: 'on-chain receipt: success' };
       }
       const publicClient = createPublicClient({
         chain: EVM_CHAIN_IDS[chainKey],

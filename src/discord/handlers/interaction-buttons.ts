@@ -144,8 +144,9 @@ export async function handleButtonPress(interaction: ButtonInteraction, hub: Ope
 
     // Fail-closed: even an operator-approved fill stays behind the risk gate
     // (drawdown cap / kill-switch). Nothing executes if risk says no.
-    const autoExec = hub.isAutoExecuteEnabled('meme-robinhood');
-    const amountUsd = autoExec.maxTradeAmount || 0.1; // USD notional (canonical)
+    // P1-5: APPROVE means "execute THIS order" — the notional is the approved
+    // suggested size, never resized from live runtime config at click time.
+    const amountUsd = approved.suggestedSizeUsd > 0 ? approved.suggestedSizeUsd : 0.1;
     const riskCheck = hub.getRiskManager().isTradeAllowed(amountUsd);
     if (!riskCheck.allowed || globalRiskEngineV2.checkKillSwitchStatus()) {
       await interaction.editReply(
