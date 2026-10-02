@@ -652,28 +652,54 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
       // fired signal, then marked ENQUEUE in the ledger so it cannot double-fire.
       let strategistEnqueued = 0;
       let strategistUnresolvable = 0;
+      // P1-10: re-feed with a FRESH execution snapshot. Previously the strategist
+      // enqueued `liquidityUsd: undefined, confidence: 0` from stale ledger
+      // metadata; with the fail-closed fill simulator that order was manufactured
+      // non-executable (READY_SMALL_BET escalations could never be filled). Fetch
+      // current price + liquidity from GMGN and only enqueue when we have real
+      // liquidity proof — otherwise treat as unresolvable rather than queueing a
+      // dead order. Fail-soft: a fetch error never throws out of the loop.
+      const strategistGmgn = new GMGNAdapter();
       for (const id of strategyCycle.enqueueCandidates) {
         try {
           const resolved = opportunityStrategist.resolveForEnqueue(id);
           if (!resolved) { strategistUnresolvable += 1; continue; }
           const chainKey = normalizeExecutionChainKey(resolved.chain) ?? 'robinhood';
           if (!executableChainsFromEnv().has(chainKey)) { strategistUnresolvable += 1; continue; }
-          const price = Number(resolved.priceUsd) || 0;
+
+          let fresh: any = null;
+          try {
+            fresh = await strategistGmgn.fetchTokenInfo(chainKey as any, resolved.contractAddress);
+          } catch (snapErr: any) {
+            console.warn(`[STRATEGIST] fresh snapshot failed for ${id}: ${snapErr.message}`);
+          }
+          const freshLiq = Number(fresh?.liquidityUsd);
+          if (!Number.isFinite(freshLiq) || freshLiq <= 0) {
+            // No current liquidity proof -> do NOT manufacture an executable-looking
+            // order. Leave it for the next strategist cycle to re-score.
+            strategistUnresolvable += 1;
+            continue;
+          }
+          const freshPrice = Number(fresh?.priceUsd);
+          const price = Number.isFinite(freshPrice) && freshPrice > 0 ? freshPrice : (Number(resolved.priceUsd) || 0);
+
           const order = approvalQueueService.enqueue({
             domain: `meme-${chainKey}`,
-            symbol: resolved.symbol || 'TOKEN',
+            symbol: resolved.symbol || fresh?.symbol || 'TOKEN',
             contractAddress: resolved.contractAddress,
             chain: chainKey,
             entryPriceUsd: price,
-            liquidityUsd: undefined,
+            liquidityUsd: freshLiq,
             // P0: maxTradeAmount is USD notional — do NOT scale by token price.
             suggestedSizeUsd: hub.isAutoExecuteEnabled(`meme-${chainKey}`).maxTradeAmount || 0.1,
-            confidence: 0,
-            thesis: `Strategist escalation ${id} -> READY_SMALL_BET`,
+            // Strategist escalation carries no swarm consensus; a deliberate sub-80
+            // confidence keeps the Q07 sizer scaling modestly instead of to its floor.
+            confidence: 70,
+            thesis: `Strategist escalation ${id} -> READY_SMALL_BET (fresh liq $${freshLiq.toFixed(0)})`,
           });
           if (opportunityStrategist.enqueue(id)) {
             strategistEnqueued += 1;
-            console.log(`[STRATEGIST] re-fed ${id} ${resolved.symbol || ''} into approval as ${order.id} (chain=${chainKey})`);
+            console.log(`[STRATEGIST] re-fed ${id} ${resolved.symbol || ''} into approval as ${order.id} (chain=${chainKey} liq=$${freshLiq.toFixed(0)})`);
           }
         } catch (refeedErr: any) {
           console.warn(`[STRATEGIST] re-feed failed for ${id}: ${refeedErr.message}`);

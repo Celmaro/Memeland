@@ -1650,9 +1650,14 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
                 liquidityUsd: t.liquidityUsd,
                 volume24hUsd: volume24hOf(t),
               },
+              // P2-13: do NOT manufacture "neutral" flow values. A missing buy/sell split
+              // previously became `volume1hUsd / 2` each (a fake 50/50 flow that
+              // looked like measured data to calibration/ML/post-mortems).
+              // buildFeatureSnapshot skips absent values and lowers dataQuality,
+              // so pass the raw optional values — MISSING stays missing.
               flow: {
-                buyUsd1h: t.buyUsd1h ?? t.volume1hUsd / 2,
-                sellUsd1h: t.sellUsd1h ?? t.volume1hUsd / 2,
+                buyUsd1h: t.buyUsd1h,
+                sellUsd1h: t.sellUsd1h,
               },
               // Phase-7: real post-audit security state, not the old `sellable:true`
               // placeholder. Absent evidence (swarm off) → conservatively unproven.
@@ -1660,7 +1665,7 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
                 sellable: finalSellability ? finalSellability.sellable : false,
                 auditClean: finalSecurityPenaltyCount === 0,
               },
-              momentum: { change1hPct: t.priceChange1h ?? 0, mlProb: klines ? predictUpMomentum(klines).score : undefined },
+              momentum: { change1hPct: t.priceChange1h ?? undefined, mlProb: klines ? predictUpMomentum(klines).score : undefined },
               smartMoney: { smartDegenCount: t.smartDegenCount, kolCount: t.renownedCount },
               // Per-facet lineage: security evidence + its fetch time ride on the
               // security group; market/flow carry the candidate feed; all fall back

@@ -86,14 +86,19 @@ export async function executeMemeBuy(opts: ExecuteMemeBuyOptions): Promise<Execu
   }
 
   const nonce = `${opts.contractAddress}:${opts.symbol}:${Date.now()}`;
+  const legacyNativeAmount = opts.entryPriceUsd > 0 ? opts.amountUsd / opts.entryPriceUsd : 0;
   const proposal: TradeProposal = {
     agent: opts.strategyUsed || 'auto-execute',
     nonce,
     symbol: opts.symbol,
     chain,
     side: 'BUY',
-    sizeEth: opts.amountUsd,
-    maxSizeEth: opts.amountUsd,
+    // P2-12: legacy sizeEth slot = native/token QUANTITY (its documented meaning),
+    // never USD. Previously this stuffed `amountUsd` here, so the two producers
+    // (approval-queue uses usd/price; this one used raw USD) disagreed on the same
+    // field. Canonical sizing logic reads sizeUsd/maxSizeUsd only.
+    sizeEth: legacyNativeAmount,
+    maxSizeEth: legacyNativeAmount,
     sizeUsd: opts.amountUsd,
     maxSizeUsd: opts.amountUsd,
     confidence: confidenceToFraction(opts.confidence || 0),

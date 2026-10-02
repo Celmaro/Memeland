@@ -12,6 +12,16 @@
  * unreadable it reports `unreadable` so the caller can decide (the executor
  * treats it as a warning, not a hard block).
  *
+ * SCOPE (do not over-read this guard):
+ *  - It detects ONLY `TransferFeeConfig` (1) and `TransferHook` (5). Other
+ *    Token-2022 extensions (and any extension that can distort or revert a
+ *    transfer) are NOT evaluated. Passing this guard is NOT proof that a
+ *    Token-2022 mint is safe to trade.
+ *  - TLV parsing is fail-open: a malformed/truncated structure stops the scan,
+ *    so extensions after the bad entry are simply not seen (and `unreadable` may
+ *    not even be set for a partial-but-parseable read). Treat a pass as "no known
+ *    priced extension found in what parsed", not as a safety proof.
+ *
  * Layout (spl-token Token-2022):
  *   - Mint account = 82-byte base layout, then a TLV region.
  *   - Each TLV entry: type u16 LE, length u16 LE, then `length` bytes of data.
