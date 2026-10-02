@@ -57,6 +57,9 @@ import { createScreeningCycle } from './startup/screening-cycle.js';
 import { runDiscordStartupIntegrations, isControlRoomChannel } from './startup/integrations.js';
 import { globalOperationalHealth } from './services/operational-health.js';
 import { createOperationalFunnel, mergeOperationalFunnel, funnelCountersFromState } from './services/operational-funnel.js';
+import { globalCandidateStateStore } from './state/candidate-state.js';
+import { globalCandidateObserver } from './state/candidate-observer.js';
+import { createRedisIngressWriter, buildHeliusIngressServer, type IngressWriter } from './ingress/helius-webhook-server.js';
 
 dotenv.config();
 
@@ -67,14 +70,18 @@ printStartupBanner();
 // P2/P5 — probe the durable + ephemeral backends at boot and log the result so
 // the cloud deployment's Postgres/Redis arming state is visibly confirmed.
 // Both probes are best-effort and fail-open (never block startup).
+// T1 — also probe the candidate-state reducer backend (Redis CAS store).
 void Promise.allSettled([
   globalObservationStore.probe ? globalObservationStore.probe() : Promise.resolve({ armed: false, ok: false, detail: 'probe N/A' }),
   globalEphemeralStore.probe ? globalEphemeralStore.probe() : Promise.resolve({ armed: false, ok: false, detail: 'probe N/A' }),
-]).then(([pg, redis]) => {
+  globalCandidateStateStore.probe(),
+]).then(([pg, redis, cand]) => {
   const pgRes = pg.status === 'fulfilled' ? pg.value : { armed: false, ok: false, detail: 'probe rejected' };
   const rdRes = redis.status === 'fulfilled' ? redis.value : { armed: false, ok: false, detail: 'probe rejected' };
+  const cdRes = cand.status === 'fulfilled' ? cand.value : { armed: false, ok: false, detail: 'probe rejected' };
   console.log(`[DURABLE] pg armed=${pgRes.armed} ok=${pgRes.ok} :: ${pgRes.detail}`);
   console.log(`[EPHEMERAL] redis armed=${rdRes.armed} ok=${rdRes.ok} :: ${rdRes.detail}`);
+  console.log(`[CANDIDATE-STATE] backend armed=${cdRes.armed} ok=${cdRes.ok} :: ${cdRes.detail}`);
 });
 
 const telegramService = new TelegramService();
@@ -504,6 +511,45 @@ if (process.env.JSONRPC_WS_TAPE_ENABLED === 'true' && wsTapeRaw) {
   robinhoodScreeningAgent.injectJsonRpcWsTapes(jsonRpcWsTapes);
 }
 
+// ── T1 Helius webhook ingress (opt-in) ──────────────────────────────────────
+// Decoupled Solana discovery receiver. Wired only when the operator enables it
+// (HELIUS_WEBHOOK_ENABLED=true + HELIUS_WEBHOOK_SECRET). It writes each pump.fun
+// discovery to the Redis stream AND records a non-gating causal candidate-state
+// transition (globalCandidateObserver) — never gates or drops. Fail-open: a
+// start/bind error logs and never blocks boot.
+let heliusServer: ReturnType<typeof buildHeliusIngressServer> | null = null;
+if (process.env.HELIUS_WEBHOOK_ENABLED === 'true' && process.env.HELIUS_WEBHOOK_SECRET) {
+  try {
+    const redisWriter = createRedisIngressWriter();
+    const heliusWriter: IngressWriter = {
+      async xadd(stream: string, ...args: (string | number)[]): Promise<unknown> {
+        try {
+          await redisWriter.xadd(stream, ...args);
+        } catch {
+          /* fail-open */
+        }
+        const data = args[args.length - 1];
+        try {
+          const rec = JSON.parse(String(data)) as { mint?: string };
+          if (rec.mint) {
+            await globalCandidateObserver.recordDiscovery({ id: `sol:${rec.mint}` });
+          }
+        } catch {
+          /* fail-open: metric extraction must never throw into the webhook */
+        }
+        return null;
+      },
+    };
+    heliusServer = buildHeliusIngressServer({ webhookSecret: process.env.HELIUS_WEBHOOK_SECRET, writer: heliusWriter });
+    const heliusPort = Number(process.env.HELIUS_WEBHOOK_PORT || 8787);
+    heliusServer.listen(heliusPort, () => {
+      console.log(`[INGRESS] Helius webhook receiver listening on :${heliusPort} → solana:discovery:stream`);
+    });
+  } catch (err: any) {
+    console.warn(`[INGRESS] Helius webhook start failed (fail-open): ${err.message}`);
+  }
+}
+
 // Graceful Shutdown: stop the runtime schedulers, flush pending state writes to
 // disk, then close the REST API before exiting.
 registerGracefulShutdown('SIGINT', {
@@ -512,6 +558,7 @@ registerGracefulShutdown('SIGINT', {
     runtimeStop?.();
     pumpDevTape?.stop();
     for (const t of jsonRpcWsTapes) t.stop();
+    heliusServer?.close();
     await apiServer.stop();
   },
 });
@@ -521,6 +568,7 @@ registerGracefulShutdown('SIGTERM', {
     runtimeStop?.();
     pumpDevTape?.stop();
     for (const t of jsonRpcWsTapes) t.stop();
+    heliusServer?.close();
     await apiServer.stop();
   },
 });

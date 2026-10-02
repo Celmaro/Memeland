@@ -131,6 +131,15 @@ export function createScreeningCycle(deps: ScreeningCycleDeps): () => Promise<vo
             })
             .join(' ');
           console.log(`[RPC FAILOVER] active hosts: ${active}`);
+          // T1 — cross-RPC block-lag verification (opt-in, fail-open): when
+          // RPC_LAG_VERIFY=true, compare the latest block height across the
+          // chain's healthy hosts and quarantine any that lag. Extra block
+          // reads are skipped by default to avoid doubling probe traffic.
+          if (process.env.RPC_LAG_VERIFY === 'true') {
+            for (const k of ['rh', 'eth', 'bsc', 'base', 'sol'] as const) {
+              void globalRPCFailoverManager.runBlockLagVerification(k).catch(() => {});
+            }
+          }
         })
         .catch((err: any) =>
           console.warn(`[RPC FAILOVER] latency probe failed: ${err.message}`));

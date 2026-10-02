@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { rpcCallWithFailover, type FailoverCallOptions } from './rpc-failover.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { rpcCallWithFailover, type FailoverCallOptions, RPCFailoverManager } from './rpc-failover.js';
 
 /** Ordered host sequence: returns hosts[i] for the i-th getActiveRPC call, then ''. */
 function hostSeq(hosts: string[]): () => string {
@@ -78,5 +78,45 @@ describe('rpcCallWithFailover (R1 failover round-trip + R4 chainId guard)', () =
     const r = await rpcCallWithFailover('rh', 'eth_chainId', [], opts);
     expect(r.ok).toBe(false);
     expect(reported).toEqual([]);
+  });
+});
+
+describe('RPCFailoverManager — T1 block-lag quarantine integration', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.RPC_FAILOVER_URLS;
+  });
+
+  it('skips a lag-quarantined host even when it is the first/lowest-latency pool entry', async () => {
+    // Note: the env override is ADDITIVE with CHAIN_RPC_SPEC defaults, so the rh
+    // pool is [a.example, b.example, ...defaults]. We focus on selection: make
+    // a.example (the first/pool order) lag so getActiveRPC must move off it.
+    process.env.RPC_FAILOVER_URLS = JSON.stringify({ rh: ['https://lag-q-one.example', 'https://lag-q-two.example'] });
+    vi.stubGlobal('fetch', async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result: '0x1237' }),
+    }) as never);
+    const m = new RPCFailoverManager();
+    await m.probeLatencies();
+    expect(m.getActiveRPC('rh')).toBe('https://lag-q-one.example');
+
+    // lag-q-one lags by 4 blocks (> threshold 3); every other host is fresh.
+    await m.runBlockLagVerification('rh', async (url: string) => (url === 'https://lag-q-one.example' ? 996 : 1000));
+    expect(m.getActiveRPC('rh')).toBe('https://lag-q-two.example');
+    expect(m.getHealthyRPCs('rh')).not.toContain('https://lag-q-one.example');
+  });
+
+  it('does not alter selection when no host lags beyond the threshold', async () => {
+    process.env.RPC_FAILOVER_URLS = JSON.stringify({ rh: ['https://lag-q-one.example', 'https://lag-q-two.example'] });
+    vi.stubGlobal('fetch', async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result: '0x1237' }),
+    }) as never);
+    const m = new RPCFailoverManager();
+    await m.probeLatencies();
+    await m.runBlockLagVerification('rh', async () => 1000);
+    expect(m.getActiveRPC('rh')).toBe('https://lag-q-one.example');
   });
 });

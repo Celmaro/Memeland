@@ -1,5 +1,6 @@
 import { getEnvString } from '../config/config.js';
 import { globalRateLimiter } from './provider-rate-limiter.js';
+import { RpcHealthMonitor, verifyBlockLag, type BlockHeightFetcher } from './rpc-health.js';
 
 export type RpcChainKey = 'rh' | 'eth' | 'bsc' | 'base' | 'sol';
 export const RPC_CHAINS: RpcChainKey[] = ['rh', 'eth', 'bsc', 'base', 'sol'];
@@ -102,6 +103,8 @@ export class RPCFailoverManager {
   private lastProbeAt = 0;
   /** URLs reported failed since the last probe (reportRPCFailure memory). */
   private failedUrls = new Set<string>();
+  /** Per-chain block-lag quarantine monitors (T1, lag-based penalty boxing). */
+  private lagMonitors: Partial<Record<RpcChainKey, RpcHealthMonitor>> = {};
 
   constructor() {
     const configured = (() => {
@@ -217,7 +220,8 @@ export class RPCFailoverManager {
     const healthy = this.status[key]
       // R2: skip hosts whose 429 circuit is open (rate-limit backoff) so a
       // hammered host isn't selected between probes — not just at the next probe.
-      .filter((s) => s.healthy && !globalRateLimiter.isOpen(s.url))
+      // T1: also skip hosts quarantined for BLOCK-LAG (serving stale blocks).
+      .filter((s) => s.healthy && !globalRateLimiter.isOpen(s.url) && !this.isLagQuarantined(key, s.url))
       .sort((a, b) => a.latencyMs - b.latencyMs);
     if (healthy[0]) return healthy[0].url;
     // No healthy host: prefer a default that has NOT been reported failed since
@@ -239,7 +243,7 @@ export class RPCFailoverManager {
   public getHealthyRPCs(chain: string): string[] {
     const key = resolveChainKey(chain);
     return this.status[key]
-      .filter((s) => s.healthy && !globalRateLimiter.isOpen(s.url))
+      .filter((s) => s.healthy && !globalRateLimiter.isOpen(s.url) && !this.isLagQuarantined(key, s.url))
       .sort((a, b) => a.latencyMs - b.latencyMs)
       .map((s) => s.url);
   }
@@ -253,6 +257,71 @@ export class RPCFailoverManager {
     const entry = this.status[key].find((s) => s.url === url);
     if (entry) entry.healthy = false;
     this.failedUrls.add(url);
+  }
+
+  // ── T1 block-lag quarantine (fail-open complement to latency probing) ──────
+
+  private lagMonitor(chain: RpcChainKey): RpcHealthMonitor {
+    let m = this.lagMonitors[chain];
+    if (!m) {
+      m = new RpcHealthMonitor(this.endpoints[chain]);
+      this.lagMonitors[chain] = m;
+    }
+    return m;
+  }
+
+  private isLagQuarantined(chain: RpcChainKey, url: string): boolean {
+    const m = this.lagMonitors[chain];
+    if (!m) return false;
+    const node = m.status().find((n) => n.url === url);
+    return node ? node.quarantinedUntil > Date.now() : false;
+  }
+
+  /** Record a measured block-lag for a host (quarantines when over threshold). */
+  public recordBlockLag(chain: string, url: string, laggingBlocks: number): void {
+    const key = resolveChainKey(chain);
+    this.lagMonitor(key).recordLag(url, laggingBlocks);
+  }
+
+  /**
+   * Cross-verify the latest block height across the chain's healthy hosts and
+   * quarantine any that lag the observed max by more than the threshold. Uses a
+   * chain-aware default block-number fetcher (eth_blockNumber / getSlot), or an
+   * injected one. Fail-open: never throws; a batch error is logged and ignored.
+   */
+  public async runBlockLagVerification(chain: string, fetchHeight?: BlockHeightFetcher): Promise<void> {
+    const key = resolveChainKey(chain);
+    const urls = this.status[key].filter((s) => s.healthy).map((s) => s.url);
+    if (urls.length < 2) return; // need ≥2 independent hosts to cross-verify
+    const monitor = this.lagMonitor(key);
+    const fetcher = fetchHeight ?? this.blockHeightFetcher(key);
+    try {
+      await verifyBlockLag(urls, fetcher, monitor, {
+        reportFailure: (url) => this.reportRPCFailure(key, url),
+      });
+      const quarantined = monitor.status().filter((n) => n.quarantinedUntil > Date.now());
+      if (quarantined.length > 0) {
+        console.warn(`[RPC LAG] chain=${key} lag-quarantined: ${quarantined.map((n) => `${n.url}=lag${n.laggingBlocks}`).join(', ')}`);
+      }
+    } catch {
+      // fail-open — a lag-check error never disrupts the pool
+    }
+  }
+
+  private blockHeightFetcher(chain: RpcChainKey): BlockHeightFetcher {
+    const isEvm = Boolean(CHAIN_RPC_SPEC[chain].chainId);
+    const method = isEvm ? 'eth_blockNumber' : 'getSlot';
+    return async (url: string): Promise<number> => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method, params: [], id: 1 }),
+      });
+      const json = (await res.json()) as { result?: unknown };
+      const h = isEvm ? parseInt(json.result as string, 16) : (json.result as number);
+      if (!Number.isFinite(h)) throw new Error('bad block height');
+      return h;
+    };
   }
 }
 

@@ -368,6 +368,12 @@ export class CandidateStateStore {
     return this.backend.read(candidateKey(id));
   }
 
+  /** Best-effort backend arming probe (fail-open, mirrors the pg/redis probes). */
+  public async probe(): Promise<{ armed: boolean; ok: boolean; detail: string }> {
+    if (!this.backend.probe) return { armed: false, ok: false, detail: 'probe N/A' };
+    return this.backend.probe();
+  }
+
   public async transition(
     id: string,
     event: CandidateEvent,
