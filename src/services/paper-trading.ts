@@ -220,9 +220,17 @@ export function createDefaultPaperTradingLedger(journal: TradeJournalService | n
   const url = paperPostgresUrl();
   const ledger = new PaperTradingLedger(journal, Date.now, url ? pgPaperTradeIO(url) : filePaperTradeIO());
   if (url) {
-    void loadPaperTrades({ url })
-      .then((ts) => { if (ts.length > 0) ledger.hydrate(ts); })
-      .catch(() => { /* hydration is best-effort */ });
+    // P1-7: attach the hydration promise so startup can `await ledger.ready()`
+    // BEFORE the scheduler's first (immediate) pass. Hydrating inside the
+    // constructor with `void ...` raced the immediate first screening run and
+    // could permanently discard historical paper-trade evidence this process.
+    ledger.attachHydration(
+      loadPaperTrades({ url })
+        .then((ts) => {
+          if (ts.length > 0) ledger.hydrate(ts);
+        })
+        .catch(() => { /* hydration is best-effort */ }),
+    );
   }
   return ledger;
 }
@@ -230,6 +238,8 @@ export function createDefaultPaperTradingLedger(journal: TradeJournalService | n
 /** Paper ledger — records paper fills as journal entries and gates approval unlock. */
 export class PaperTradingLedger {
   private trades = new Map<string, PaperTrade>();
+  private hydrated = false;
+  private readyPromise: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly journal: TradeJournalService | null,
@@ -237,19 +247,36 @@ export class PaperTradingLedger {
     private readonly io?: PaperTradeIO,
   ) {}
 
+  /** Attach the durable-history hydration promise; `ready()` awaits it. */
+  attachHydration(p: Promise<void>): void {
+    this.readyPromise = p;
+  }
+
+  /** Resolves once boot hydration has finished (or immediately when skipped). */
+  ready(): Promise<void> {
+    return this.readyPromise;
+  }
+
   /** All paper trades (open + closed), in insertion order. */
   get all(): PaperTrade[] {
     return [...this.trades.values()];
   }
 
   /**
-   * P8 — rebuild the ledger from a durable trade history after a restart. Applies
-   * only when the ledger is empty this process (no live divergence), so it never
-   * clobbers trades recorded in the current run.
+   * P8 — rebuild the ledger from durable trade history after a restart. Merges by
+   * ID (adds only missing records) so any trades recorded in-process before
+   * hydration finishes are preserved, and hydration never clobbers live writes.
+   * Guarded by an explicit `hydrated` flag, not a `trades.size > 0` shortcut.
    */
   hydrate(trades: PaperTrade[]): void {
-    if (this.trades.size > 0) return;
-    for (const t of trades) this.trades.set(t.id, t);
+    this.hydrated = true;
+    for (const t of trades) {
+      if (!this.trades.has(t.id)) this.trades.set(t.id, t);
+    }
+  }
+
+  get isHydrated(): boolean {
+    return this.hydrated;
   }
 
   /**

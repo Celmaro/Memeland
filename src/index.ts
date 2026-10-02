@@ -352,6 +352,11 @@ const runScreeningCycle = createScreeningCycle({
 });
 // Scheduler and the independent market-risk monitor are owned by the startup module.
 const marketSentinel = createMarketRiskMonitor();
+// P1-7/P1-8: the paper + opportunity ledgers hydrate DURABLE history at boot. Await
+// both before the scheduler's first (immediate) screening pass so the paper regime
+// gate and the Strategist never read an empty process-local state right after boot
+// (the old fire-and-forget hydration could permanently discard historical evidence).
+await Promise.all([paperTrading.ready(), opportunityLedger.ready()]);
 const runtime = startRuntimeMonitoring({ runCycle: runScreeningCycle, marketSentinel });
 runtimeStop = runtime;
 for (const status of runtime.statuses()) {

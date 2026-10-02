@@ -181,4 +181,25 @@ describe('PaperTradingLedger durability (P8 — state survives restart via hydra
     l.hydrate(before);
     expect(l.all).toHaveLength(1); // hydrate is a no-op once the ledger is live
   });
+
+  it('P1-7: ready() awaits attached hydration; hydrate merges history by id', async () => {
+    const mk = () => new PaperTradingLedger(null, () => 1_700_000_000_000);
+    const live = mk();
+    openOne(live); // a live trade recorded BEFORE boot hydration lands
+    const liveId = live.all[0]!.id;
+
+    // A durable snapshot that resolves later with a DIFFERENT trade id.
+    const other = mk();
+    openOne(other);
+    const otherId = other.all[0]!.id;
+
+    const hydration = Promise.resolve().then(() => live.hydrate(other.all));
+    live.attachHydration(hydration);
+    await live.ready();
+
+    expect(live.isHydrated).toBe(true);
+    // Both the live trade AND the historical trade survive — hydration is a
+    // merge, not a discard-on-non-empty, so the boot race can't lose evidence.
+    expect(live.all.map((t) => t.id).sort()).toEqual([liveId, otherId].sort());
+  });
 });

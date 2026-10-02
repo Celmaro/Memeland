@@ -217,6 +217,9 @@ export class OpportunityLedger {
   /** Injectable clock for deterministic tests; defaults to real time. */
   private readonly now: () => Date;
 
+  /** Boot hydration promise; `ready()` awaits it so the Strategist sees history. */
+  private readyPromise: Promise<void> = Promise.resolve();
+
   constructor(filePath?: string, now?: () => Date) {
     this.now = now ?? (() => new Date());
     const dbDir = path.resolve(process.cwd(), 'database');
@@ -228,13 +231,20 @@ export class OpportunityLedger {
     // P6 — co-locate the ledger's snapshot in Postgres (same durable layer as the
     // other ledgers). When a DB URL is set, hydrate state from Postgres if the
     // in-process ledger is still empty, and mirror each save to Postgres.
+    // P1-8: capture the hydration promise (instead of `void ...`) so startup can
+    // await it before the first signal — previously hydration raced the first
+    // ingestion and the persistent history could be silently skipped.
     const pgUrl = this.postgresUrl();
     if (pgUrl) {
-      void this.hydrateFromPostgres()
-        .catch((err: unknown) => {
-          console.warn(`[OPPORTUNITY LEDGER] Postgres hydrate failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+      this.readyPromise = this.hydrateFromPostgres().catch((err: unknown) => {
+        console.warn(`[OPPORTUNITY LEDGER] Postgres hydrate failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
+  }
+
+  /** Resolves once boot Postgres hydration has finished (or immediately when skipped). */
+  ready(): Promise<void> {
+    return this.readyPromise;
   }
 
   /** Idempotent — returns the existing identity or creates a FIRST_SEEN one. */
