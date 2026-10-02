@@ -1024,6 +1024,9 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
       // P2-1: respect an abort signal (set by the screening-timeout primitive);
       // an already-aborted pass yields immediately instead of doing wasted work.
       if (signal?.aborted) return [];
+      // Capture under a distinct name — the candidate loop body declares its own
+      // `const signal: RobinhoodSignal`, which would shadow the AbortSignal.
+      const abortSignal = signal;
       console.log('[MEME AGENT] Screening pass started (GMGN OpenAPI)...');
       const reports: AgentReport<RobinhoodSignal>[] = [];
       let scanned = 0;
@@ -1068,6 +1071,11 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
       for (const chain of chains) {
         const nativeSymbol = chain === 'sol' ? 'SOL' : 'ETH';
         console.log(`[MEME AGENT] ── chain=${chain} ──`);
+
+        // P2-1: cooperative cancellation — check between these expensive per-chain
+        // phases so an aborted pass (screening timeout) stops doing RPC/API work
+        // instead of running to completion in the background.
+        if (abortSignal?.aborted) return [];
 
         // 0. Live native price — once per chain per pass (fee gate conversion; cached 60s)
         let nativePriceUsd: number | null = null;
@@ -1212,6 +1220,9 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
 
         // 2. Pre-filter (cheap, termasuk audit GMGN) then detect
         for (const t of allCandidates) {
+          // P2-1: checkpoint before each candidate's expensive audit/enrichment —
+          // an aborted pass yields now rather than finishing the whole batch.
+          if (abortSignal?.aborted) return [];
           // P3.6 QLO organic-lift (time-on-curve): for fresh SOL candidates,
           // measure how long the bonding curve took to fill — slow fills are
           // 1.5x/2.4x more likely to 2x/5x post-graduation (qlo, n=97,146).
