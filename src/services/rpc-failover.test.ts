@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { rpcCallWithFailover, type FailoverCallOptions, RPCFailoverManager } from './rpc-failover.js';
 
 /** Ordered host sequence: returns hosts[i] for the i-th getActiveRPC call, then ''. */
@@ -83,22 +83,35 @@ describe('rpcCallWithFailover (R1 failover round-trip + R4 chainId guard)', () =
 
 describe('RPCFailoverManager — T1 block-lag quarantine integration', () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
     delete process.env.RPC_FAILOVER_URLS;
   });
 
+  // A deterministic probe fetcher injected (not vi.stubGlobal) so it can't clobber
+  // other test files sharing the worker, AND so selection is reproducible:
+  //  - only the two `lag-q` hosts answer the rh chainId (the CHAIN_RPC_SPEC
+  //    default endpoints answer a wrong chain → stay unhealthy), so the healthy
+  //    lag pool is exactly [lag-q-one, lag-q-two];
+  //  - lag-q-two is deliberately ~5ms slower, so the latency tie is resolved
+  //    deterministically (lag-q-one is always fastest while it is healthy) instead
+  //    of flipping on Date.now() timing noise across CI runs.
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+  const chainOk = () => ({ ok: true, status: 200, json: async () => ({ result: '0x1237' }) }) as unknown as Response;
+  const stubFetch: (url: string, init?: RequestInit) => Promise<Response> = async (url) => {
+    if (url.includes('lag-q-two.example')) {
+      await sleep(5);
+      return chainOk();
+    }
+    if (url.includes('lag-q-one.example')) return chainOk();
+    return ({ ok: true, status: 200, json: async () => ({ result: '0x9999' }) }) as unknown as Response;
+  };
+
   it('skips a lag-quarantined host even when it is the first/lowest-latency pool entry', async () => {
     // Note: the env override is ADDITIVE with CHAIN_RPC_SPEC defaults, so the rh
-    // pool is [a.example, b.example, ...defaults]. We focus on selection: make
-    // a.example (the first/pool order) lag so getActiveRPC must move off it.
+    // pool is [lag-q-one, lag-q-two, ...defaults]. We focus on selection: make
+    // lag-q-one (the first/pool order) lag so getActiveRPC must move off it.
     process.env.RPC_FAILOVER_URLS = JSON.stringify({ rh: ['https://lag-q-one.example', 'https://lag-q-two.example'] });
-    vi.stubGlobal('fetch', async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ result: '0x1237' }),
-    }) as never);
     const m = new RPCFailoverManager();
-    await m.probeLatencies();
+    await m.probeLatencies(stubFetch);
     expect(m.getActiveRPC('rh')).toBe('https://lag-q-one.example');
 
     // lag-q-one lags by 4 blocks (> threshold 3); every other host is fresh.
@@ -109,13 +122,8 @@ describe('RPCFailoverManager — T1 block-lag quarantine integration', () => {
 
   it('does not alter selection when no host lags beyond the threshold', async () => {
     process.env.RPC_FAILOVER_URLS = JSON.stringify({ rh: ['https://lag-q-one.example', 'https://lag-q-two.example'] });
-    vi.stubGlobal('fetch', async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ result: '0x1237' }),
-    }) as never);
     const m = new RPCFailoverManager();
-    await m.probeLatencies();
+    await m.probeLatencies(stubFetch);
     await m.runBlockLagVerification('rh', async () => 1000);
     expect(m.getActiveRPC('rh')).toBe('https://lag-q-one.example');
   });

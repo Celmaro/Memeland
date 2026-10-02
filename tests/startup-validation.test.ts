@@ -20,7 +20,29 @@ describe('startup configuration validation', () => {
     expect(validateStartupConfig({
       DRY_RUN: 'false', AUTO_EXECUTE_ENABLED: 'true', OPERATOR_APPROVAL_REQUIRED: 'true',
       LIVE_TRADING_ACKNOWLEDGED: 'true', EVM_PRIVATE_KEY: 'test-key', SAFETY_GATE_ENFORCED: 'true',
+      LIFI_INTEGRATOR: 'lifi', SOLANA_PRIVATE_KEY: 'sol-key',
     }).ok).toBe(true);
+  });
+
+  it('P0: EXECUTION_MODE=AUTO_EXECUTE alone still triggers the live prerequisites', () => {
+    // Legacy DRY_RUN/AUTO_EXECUTE_ENABLED flags are absent, but canonical
+    // EXECUTION_MODE=AUTO_EXECUTE must NOT bypass live startup safety.
+    const result = validateStartupConfig({
+      EXECUTION_MODE: 'AUTO_EXECUTE',
+      LIVE_TRADING_ACKNOWLEDGED: 'true', OPERATOR_APPROVAL_REQUIRED: 'true',
+      EVM_PRIVATE_KEY: 'k', SAFETY_GATE_ENFORCED: 'true',
+      LIFI_INTEGRATOR: 'lifi', SOLANA_PRIVATE_KEY: 'sol-key',
+    } as NodeJS.ProcessEnv);
+    expect(result.ok).toBe(true);
+    // Removing a live prereq now fails.
+    const missing = validateStartupConfig({
+      EXECUTION_MODE: 'AUTO_EXECUTE',
+      LIVE_TRADING_ACKNOWLEDGED: 'true', OPERATOR_APPROVAL_REQUIRED: 'true',
+      EVM_PRIVATE_KEY: 'k', SAFETY_GATE_ENFORCED: 'true',
+      LIFI_INTEGRATOR: 'lifi',
+    } as NodeJS.ProcessEnv);
+    expect(missing.ok).toBe(false);
+    expect(missing.errors.map((e) => e.key)).toContain('SOLANA_PRIVATE_KEY');
   });
 
   it('DuckAI P0-3: live auto-execution fails startup when the safety gate is not enforced', () => {

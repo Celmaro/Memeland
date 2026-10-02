@@ -9,6 +9,24 @@
 
 export type ExecutionChainKey = 'eth' | 'bsc' | 'base' | 'robinhood' | 'sol';
 
+/**
+ * The default executable scope when `MULTICHAIN_CHAINS` is unset. This MUST
+ * match the screening agent's default scan scope (see robinhood-screening-agent)
+ * so that "chains being scanned" and "chains that can execute" are never two
+ * different sets — the P0 failure where signals exist but no trade path exists.
+ */
+export const DEFAULT_EXECUTION_CHAINS: ExecutionChainKey[] = ['sol', 'bsc', 'base', 'eth', 'robinhood'];
+
+/** Parse a `MULTICHAIN_CHAINS`-style list into canonical keys (unknown dropped). */
+export function parseChainList(raw: string): ExecutionChainKey[] {
+  const out: ExecutionChainKey[] = [];
+  for (const part of raw.split(',')) {
+    const key = normalizeExecutionChainKey(part);
+    if (key && !out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
 /** A known funding token used to quote the "from" leg of an execution. */
 export interface FundingToken {
   symbol: string;
@@ -142,17 +160,15 @@ export function resolveExecutionChain(value: string): ExecutionChainConfig {
 
 /**
  * The set of executable chains derived from the registry plus `MULTICHAIN_CHAINS`.
- * Unknown entries are ignored; an empty result means NO chain can execute.
+ * When `MULTICHAIN_CHAINS` is unset it defaults to the full scan scope
+ * (DEFAULT_EXECUTION_CHAINS) so execution admission matches scanning — the
+ * historical P0 bug where signals fired on all five chains but the execution
+ * layer admitted zero. Unknown entries are ignored (fail-closed, no silent id).
  */
 export function executableChainsFromEnv(env: NodeJS.ProcessEnv = process.env): Set<ExecutionChainKey> {
   const raw = (env.MULTICHAIN_CHAINS || '').trim();
-  const chains = new Set<ExecutionChainKey>();
-  if (!raw) return chains;
-  for (const part of raw.split(',')) {
-    const key = normalizeExecutionChainKey(part);
-    if (key) chains.add(key);
-  }
-  return chains;
+  if (!raw) return new Set<ExecutionChainKey>(DEFAULT_EXECUTION_CHAINS);
+  return new Set<ExecutionChainKey>(parseChainList(raw));
 }
 
 /** Explorer URL for a confirmed transaction on a given chain. */

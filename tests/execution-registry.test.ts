@@ -43,7 +43,10 @@ describe('execution-registry (LI.FI multi-chain source of truth)', () => {
   it('derives the executable set from MULTICHAIN_CHAINS and ignores unknown entries', () => {
     expect(executableChainsFromEnv({ MULTICHAIN_CHAINS: 'robinhood,sol,aptos' } as NodeJS.ProcessEnv).has('sol')).toBe(true);
     expect(executableChainsFromEnv({ MULTICHAIN_CHAINS: 'robinhood,sol,aptos' } as NodeJS.ProcessEnv).has('aptos')).toBe(false);
-    expect(executableChainsFromEnv({} as NodeJS.ProcessEnv).size).toBe(0);
+    // Unset → the full 5-chain scope (must match the screening agent's default).
+    expect(executableChainsFromEnv({} as NodeJS.ProcessEnv)).toEqual(new Set(['sol', 'bsc', 'base', 'eth', 'robinhood']));
+    // Narrow explicit scope is honored.
+    expect(executableChainsFromEnv({ MULTICHAIN_CHAINS: 'sol' } as NodeJS.ProcessEnv)).toEqual(new Set(['sol']));
   });
 
   it('builds explorer URLs from the per-chain template', () => {

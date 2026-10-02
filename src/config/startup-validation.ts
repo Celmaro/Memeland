@@ -1,4 +1,5 @@
-import { normalizeExecutionChainKey, resolveFundingToken } from './execution-registry.js';
+import { normalizeExecutionChainKey, resolveFundingToken, parseChainList } from './execution-registry.js';
+import { getExecutionModeFromEnv } from './config.js';
 import { validateProviderConfig } from './provider-config.js';
 
 export interface StartupConfigError {
@@ -31,13 +32,6 @@ function isLoopback(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
 }
 
-function executableChains(env: NodeJS.ProcessEnv): string[] {
-  return (env.MULTICHAIN_CHAINS || '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 /** Pure, centralized validation for settings that can change startup safety. */
 export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): StartupConfigResult {
   const errors: StartupConfigError[] = [];
@@ -54,8 +48,19 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): Sta
   if (env.DRY_RUN !== undefined && dryRun === undefined) errors.push({ key: 'DRY_RUN', message: 'must be true/false or 1/0' });
   if (env.AUTO_EXECUTE_ENABLED !== undefined && autoExecute === undefined) errors.push({ key: 'AUTO_EXECUTE_ENABLED', message: 'must be true/false or 1/0' });
   if (env.OPERATOR_APPROVAL_REQUIRED !== undefined && operatorApproval === undefined) errors.push({ key: 'OPERATOR_APPROVAL_REQUIRED', message: 'must be true/false or 1/0' });
+  if (env.EXECUTION_MODE !== undefined) {
+    const m = env.EXECUTION_MODE.trim().toUpperCase();
+    if (m !== 'AUTO_EXECUTE' && m !== 'DRY_RUN' && m !== 'SIGNAL_ONLY') {
+      errors.push({ key: 'EXECUTION_MODE', message: 'must be AUTO_EXECUTE, DRY_RUN, or SIGNAL_ONLY' });
+    }
+  }
 
-  const liveAuto = dryRun === false && autoExecute === true;
+  // P0: live-mode is decided by the CANONICAL execution-mode resolver (the same
+  // one `isAutoExecute()`/`getExecutionMode()` use at runtime). A deployment set
+  // to `EXECUTION_MODE=AUTO_EXECUTE` must NOT slip past the live-prerequisite
+  // checks just because the legacy DRY_RUN/AUTO_EXECUTE_ENABLED flags disagree.
+  const executionMode = getExecutionModeFromEnv(env);
+  const liveAuto = executionMode === 'AUTO_EXECUTE';
   if (liveAuto) {
     if (!(env.LIVE_TRADING_ACKNOWLEDGED === 'true' || env.LIVE_TRADING_ACKNOWLEDGED === '1')) {
       errors.push({ key: 'LIVE_TRADING_ACKNOWLEDGED', message: 'must be explicitly enabled for live auto-execution' });
@@ -64,22 +69,29 @@ export function validateStartupConfig(env: NodeJS.ProcessEnv = process.env): Sta
       errors.push({ key: 'OPERATOR_APPROVAL_REQUIRED', message: 'cannot be false for live auto-execution' });
     }
     if (!env.EVM_PRIVATE_KEY?.trim()) errors.push({ key: 'EVM_PRIVATE_KEY', message: 'is required for live auto-execution' });
+    // LI.FI is the ONLY execution layer — live auto-execution needs the integrator id.
+    if (!env.LIFI_INTEGRATOR?.trim()) {
+      errors.push({ key: 'LIFI_INTEGRATOR', message: 'is required for live auto-execution (LI.FI is the only execution layer)' });
+    }
+    // SOL is part of the canonical executable scope; live auto-execution cannot
+    // start without a Solana keypair (EVM and Solana cannot share one address).
+    if (!env.SOLANA_PRIVATE_KEY?.trim()) {
+      errors.push({ key: 'SOLANA_PRIVATE_KEY', message: 'is required for live auto-execution (SOL is in the default executable scope)' });
+    }
     // DuckAI P0-3: the safety registry must actually be enforced for live
     // auto-execution — an opt-in gate that defaults to bypass is not a gate.
     if (!(env.SAFETY_GATE_ENFORCED === 'true' || env.SAFETY_GATE_ENFORCED === '1')) {
       errors.push({ key: 'SAFETY_GATE_ENFORCED', message: 'must be explicitly enabled for live auto-execution (opt-in bypass is not a safety gate)' });
     }
   }
-  // LI.FI is the ONLY execution layer. Live execution therefore also needs the
-  // LI.FI integrator id, and any Solana chain in MULTICHAIN_CHAINS needs a
-  // Solana keypair (EVM and Solana cannot share one address). Funding tokens are
-  // resolved fail-closed from the registry so a typo'd override fails startup.
-  const chains = executableChains(env);
-  if (chains.length > 0) {
-    if (liveAuto && !env.LIFI_INTEGRATOR?.trim()) {
-      errors.push({ key: 'LIFI_INTEGRATOR', message: 'is required for live auto-execution (LI.FI is the only execution layer)' });
-    }
-    if (chains.includes('sol') && !env.SOLANA_PRIVATE_KEY?.trim()) {
+  // Per-chain key ownership + funding-token checks. These fire for the chains an
+  // operator EXPLICITLY configured in MULTICHAIN_CHAINS (whether DRY_RUN or live),
+  // so an unconfigured key fails fast at boot instead of deep in the executor.
+  // `executableChainsFromEnv()` defaults to the full scope at runtime, so live
+  // mode is already covered by the mandatory EVM/SOLANA/LIFI prereqs above.
+  const chains = new Set(parseChainList(env.MULTICHAIN_CHAINS || ''));
+  if (chains.size > 0) {
+    if (chains.has('sol') && !env.SOLANA_PRIVATE_KEY?.trim()) {
       errors.push({ key: 'SOLANA_PRIVATE_KEY', message: 'is required when sol is in MULTICHAIN_CHAINS' });
     }
     // Per-chain EVM key check (R1): a shared EVM_PRIVATE_KEY covers all EVM

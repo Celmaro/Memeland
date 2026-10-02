@@ -154,7 +154,8 @@ export class RPCFailoverManager {
     return this.endpoints[resolveChainKey(chain)];
   }
 
-  public async probeLatencies(): Promise<void> {
+  public async probeLatencies(fetcher?: (url: string, init?: RequestInit) => Promise<Response>): Promise<void> {
+    const doFetch = fetcher ?? fetch;
     await Promise.all(
       RPC_CHAINS.flatMap((chain) =>
         this.status[chain].map(async (s) => {
@@ -169,7 +170,7 @@ export class RPCFailoverManager {
             const body = CHAIN_RPC_SPEC[chain].chainId
               ? '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
               : '{"jsonrpc":"2.0","method":"getVersion","params":[],"id":1}';
-            const res = await fetch(s.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+            const res = await doFetch(s.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
             if (res.status === 429) {
               // 429 → open this host's circuit (backoff), do NOT count against the
               // host as a permanent failure (provider outage ≠ dead endpoint).

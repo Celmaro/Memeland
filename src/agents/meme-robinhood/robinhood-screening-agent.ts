@@ -42,6 +42,7 @@ import type { BuyEvent } from '../../services/flow-convergence.js';
 import { createDedupe, preFilterToken, detectMemeSignal, volume24hOf, buildSignalBoostMap, applySignalBoost, toStrategyGmgn, buildMemeThesis, isGraduatedToken, validateMemeConfigUpdate, securityAuditGate, goPlusAuditGate, buildTrackAccumulation, trackAccumulationLabel, memeRegimeFor } from '../shared/gmgn-meme-helpers.js';
 import type { SignalBoostMap, TrackAccumulation, MemePreFilterConfig } from '../shared/gmgn-meme-helpers.js';
 import { discoveryFiltersForChain, normalizeTapeWindow, normalizeDexToken } from './robinhood-discovery.js';
+import { executableChainsFromEnv } from '../../config/execution-registry.js';
 import { SentimentVoter } from '../shared/sentiment-voter.js';
 import { DexScreenerBoostsFeed } from '../../adapters/dexscreener-boosts.js';
 import { CriticVoter } from '../shared/critic-voter.js';
@@ -1038,10 +1039,9 @@ export class ScreeningAgent implements ScreeningAgentContract<RobinhoodSignal> {
       // Operators narrow with `MULTICHAIN_CHAINS=sol,bsc,robinhood` etc.; an empty
       // env var still yields the full scope. Provision per-chain GMGN keys (R1) before
       // enabling chains — without a key, every audit on that chain fails (Fix #5).
-      const chains: Chain[] = (process.env.MULTICHAIN_CHAINS || 'sol,bsc,base,eth,robinhood')
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter((s): s is Chain => (['sol', 'bsc', 'base', 'eth', 'robinhood'] as string[]).includes(s));
+      // Uses the SAME canonical resolver as the execution layer so scanning scope and
+      // executable scope can never diverge (P0: signals existed with no trade path).
+      const chains: Chain[] = [...executableChainsFromEnv()] as Chain[];
 
       // P7 — ResearchCoordinator owns the per-pass research admission budget.
       // A fresh instance per pass (state never leaks across cycles) admits which

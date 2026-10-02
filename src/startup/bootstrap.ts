@@ -2,6 +2,7 @@ import { assertStartupConfig } from '../config/startup-validation.js';
 import { getExecutionMode, isDryRun as isDryRunMode, isAutoExecute, isSignalOnly } from '../config/config.js';
 import { globalRPCFailoverManager } from '../services/rpc-failover.js';
 import { validateChainConfig, validateExecutionMode } from '../config/chain-config.js';
+import { executableChainsFromEnv } from '../config/execution-registry.js';
 import { printProviderBanner } from './provider-banner.js';
 
 /** Central startup guard: same env checks as before, packaged as a boot module. */
@@ -20,8 +21,9 @@ export function bootstrapStartupConfig(): void {
  * bot can still screen, but the operator is told exactly what is wrong).
  */
 export function validateRuntimeConfig(): void {
-  const chains = (process.env.MULTICHAIN_CHAINS || 'sol,bsc,base,eth,robinhood')
-    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  // Canonial executable set (defaults to the full 5-chain scope when
+  // MULTICHAIN_CHAINS is unset) — same resolver the execution layer uses.
+  const chains = [...executableChainsFromEnv()];
   const chainRes = validateChainConfig(chains, (key) => {
     const pool = globalRPCFailoverManager.getRpcUrls(key);
     return pool && pool.length > 0 ? pool[0] : undefined;
@@ -40,8 +42,7 @@ export function printStartupBanner(): string {
   console.log('Memeland autonomous multi-agent crypto system initializing...');
   console.log('----------------------------------------------------');
   const execMode = getExecutionMode();
-  const chainsEnv = (process.env.MULTICHAIN_CHAINS || 'sol,bsc,base,eth,robinhood')
-    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const chainsEnv = [...executableChainsFromEnv()];
   console.log(`[CONFIG] Memeland fork @ master=${process.env.MEMELAND_BUILD_SHA?.slice(0, 8) || 'local'}`);
   console.log(`         exec=${execMode} | dry_run=${isDryRunMode()} | auto_exec=${isAutoExecute()} | op_approval=${process.env.OPERATOR_APPROVAL_REQUIRED !== 'false'} | safety_gate=${process.env.SAFETY_GATE_ENFORCED === 'true'}`);
   console.log(`         execution_layer=LI.FI/Jumper (only) | chains=${chainsEnv.join('+')}`);
